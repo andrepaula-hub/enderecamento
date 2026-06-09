@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "sheet_id": "1W998QOxwvUyxFzLDjiyNhAjaEye5TSHVQ0ecPBMR5X0",
+  "plan_sheet": "Plano_Enderecamento_Final_card_175",
+  "working_sheet": "Plano_Enderecamento_Final",
+  "base_sheet": "Plano_Enderecamento_Final_card_175_base",
+  "changes_sheet": "Log_Alteracoes_card_175",
+  "source_file": "metabase_card_175",
+  "imported_at": "2026-05-28T12:35:35"
+}

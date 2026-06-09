@@ -1,0 +1,1277 @@
+--- Dahsboard.html	2026-01-14 07:23:20
++++ Dashboard(2).html	2026-01-14 07:42:17
+@@ -135,6 +135,37 @@
+ 	body.manage-mode.remove-active .remove-equip-btn {
+             display: block;
+ 	}
++	
++	/* Ícone de troca de tipo de equipamento */
++	.change-type-btn {
++            display: none; /* Oculto por padrão */
++            position: absolute;
++            top: -5px;
++            left: -5px;
++            width: 24px;
++            height: 24px;
++            background-color: #e67e22;
++            color: white;
++            border: 2px solid #d35400;
++            border-radius: 50%;
++            font-size: 14px;
++            font-weight: bold;
++            line-height: 20px;
++            text-align: center;
++            cursor: pointer;
++            opacity: 0.8;
++            transition: all 0.2s;
++            z-index: 5;
++	}
++	.change-type-btn:hover {
++            opacity: 1;
++            transform: scale(1.1);
++            box-shadow: 0 0 5px rgba(230, 126, 34, 0.7);
++	}
++	/* Mostra o botão apenas no modo Gerenciar + Modo Alterar Tipo */
++	body.manage-mode.edit-type-active .change-type-btn {
++            display: block;
++	}
+ 	/* Para o equipamento sumir ao ser removido */
+ 	.equipamento.removed {
+             transition: all 0.5s ease;
+\ No newline at end of file
+@@ -183,6 +214,41 @@
+ 	/* Escaninho */
+ 	.escaninho.grid-cell { width: 100%; height: 100%; font-weight: bold; font-size: 14px; color: white; text-shadow: 1px 1px 2px rgba(0,0,0,0.7); transition: all 0.2s ease; cursor: default; }
+ 	body.readdressing-mode .escaninho[draggable="true"].grid-cell { cursor: grab; } body.readdressing-mode .escaninho[data-product-code]:not([data-product-code='Vazio']):not(.in-transition):hover { cursor: cell; box-shadow: 0 0 10px #f1c40f; transform: scale(1.05); }
++
++	/* Escaninho com 2 produtos - destaque visual */
++	.escaninho.has-two-products { 
++            border: 3px solid #27ae60 !important; 
++            box-shadow: 0 0 8px rgba(39, 174, 96, 0.6) !important; 
++            position: relative;
++	}
++	.escaninho.has-two-products::before {
++            content: '2';
++            position: absolute;
++            top: 2px;
++            right: 2px;
++            background-color: #27ae60;
++            color: white;
++            font-size: 10px;
++            font-weight: bold;
++            width: 16px;
++            height: 16px;
++            border-radius: 50%;
++            display: flex;
++            align-items: center;
++            justify-content: center;
++            z-index: 1;
++	}
++	
++	/* Escaninho com 2 produtos da mesma subcategoria fica amarelo */
++	.escaninho.same-subcategory {
++            background-color: #f1c40f !important;
++            border: 3px solid #f39c12 !important;
++            color: transparent !important; /* Esconde o texto das curvas */
++            text-shadow: none !important;
++	}
++	.escaninho.same-subcategory::before {
++            display: none !important; /* Esconde o badge "2" */
++	}
+ 
+ 	.escaninho .tooltip, .prancheta-item .tooltip { display: none; }
+ 
+\ No newline at end of file
+@@ -594,6 +660,10 @@
+ <input type="radio" id="manage-mode-remove" name="manage-mode" value="remove">
+  Modo Remoção
+  </label>
++ <label id="label-manage-edit-type" title="Alterar o tipo do equipamento (geladeira, freezer, prateleira, etc.)">
++<input type="radio" id="manage-mode-edit-type" name="manage-mode" value="edit-type">
++ Alterar Tipo
++ </label>
+  </div>
+  </div>
+ 
+\ No newline at end of file
+@@ -810,6 +880,21 @@
+ 		<button id="confirm-yes">Sim</button>
+ 		<button id="confirm-unallocate" style="background-color: #f39c12; color: white;">Mover p/ Não Alocados</button>
+ 		<button id="confirm-no">Cancelar</button>
++            </div>
++	</div>
++    </div>
++
++    <!-- Modal para selecionar tipo de equipamento -->
++    <div id="select-equip-type-modal" style="display: none; position: fixed; z-index: 2002; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
++	<div class="modal-content" style="max-width: 400px;">
++            <h3 style="margin-top: 0; color: #e67e22;">Alterar Tipo de Equipamento</h3>
++            <p id="select-equip-type-message" style="margin-bottom: 15px;"></p>
++            <select id="equip-type-select" style="width: 100%; padding: 10px; font-size: 14px; border: 2px solid #ddd; border-radius: 5px; margin-bottom: 20px;">
++		<option value="">Selecione um tipo...</option>
++            </select>
++            <div class="modal-buttons">
++		<button id="select-equip-type-confirm" style="background-color: #27ae60; color: white;">Confirmar</button>
++		<button id="select-equip-type-cancel" style="background-color: #95a5a6; color: white;">Cancelar</button>
+             </div>
+ 	</div>
+     </div>
+\ No newline at end of file
+@@ -1052,7 +1137,7 @@
+     let isManageMode = false;
+     let manageModeType = 'swap'; // 'swap', 'remove', ou 'create'
+     let swapSelectionA = null;
+-    let manageBtn, manageControls, manageModeSwap, manageModeRemove, manageModeCreate, labelManageSwap, labelManageRemove, labelManageCreate;
++    let manageBtn, manageControls, manageModeSwap, manageModeRemove, manageModeCreate, manageModeEditType, labelManageSwap, labelManageRemove, labelManageCreate, labelManageEditType;
+     let availableEquipTypes = []; // V2.7 - Lista de tipos da Volumetria
+ 
+     const PRANCHETA_ID = 'PRANCHETA'; const UNALLOCATED_ID = 'UNALLOCATED';
+\ No newline at end of file
+@@ -1290,9 +1375,11 @@
+             manageModeCreate = document.getElementById('manage-mode-create');
+             manageModeSwap = document.getElementById('manage-mode-swap');
+             manageModeRemove = document.getElementById('manage-mode-remove');
++            manageModeEditType = document.getElementById('manage-mode-edit-type');
+             labelManageCreate = document.getElementById('label-manage-create');
+             labelManageSwap = document.getElementById('label-manage-swap');
+             labelManageRemove = document.getElementById('label-manage-remove');
++            labelManageEditType = document.getElementById('label-manage-edit-type');
+             // === FIM ALTERAÇÃO (V2.7) ===
+ 
+             addEventListeners();
+\ No newline at end of file
+@@ -1726,6 +1813,9 @@
+             }
+             if (manageModeRemove) {
+             manageModeRemove.addEventListener('change', () => setManageMode('remove'));
++            }
++            if (manageModeEditType) {
++            manageModeEditType.addEventListener('change', () => setManageMode('edit-type'));
+             }
+ 
+             // Listeners V2.8 (Métricas e Exportação)
+\ No newline at end of file
+@@ -2020,6 +2110,43 @@
+ 		if (manageModeType === 'remove' && removeBtn) {
+                     handleRemoveEquipmentClick(removeBtn); // Chama a nova função de remoção
+                     return;
++		}
++
++		// Botão de troca de tipo (ícone ⚙)
++		const changeTypeBtn = e.target.closest('.change-type-btn');
++		if (manageModeType === 'edit-type' && changeTypeBtn) {
++                    try {
++                        const equipElement = changeTypeBtn.closest('.equipamento');
++                        if (!equipElement) return;
++                        const equipId = equipElement.id; // Ex: R1-E1
++                        if (!equipId) {
++                            console.error("Equipamento sem ID");
++                            return;
++                        }
++                        const currentTypeSpan = equipElement.querySelector('.equipamento-header span');
++                        const currentTypeText = currentTypeSpan ? currentTypeSpan.textContent.replace(/[()]/g, '').trim() : '';
++                        
++                        // Verificar se há produtos alocados neste equipamento (no frontend)
++                        const escaninhosComProduto = equipElement.querySelectorAll('.escaninho.grid-cell[data-product-code]:not([data-product-code="Vazio"])');
++                        const hasProducts = escaninhosComProduto.length > 0;
++                        
++                        // Tipos de equipamento disponíveis (hardcoded - mais simples e confiável)
++                        const equipTypes = [
++                            'geladeira',
++                            'geladeira_alta',
++                            'geladeira_americana',
++                            'freezer',
++                            'prateleira',
++                            'prateleira lateral'
++                        ];
++                        
++                        showSelectEquipTypeModal(equipId, currentTypeText, equipTypes, hasProducts);
++                        return;
++                    } catch (e) {
++                        console.error("Erro ao processar clique para alterar tipo:", e);
++                        alert("Erro ao processar alteração de tipo: " + (e.message || e));
++                        return;
++                    }
+ 		}
+ 
+ 		const header = e.target.closest('.equipamento-header');
+\ No newline at end of file
+@@ -2029,6 +2156,7 @@
+                     return;
+ 		}
+ 
++
+ 		// Se estiver em modo de gerenciamento (Criação ou outro),
+ 		// permite o toggle da micro-view se não estiver expandido
+ 		const headerForToggle = e.target.closest('.equipamento-header');
+\ No newline at end of file
+@@ -2044,11 +2172,111 @@
+             if (isReaddressingMode && escaninho) {
+ 		// Lógica de clicar no escaninho (coletar/alocar)
+ 		saveState();
+-		const fillLevel = e.shiftKey; // Verificar se Shift está pressionado para preencher nível
+-		const fillEquipment = e.ctrlKey || e.metaKey; // Verificar se Ctrl está pressionado para preencher equipamento
+ 		const isOccupied = escaninho.dataset.productCode !== 'Vazio' && !escaninho.classList.contains('in-transition');
++		const fillLevel = e.shiftKey && !e.ctrlKey && !e.metaKey && (!isOccupied || hasTwoProducts(escaninho)); // Shift para preencher nível apenas se vazio ou já tem 2 produtos
++		const fillEquipment = e.ctrlKey || (e.metaKey && !isOccupied); // Ctrl/Command preenche equipamento apenas quando alvo está vazio
++                const duplicateSecondOnLevel = e.metaKey && isOccupied && !e.shiftKey && !e.ctrlKey; // Command em produto ocupado: duplicar segundo produto no nível
+ 		
+ 		if (isOccupied) { 
++                    // Shift em produto com apenas 1 item: adicionar segundo produto somente nesse escaninho
++                    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !hasTwoProducts(escaninho)) {
++                        let productToPlace = selectedPranchetaProduct; 
++                        let currentMap; 
++                        if (!productToPlace) { 
++                            currentMap = activePranchetaTab === 'recolhidos' ? collectedProducts : unallocatedProductsMap;
++                            const applyFilters = activePranchetaTab === 'nao-alocados';
++                            const filteredProducts = applyFilters ? getFilteredProducts(currentMap, true) : Array.from(currentMap.values());
++                            if (filteredProducts.length > 0) { 
++                                productToPlace = filteredProducts[0]; 
++                            } 
++                        } else { 
++                            currentMap = activePranchetaTab === 'recolhidos' ? collectedProducts : unallocatedProductsMap; 
++                        } 
++                        if (productToPlace) { 
++                            const isValid = isPlacementValid(productToPlace.dataset, escaninho); 
++                            if (!isValid && !confirm(`ALERTA:\nProduto req: '${productToPlace.dataset.catArmz}'\nEscaninho é: '${escaninho.dataset.equipType}'.\n\nDeseja continuar?`)) { 
++                                historyStack.pop(); 
++                                return; 
++                            } 
++                            placeProduct(productToPlace, escaninho, true); // true = adicionar como segundo produto
++                            currentMap.delete(productToPlace.id); 
++                            deselectPranchetaProduct(); 
++                            renderPrancheta(); 
++                        } else { 
++                            console.log("Nenhum produto selecionado ou disponível para adicionar como segundo produto."); 
++                            historyStack.pop(); 
++                        }
++                        return;
++                    }
++
++                    // Command em produto ocupado: adicionar segundo produto em TODO o nível
++                    if (duplicateSecondOnLevel) {
++                        const targetId = escaninho.id;
++                        const idParts = targetId.replace('bin-', '').split('-');
++                        if (idParts.length >= 4) {
++                            const ruaNum = escaninho.dataset.ruaNum;
++                            const equipNum = escaninho.dataset.equipNum;
++                            const nivel = idParts[idParts.length - 1].substring(0, 1);
++
++                            // Encontrar todos os escaninhos do mesmo nível no mesmo equipamento
++                            const allBins = document.querySelectorAll(`.escaninho.grid-cell[data-rua-num="${ruaNum}"][data-equip-num="${equipNum}"]`);
++                            const levelBins = Array.from(allBins).filter(bin => {
++                                const binId = bin.id.replace('bin-', '');
++                                const binParts = binId.split('-');
++                                if (binParts.length >= 4) {
++                                    const binNivel = binParts[binParts.length - 1].substring(0, 1);
++                                    return binNivel === nivel;
++                                }
++                                return false;
++                            });
++
++                            // Apenas bins ocupados com 1 produto (sem segundo ainda)
++                            const eligibleBins = levelBins.filter(bin => {
++                                const data1 = extractProductData(bin, 1);
++                                if (!data1 || data1.product_code === 'Vazio') return false;
++                                return !hasTwoProducts(bin) && !bin.classList.contains('in-transition');
++                            });
++
++                            if (eligibleBins.length === 0) {
++                                if (historyStack.length > 0) historyStack.pop();
++                                return;
++                            }
++
++                            let currentMap = activePranchetaTab === 'recolhidos' ? collectedProducts : unallocatedProductsMap;
++                            const applyFilters = activePranchetaTab === 'nao-alocados';
++                            let productsPool = applyFilters ? getFilteredProducts(currentMap, true) : Array.from(currentMap.values());
++
++                            if (productsPool.length === 0) {
++                                if (historyStack.length > 0) historyStack.pop();
++                                return;
++                            }
++
++                            let used = 0;
++                            for (const bin of eligibleBins) {
++                                if (productsPool.length === 0) break;
++                                const nextProduct = productsPool.shift();
++                                if (!nextProduct) continue;
++                                const isValid = isPlacementValid(nextProduct.dataset || { catArmz: nextProduct.cat_armz }, bin);
++                                if (!isValid && !confirm(`ALERTA:\nProduto req: '${nextProduct.dataset?.catArmz || nextProduct.cat_armz}'\nEscaninho é: '${bin.dataset.equipType}'.\n\nDeseja continuar?`)) {
++                                    continue;
++                                }
++                                placeProduct(nextProduct, bin, true);
++                                currentMap.delete(nextProduct.id);
++                                used++;
++                            }
++
++                            if (used === 0) {
++                                if (historyStack.length > 0) historyStack.pop();
++                            } else {
++                                deselectPranchetaProduct();
++                                renderPrancheta();
++                            }
++                        } else {
++                            if (historyStack.length > 0) historyStack.pop();
++                        }
++                        return;
++                    }
++                    
+                     if (fillLevel) {
+ 			// Recolher todo o nível
+ 			const targetId = escaninho.id;
+\ No newline at end of file
+@@ -2394,7 +2622,10 @@
+                             toggleMicroView(targetEquipId);
+                         }
+                         setTimeout(() => {
+-                            const targetElements = document.querySelectorAll(`[data-product-code="${p.code}"]`);
++                            // Buscar tanto em productCode quanto em productCode2
++                            const targetElements = document.querySelectorAll(
++                                `[data-product-code="${p.code}"], [data-product-code2="${p.code}"]`
++                            );
+                             if(targetElements.length > 0) {
+                                 targetElements.forEach(el => el.classList.add('highlight'));
+                                 targetElements[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+\ No newline at end of file
+@@ -2474,7 +2705,203 @@
+ 	modal.style.display = 'block';
+     }
+ 
+-    function collectSingleInstance(escaninho) { try { const productData = extractProductData(escaninho); collectedProducts.set(productData.id, productData); convertToPlaceholder(escaninho, productData); renderPrancheta(); } catch(e){ console.error("Erro em collectSingleInstance:", e); alert("Erro ao coletar produto.");} }
++    // Função para mostrar modal de seleção de tipo de equipamento
++    function showSelectEquipTypeModal(equipId, currentType, typesList, hasProducts) {
++        try {
++            const modal = document.getElementById('select-equip-type-modal');
++            const select = document.getElementById('equip-type-select');
++            const message = document.getElementById('select-equip-type-message');
++            const confirmBtn = document.getElementById('select-equip-type-confirm');
++            const cancelBtn = document.getElementById('select-equip-type-cancel');
++            
++            // Verificar se todos os elementos existem
++            if (!modal || !select || !message || !confirmBtn || !cancelBtn) {
++                console.error("Elementos do modal não encontrados:", { modal, select, message, confirmBtn, cancelBtn });
++                alert("Erro: Elementos do modal não encontrados. Por favor, recarregue a página.");
++                return;
++            }
++            
++            // Limpar select anterior
++            select.innerHTML = '<option value="">Selecione um tipo...</option>';
++        
++        // Popular com tipos disponíveis
++        typesList.forEach(type => {
++            const option = document.createElement('option');
++            option.value = type;
++            option.textContent = type;
++            if (type === currentType) {
++                option.selected = true;
++            }
++            select.appendChild(option);
++        });
++        
++        // Mensagem
++        if (hasProducts) {
++            message.innerHTML = `<strong>Equipamento ${equipId}</strong><br><br>Este equipamento possui produtos alocados.<br>Se continuar, <strong>TODOS</strong> esses produtos serão recolhidos (ficarão como 'Não Alocados').`;
++        } else {
++            message.innerHTML = `<strong>Equipamento ${equipId}</strong><br><br>Selecione o novo tipo de equipamento:`;
++        }
++        
++        // Remover listeners anteriores
++        const newConfirmBtn = confirmBtn.cloneNode(true);
++        const newCancelBtn = cancelBtn.cloneNode(true);
++        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
++        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
++        
++        // Listener de cancelar
++        newCancelBtn.addEventListener('click', () => {
++            modal.style.display = 'none';
++        }, { once: true });
++        
++        // Listener de confirmar
++        newConfirmBtn.addEventListener('click', () => {
++            const newType = select.value.trim();
++            if (!newType) {
++                alert("Por favor, selecione um tipo de equipamento.");
++                return;
++            }
++            
++            if (hasProducts) {
++                const ok = confirm(`Tem certeza que deseja alterar o tipo de ${currentType || 'N/A'} para ${newType}?\n\nTodos os produtos serão recolhidos.`);
++                if (!ok) return;
++            }
++            
++            modal.style.display = 'none';
++            showLoading("Alterando tipo do equipamento...", `Equipamento ${equipId} → ${newType}`);
++            try {
++                google.script.run
++                    .withSuccessHandler(result => {
++                        hideLoading();
++                        try {
++                            if (result && result.success) {
++                                alert(result.message || "Tipo do equipamento alterado com sucesso. A página será recarregada.");
++                                window.location.reload();
++                            } else {
++                                alert((result && result.error) || "Erro ao alterar tipo do equipamento.");
++                            }
++                        } catch (e) {
++                            console.error("Erro no successHandler:", e);
++                            hideLoading();
++                            alert("Erro ao processar resultado: " + (e.message || e));
++                        }
++                    })
++                    .withFailureHandler(err => {
++                        hideLoading();
++                        console.error("Erro ao alterar tipo:", err);
++                        alert("Erro de comunicação ao alterar tipo do equipamento: " + (err && err.message ? err.message : err));
++                    })
++                    .changeEquipmentType(equipId, newType, hasProducts);
++            } catch (e) {
++                hideLoading();
++                console.error("Erro ao chamar changeEquipmentType:", e);
++                alert("Erro ao iniciar alteração de tipo: " + (e.message || e));
++            }
++        }, { once: true });
++        
++        // Mostrar modal
++        modal.style.display = 'block';
++        
++        // Fechar ao clicar fora
++        modal.addEventListener('click', (e) => {
++            if (e.target === modal) {
++                modal.style.display = 'none';
++            }
++        }, { once: true });
++        } catch (e) {
++            console.error("Erro em showSelectEquipTypeModal:", e);
++            alert("Erro ao abrir modal de seleção de tipo: " + (e.message || e));
++        }
++    }
++
++    function collectSingleInstance(escaninho) { 
++        try { 
++            // Se o escaninho tem 2 produtos, recolher o primeiro (productIndex 1)
++            if (hasTwoProducts(escaninho)) {
++                const product1Data = extractProductData(escaninho, 1);
++                const product2Data = extractProductData(escaninho, 2);
++                
++                if (product1Data && product1Data.product_code !== 'Vazio') {
++                    // Recolher primeiro produto
++                    collectedProducts.set(`${product1Data.id}-1`, product1Data);
++                    
++                    // Mover segundo produto para o primeiro slot, preservando todos os dados
++                    if (product2Data && product2Data.product_code !== 'Vazio') {
++                        // Obter dados completos do segundo produto
++                        const product2Code = product2Data.product_code;
++                        const product2FullData = allProductDataMap.get(product2Code) || {};
++                        
++                        // Atualizar escaninho manualmente preservando todos os dados
++                        escaninho.dataset.productCode = product2Code;
++                        escaninho.dataset.productName = product2FullData.product_name || product2Data.product_name || '';
++                        escaninho.dataset.subcategory = product2FullData.subcategoria || product2Data.subcategory || '';
++                        escaninho.dataset.catArmz = product2FullData.categoria_armazenagem || product2Data.cat_armz || '';
++                        escaninho.dataset.marca = product2FullData.nm_fabricante || product2Data.marca || '';
++                        escaninho.dataset.fragil = String(product2FullData.is_fragil || product2Data.is_fragil || '').toUpperCase().trim();
++                        escaninho.dataset.degelo = String(product2FullData.degelo || product2Data.degelo || '').toUpperCase().trim();
++                        
++                        // Limpar segundo produto
++                        escaninho.dataset.productCode2 = '';
++                        escaninho.dataset.productName2 = '';
++                        escaninho.dataset.subcategory2 = '';
++                        escaninho.dataset.catArmz2 = '';
++                        escaninho.dataset.marca2 = '';
++                        escaninho.dataset.fragil2 = '';
++                        escaninho.dataset.degelo2 = '';
++                        escaninho.classList.remove('has-two-products');
++                        
++                        // Atualizar classes
++                        escaninho.classList.remove('pesado', 'alto', 'pequeno', 'fragil', 'degelo-nao');
++                        if (product2FullData.is_pesado) escaninho.classList.add('pesado');
++                        if (product2FullData.is_alto) escaninho.classList.add('alto');
++                        if (product2FullData.is_pequeno) escaninho.classList.add('pequeno');
++                        if (escaninho.dataset.fragil === 'SIM') escaninho.classList.add('fragil');
++                        if (escaninho.dataset.degelo === 'NAO') escaninho.classList.add('degelo-nao');
++                        
++                        // Atualizar cor
++                        escaninho.style.backgroundColor = product2Data.cor_grupo || product2FullData.cor_grupo || '#bdc3c7';
++                        
++                        // Atualizar display e tooltip
++                        let curvaOriginal = product2FullData.curva || '';
++                        let marcaOriginal = product2FullData.nm_fabricante || '';
++                        let curvaDisplay = '';
++                        if (curvaOriginal && isNaN(curvaOriginal) && String(curvaOriginal).length === 1) {
++                            curvaDisplay = String(curvaOriginal)[0].toUpperCase();
++                        } else if (marcaOriginal && isNaN(marcaOriginal) && String(marcaOriginal).length === 1 && !isNaN(curvaOriginal)) {
++                            curvaDisplay = String(marcaOriginal)[0].toUpperCase();
++                        }
++                        
++                        let infoHoverHtml = '<b>Info indisponível</b>';
++                        if (typeof criarInfoHover === 'function' && product2Code && product2Code !== 'Vazio') {
++                            try {
++                                infoHoverHtml = criarInfoHover(product2FullData);
++                            } catch (e) {
++                                infoHoverHtml = product2Data.info_hover || '<b>Info indisponível</b>';
++                            }
++                        } else {
++                            infoHoverHtml = product2Data.info_hover || '<b>Info indisponível</b>';
++                        }
++                        
++                        escaninho.innerHTML = `${curvaDisplay}<span class="tooltip">${infoHoverHtml}</span>`;
++                    } else {
++                        // Se não há segundo produto, apenas limpar
++                        convertToEmpty(escaninho);
++                    }
++                    renderPrancheta();
++                    return;
++                }
++            }
++            // Comportamento normal: recolher único produto
++            const productData = extractProductData(escaninho, 1);
++            if (productData && productData.product_code !== 'Vazio') {
++                collectedProducts.set(productData.id, productData);
++                convertToPlaceholder(escaninho, productData);
++                renderPrancheta();
++            }
++        } catch(e){ 
++            console.error("Erro em collectSingleInstance:", e); 
++            alert("Erro ao coletar produto.");
++        }
++    }
+     // Função para atualizar contagem de itens não alocados
+     function updateUnallocatedCount() {
+         try {
+\ No newline at end of file
+@@ -2890,11 +3317,22 @@
+         return item; 
+     }
+     function isPlacementValid(productDataset, escaninho) { try { if(!productDataset || !escaninho || !escaninho.dataset) return false; const productReq = productDataset.catArmz; const equipType = escaninho.dataset.equipType; if (!productReq || productReq === 'N/A') return true; for (const [req, validEquips] of Object.entries(compatibilityMatrix)) { if (productReq === req) return validEquips.includes(equipType); } return true; } catch(e){ console.error("Erro em isPlacementValid:", e); return false;} }
+-    function placeProduct(product, escaninho) { 
++    function placeProduct(product, escaninho, asSecondProduct = false) { 
+ 	try { 
+-            escaninho.classList.remove('in-transition', 'pesado', 'alto', 'pequeno', 'fragil', 'degelo-nao'); 
+-            if (product.classes) escaninho.classList.add(...product.classes.split(' ')); 
++            // Verificar se já existe um produto no escaninho
++            const existingProductCode = escaninho.dataset.productCode;
++            const hasExistingProduct = existingProductCode && existingProductCode !== 'Vazio';
+             
++            // Se estamos tentando adicionar como segundo produto mas já tem 2, ou se não é para adicionar como segundo mas já tem produto
++            if (asSecondProduct && hasTwoProducts(escaninho)) {
++                console.warn('Escaninho já tem 2 produtos. Não é possível adicionar mais.');
++                return;
++            }
++            if (!asSecondProduct && hasExistingProduct && !hasTwoProducts(escaninho)) {
++                // Se já tem um produto e não estamos adicionando como segundo, substituir
++                asSecondProduct = false;
++            }
++            
+             // Garantir que temos product_code válido
+             const productCode = String(product.product_code || '').trim();
+             if (!productCode || productCode === 'Vazio') {
+\ No newline at end of file
+@@ -2918,6 +3356,52 @@
+                 ...product,
+                 product_code: productCode // Garantir que product_code está correto
+             };
++            
++            if (asSecondProduct && hasExistingProduct) {
++                // Adicionar como segundo produto
++                escaninho.dataset.productCode2 = productCode;
++                escaninho.dataset.productName2 = productData.product_name || product.product_name || '';
++                escaninho.dataset.subcategory2 = productData.subcategoria || productData.subcategory || '';
++                escaninho.dataset.catArmz2 = productData.categoria_armazenagem || productData.cat_armz || '';
++                escaninho.dataset.marca2 = productData.nm_fabricante || productData.marca || '';
++                escaninho.dataset.fragil2 = String(productData.is_fragil || product.is_fragil || '').toUpperCase().trim();
++                escaninho.dataset.degelo2 = String(productData.degelo || product.degelo || '').toUpperCase().trim();
++                
++                // Adicionar classe para indicar que tem 2 produtos
++                escaninho.classList.add('has-two-products');
++                
++                // Verificar se os dois produtos têm a mesma subcategoria (para ficar amarelo)
++                const subcat1 = (productData.subcategoria || escaninho.dataset.subcategory || 'N/A').trim();
++                const subcat2 = (productData.subcategoria || product.subcategoria || 'N/A').trim();
++                const subcat1Normalized = subcat1 || 'N/A';
++                const subcat2Normalized = subcat2 || 'N/A';
++                
++                if (subcat1Normalized === subcat2Normalized) {
++                    escaninho.classList.add('same-subcategory');
++                    // Quando tem mesma subcategoria, não definir cor de fundo (deixa o CSS fazer)
++                    // escaninho.style.backgroundColor não deve ser definido aqui
++                } else {
++                    escaninho.classList.remove('same-subcategory');
++                }
++                
++                // Atualizar tooltip para mostrar ambos os produtos
++                updateEscaninhoTooltip(escaninho);
++                
++                // Atualizar visualização (mostrar ambas as curvas)
++                updateEscaninhoDisplay(escaninho);
++            } else {
++                // Comportamento normal: colocar como primeiro produto
++                escaninho.classList.remove('in-transition', 'pesado', 'alto', 'pequeno', 'fragil', 'degelo-nao', 'has-two-products');
++                if (product.classes) escaninho.classList.add(...product.classes.split(' ')); 
++                
++                // Limpar segundo produto se existir
++                escaninho.dataset.productCode2 = '';
++                escaninho.dataset.productName2 = '';
++                escaninho.dataset.subcategory2 = '';
++                escaninho.dataset.catArmz2 = '';
++                escaninho.dataset.marca2 = '';
++                escaninho.dataset.fragil2 = '';
++                escaninho.dataset.degelo2 = '';
+             
+             // Atualizar dataset do escaninho com dados completos
+             escaninho.dataset.productCode = productCode; 
+\ No newline at end of file
+@@ -2951,26 +3435,22 @@
+             } 
+             
+             // Gerar tooltip - garantir que temos todos os dados necessários
+-            // criarInfoHover busca internamente do baseProdutosMap usando product_code
+-            // Mas precisamos garantir que o objeto passado tenha product_code válido
+             let infoHoverHtml = '<b>Info indisponível</b>';
+             if (typeof criarInfoHover === 'function' && productCode && productCode !== 'Vazio') {
+                 try {
+-                    // Passar productData completo para criarInfoHover
+                     infoHoverHtml = criarInfoHover(productData);
+                 } catch (e) {
+                     console.error('Erro ao gerar tooltip:', e, { productCode, productData });
+-                    // Fallback: usar info_hover do product se disponível
+                     infoHoverHtml = product.info_hover || '<b>Info indisponível</b>';
+                 }
+             } else {
+-                // Fallback: usar info_hover do product se disponível
+                 infoHoverHtml = product.info_hover || '<b>Info indisponível</b>';
+             } 
+             
+-            // Mostrar informações visíveis no escaninho (mostrar apenas a curva, não o código)
+-            // A curva já está calculada em curvaDoMap acima
++                // Mostrar informações visíveis no escaninho
+             escaninho.innerHTML = `${curvaDoMap}<span class="tooltip">${infoHoverHtml}</span>`; 
++            }
++            
+             escaninho.draggable = isReaddressingMode; 
+             
+             // Atualizar linhas de conexão após colocar produto
+\ No newline at end of file
+@@ -2981,6 +3461,7 @@
+             // Marcar equipamento como degelo-nao se tiver produto degelo = NAO
+             const equipamento = escaninho.closest('.equipamento');
+             if (equipamento) {
++                const degelo = String(productData.degelo || product.degelo || '').toUpperCase().trim();
+             if (degelo === 'NAO') {
+                 const equipamentoContainer = escaninho.closest('.equipamento-container');
+                 if (equipamentoContainer) {
+\ No newline at end of file
+@@ -2991,7 +3472,7 @@
+                 // Verificar se ainda há produtos degelo = NAO no equipamento
+                 const equipamentoContainer = escaninho.closest('.equipamento-container');
+                 if (equipamentoContainer) {
+-                    const hasDegeloNao = equipamentoContainer.querySelector('.escaninho[data-degelo="NAO"]');
++                        const hasDegeloNao = equipamentoContainer.querySelector('.escaninho[data-degelo="NAO"], .escaninho[data-degelo2="NAO"]');
+                     if (!hasDegeloNao) {
+                         equipamentoContainer.classList.remove('degelo-nao');
+                             updateEquipHeaderDegelo(equipamento, false);
+\ No newline at end of file
+@@ -3002,6 +3483,120 @@
+ 	} catch(e){ 
+             console.error("Erro em placeProduct:", e); 
+ 	} 
++    }
++    
++    // Função para atualizar tooltip quando escaninho tem 2 produtos
++    function updateEscaninhoTooltip(escaninho) {
++        const product1Code = escaninho.dataset.productCode;
++        const product2Code = escaninho.dataset.productCode2;
++        
++        if (!product1Code || product1Code === 'Vazio') return;
++        
++        let tooltipHtml = '';
++        
++        // Primeiro produto
++        const product1Data = allProductDataMap.get(product1Code) || {};
++        let tooltip1 = '<b>Info indisponível</b>';
++        if (typeof criarInfoHover === 'function' && product1Code !== 'Vazio') {
++            try {
++                tooltip1 = criarInfoHover(product1Data);
++            } catch (e) {
++                tooltip1 = escapeHtml(product1Data.product_name || product1Code);
++            }
++        }
++        
++        // Segundo produto
++        let tooltip2 = '';
++        if (product2Code && product2Code !== 'Vazio') {
++            const product2Data = allProductDataMap.get(product2Code) || {};
++            if (typeof criarInfoHover === 'function') {
++                try {
++                    tooltip2 = criarInfoHover(product2Data);
++                } catch (e) {
++                    tooltip2 = escapeHtml(product2Data.product_name || product2Code);
++                }
++            }
++        }
++        
++        // Layout lado a lado
++        if (tooltip2) {
++            tooltipHtml = '<div style="display: flex; gap: 15px; align-items: flex-start;">' +
++                         '<div style="flex: 1; border-right: 1px solid #ccc; padding-right: 10px;"><b>Produto 1:</b><br>' + tooltip1 + '</div>' +
++                         '<div style="flex: 1;"><b>Produto 2:</b><br>' + tooltip2 + '</div>' +
++                         '</div>';
++        } else {
++            tooltipHtml = '<div><b>Produto 1:</b><br>' + tooltip1 + '</div>';
++        }
++        
++        const tooltipNode = escaninho.querySelector('.tooltip');
++        if (tooltipNode) {
++            tooltipNode.innerHTML = tooltipHtml || '<b>Escaninho com 2 produtos</b>';
++        }
++    }
++    
++    // Função para atualizar visualização quando escaninho tem 2 produtos
++    function updateEscaninhoDisplay(escaninho) {
++        const product1Code = escaninho.dataset.productCode;
++        const product2Code = escaninho.dataset.productCode2;
++        
++        if (!product1Code || product1Code === 'Vazio') return;
++        
++        let displayText = '';
++        
++        // Primeira curva
++        const product1Data = allProductDataMap.get(product1Code) || {};
++        let curva1 = '';
++        let curvaOriginal1 = product1Data.curva || '';
++        let marcaOriginal1 = product1Data.nm_fabricante || '';
++        if (curvaOriginal1 && isNaN(curvaOriginal1) && String(curvaOriginal1).length === 1) {
++            curva1 = String(curvaOriginal1)[0].toUpperCase();
++        } else if (marcaOriginal1 && isNaN(marcaOriginal1) && String(marcaOriginal1).length === 1 && !isNaN(curvaOriginal1)) {
++            curva1 = String(marcaOriginal1)[0].toUpperCase();
++        }
++        
++        displayText = curva1 || '?';
++        
++        // Segunda curva
++        if (product2Code && product2Code !== 'Vazio') {
++            const product2Data = allProductDataMap.get(product2Code) || {};
++            let curva2 = '';
++            let curvaOriginal2 = product2Data.curva || '';
++            let marcaOriginal2 = product2Data.nm_fabricante || '';
++            if (curvaOriginal2 && isNaN(curvaOriginal2) && String(curvaOriginal2).length === 1) {
++                curva2 = String(curvaOriginal2)[0].toUpperCase();
++            } else if (marcaOriginal2 && isNaN(marcaOriginal2) && String(marcaOriginal2).length === 1 && !isNaN(curvaOriginal2)) {
++                curva2 = String(marcaOriginal2)[0].toUpperCase();
++            }
++            
++            displayText += '/' + (curva2 || '?');
++            
++            // Verificar se os dois produtos têm a mesma subcategoria
++            const subcat1 = (product1Data.subcategoria || escaninho.dataset.subcategory || 'N/A').trim();
++            const subcat2 = (product2Data.subcategoria || escaninho.dataset.subcategory2 || 'N/A').trim();
++            const subcat1Normalized = subcat1 || 'N/A';
++            const subcat2Normalized = subcat2 || 'N/A';
++            
++            if (subcat1Normalized === subcat2Normalized) {
++                escaninho.classList.add('same-subcategory');
++                // Quando tem mesma subcategoria, não mostrar nada além do amarelo
++                displayText = ''; // Limpar o texto das curvas
++            } else {
++                escaninho.classList.remove('same-subcategory');
++            }
++        } else {
++            // Se não tem segundo produto, remover classe
++            escaninho.classList.remove('same-subcategory');
++        }
++        
++        // Atualizar HTML mantendo o tooltip
++        const tooltipNode = escaninho.querySelector('.tooltip');
++        const tooltipHtml = tooltipNode ? tooltipNode.innerHTML : '';
++        // Se tem same-subcategory, não mostrar texto, apenas tooltip vazio
++        if (escaninho.classList.contains('same-subcategory')) {
++            escaninho.innerHTML = '<span class="tooltip">' + tooltipHtml + '</span>';
++        } else {
++            escaninho.innerHTML = displayText + '<span class="tooltip">' + tooltipHtml + '</span>';
++        }
+     }
+     function convertToPlaceholder(escaninho, productData) { try { const emptyData = allProductDataMap.get('Vazio'); escaninho.classList.add('in-transition'); escaninho.dataset.productCode = 'Vazio'; escaninho.dataset.productName = emptyData.product_name; escaninho.dataset.subcategory = emptyData.subcategoria; escaninho.dataset.catArmz = emptyData.cat_armz; escaninho.dataset.originalProductId = productData.id; escaninho.style.backgroundColor = '#ecf0f1'; escaninho.innerHTML = `‹-›<span class="tooltip"><b>Local Original de:</b><br>${escapeHtml(productData.product_name)}<br>Cód: ${productData.product_code}</span>`; escaninho.draggable = false; } catch(e){ console.error("Erro em convertToPlaceholder:", e); } }
+     function convertToEmpty(escaninho) { try { const emptyData = allProductDataMap.get('Vazio'); escaninho.classList.remove('in-transition', 'pesado', 'alto', 'pequeno', 'fragil', 'degelo-nao'); Object.keys(escaninho.dataset).forEach(key => { if (key.startsWith('product') || key === 'subcategory' || key === 'catArmz' || key === 'fragil' || key === 'degelo') { escaninho.dataset[key] = emptyData[key] || ''; } }); escaninho.dataset.productCode = 'Vazio'; escaninho.style.backgroundColor = '#ecf0f1';             escaninho.innerHTML = `<span class="tooltip"><b>Escaninho Vazio</b></span>`; escaninho.draggable = false; 
+\ No newline at end of file
+@@ -3024,7 +3619,54 @@
+                 }
+             }
+         } catch(e){ console.error("Erro em convertToEmpty:", e); } }
+-    function extractProductData(escaninho) { try { const productCode = escaninho.dataset.productCode; if (productCode === 'Vazio') { return { ...allProductDataMap.get('Vazio'), id: escaninho.id }; } const productData = allProductDataMap.get(productCode) || {}; const tooltipNode = escaninho.querySelector('.tooltip'); const tooltipHTML = tooltipNode ? tooltipNode.innerHTML : ''; return { id: escaninho.id, product_code: productCode, product_name: productData.product_name || escaninho.dataset.productName, cor_grupo: escaninho.style.backgroundColor, curva: productData.curva || '', info_hover: tooltipHTML, classes: Array.from(escaninho.classList).filter(c => c === 'pesado' || c === 'alto').join(' '), dataset: {...escaninho.dataset}, cat_armz: productData.categoria_armazenagem || escaninho.dataset.catArmz }; } catch(e){ console.error("Erro em extractProductData:", e); return null;} }
++    function extractProductData(escaninho, productIndex = 1) { 
++        try { 
++            const productCode = productIndex === 1 ? escaninho.dataset.productCode : escaninho.dataset.productCode2;
++            if (!productCode || productCode === 'Vazio') { 
++                return productIndex === 1 ? { ...allProductDataMap.get('Vazio'), id: escaninho.id } : null; 
++            } 
++            const productData = allProductDataMap.get(productCode) || {}; 
++            const tooltipNode = escaninho.querySelector('.tooltip'); 
++            const tooltipHTML = tooltipNode ? tooltipNode.innerHTML : ''; 
++            const colorFromMap = productData.cor_grupo || productData.cor || ''; 
++            const effectiveColor = colorFromMap || escaninho.style.backgroundColor || '#bdc3c7';
++            return { 
++                id: escaninho.id, 
++                product_code: productCode, 
++                product_name: productData.product_name || (productIndex === 1 ? escaninho.dataset.productName : escaninho.dataset.productName2), 
++                cor_grupo: effectiveColor, 
++                curva: productData.curva || '', 
++                info_hover: tooltipHTML, 
++                classes: Array.from(escaninho.classList).filter(c => c === 'pesado' || c === 'alto').join(' '), 
++                dataset: {...escaninho.dataset}, 
++                cat_armz: productData.categoria_armazenagem || escaninho.dataset.catArmz,
++                productIndex: productIndex
++            }; 
++        } catch(e){ 
++            console.error("Erro em extractProductData:", e); 
++            return null;
++        }
++    }
++    
++    // Função auxiliar para obter todos os produtos de um escaninho
++    function getAllProductsFromEscaninho(escaninho) {
++        const products = [];
++        const product1 = extractProductData(escaninho, 1);
++        if (product1 && product1.product_code !== 'Vazio') {
++            products.push(product1);
++        }
++        const product2 = extractProductData(escaninho, 2);
++        if (product2 && product2.product_code && product2.product_code !== 'Vazio') {
++            products.push(product2);
++        }
++        return products;
++    }
++    
++    // Função auxiliar para verificar se escaninho tem 2 produtos
++    function hasTwoProducts(escaninho) {
++        const productCode2 = escaninho.dataset.productCode2;
++        return productCode2 && productCode2 !== 'Vazio' && productCode2 !== '';
++    }
+     function deselectPranchetaProduct() { selectedPranchetaProduct = null; document.querySelectorAll('.prancheta-item.selected').forEach(el => el.classList.remove('selected')); document.body.classList.remove('paintbrush-active'); }
+     function swapEscaninhos(source, target) { try { const sourceData = extractProductData(source); const targetData = extractProductData(target); if (targetData.product_code === 'Vazio') { convertToEmpty(source); } else { placeProduct(targetData, source); } if (sourceData.product_code === 'Vazio') { convertToEmpty(target); } else { placeProduct(sourceData, target); } } catch(e){ console.error("Erro em swapEscaninhos:", e); alert("Erro ao trocar produtos.");} }
+     function toggleMicroView(equipId) { try { const equipDiv = document.getElementById(equipId); if (!equipDiv || document.body.classList.contains('expanded-view')) return; const microView = document.getElementById('micro-' + equipId); const isActive = equipDiv.classList.contains('active'); document.querySelectorAll('.micro-view').forEach(div => div.style.display = 'none'); document.querySelectorAll('.equipamento').forEach(div => div.classList.remove('active')); if (!isActive) { equipDiv.classList.add('active'); microView.style.display = 'block'; 
+\ No newline at end of file
+@@ -3195,120 +3837,105 @@
+             // Função auxiliar para obter subcategoria do produto
+             const getSubcategoria = (product) => {
+ 		const productData = allProductDataMap.get(product.product_code) || {};
+-		return (productData.subcategoria || product.subcategoria || '').trim();
++		// Produtos sem subcategoria são tratados como 'N/A' (mesma subcategoria)
++		let sub = (productData.subcategoria || product.subcategoria || 'N/A').trim();
++                if (!sub) sub = 'N/A';
++		return sub;
+             };
+             
+-            // Função auxiliar para obter grupo do produto
+-            const getGrupo = (product) => {
+-		const productData = allProductDataMap.get(product.product_code) || {};
+-		const grupo = (productData.grupo || product.grupo || 'neutro').toLowerCase().trim();
+-		return grupo;
+-            };
++            // NOVA LÓGICA: Garantir que TODOS os produtos da mesma subcategoria fiquem com pelo menos 5 posições de distância
++            // Agrupar produtos por subcategoria
++            const subcatGroups = new Map(); // Map<subcategoria, Array<{product, originalIndex}>>
++            productsArray.forEach((product, index) => {
++                const subcat = getSubcategoria(product);
++                if (!subcatGroups.has(subcat)) {
++                    subcatGroups.set(subcat, []);
++                }
++                subcatGroups.get(subcat).push({ product, originalIndex: index });
++            });
+             
+-            // Identificar produtos da mesma subcategoria lado a lado
+-            let moved = false;
+-            let maxIterations = productsArray.length * 2; // Limite de iterações para evitar loop infinito
+-            let iterations = 0;
++            // Criar novo array reorganizado
++            const newOrder = new Array(productsArray.length).fill(null);
++            const usedIndices = new Set();
+             
+-            // Continuar processando até não encontrar mais produtos adjacentes da mesma subcategoria
+-            while (iterations < maxIterations) {
+-		let foundAdjacent = false;
++            // Função para encontrar a próxima posição disponível que respeita a distância mínima de 5
++            const findNextPosition = (subcat, minDistance = 5) => {
++                // Encontrar todas as posições já ocupadas por produtos da mesma subcategoria
++                const occupiedPositions = [];
++                for (let i = 0; i < newOrder.length; i++) {
++                    if (newOrder[i] !== null) {
++                        const existingSubcat = getSubcategoria(newOrder[i].product);
++                        if (existingSubcat === subcat) {
++                            occupiedPositions.push(i);
++                        }
++                    }
++                }
+                 
+-		// Verificar todos os pares adjacentes
+-		for (let i = 0; i < productsArray.length - 1; i++) {
+-		const current = productsArray[i];
+-		const next = productsArray[i + 1];
+-                
+-		const currentSubcat = getSubcategoria(current);
+-		const nextSubcat = getSubcategoria(next);
+-                    
+-                    // Não separar produtos com o mesmo product_code (mesmo produto em múltiplos escaninhos)
+-                    const currentCode = current.product_code || '';
+-                    const nextCode = next.product_code || '';
+-                    if (currentCode === nextCode && currentCode !== '') {
+-			continue; // São o mesmo produto, não separar
++                // Se não há nenhuma posição ocupada, começar do início
++                if (occupiedPositions.length === 0) {
++                    for (let i = 0; i < newOrder.length; i++) {
++                        if (!usedIndices.has(i)) return i;
+                     }
++                }
+                 
+-		// Se são da mesma subcategoria e não vazias
+-                    if (currentSubcat && currentSubcat === nextSubcat && currentSubcat !== 'N/A' && currentSubcat !== '') {
+-                    const currentCurva = getCurva(current);
+-                    let foundPosition = -1;
++                // Encontrar uma posição que está a pelo menos minDistance de todas as posições ocupadas
++                for (let candidate = 0; candidate < newOrder.length; candidate++) {
++                    if (usedIndices.has(candidate)) continue;
+                     
+-                    // Procurar uma posição onde a subcategoria seja diferente
+-			const produtoParaMover = productsArray[i + 1];
+-			const produtoParaMoverCode = produtoParaMover.product_code || '';
+-			
+-                    for (let j = 0; j < productsArray.length; j++) {
+-                            if (j === i || j === i + 1) continue;
+-                        
+-			const candidate = productsArray[j];
+-                            
+-			const candidateSubcat = getSubcategoria(candidate);
+-			const candidateCurva = getCurva(candidate);
+-                        
+-			// Verificar se a curva é compatível (mesma curva ou vazia)
+-			const curvaCompativel = !currentCurva || !candidateCurva || currentCurva === candidateCurva;
+-                        
+-			// Se a subcategoria é diferente e a curva é compatível, podemos inserir aqui
+-			if (candidateSubcat !== currentSubcat && curvaCompativel) {
+-                            // Verificar se os vizinhos também não têm a mesma subcategoria
+-                            const prevSubcat = j > 0 ? getSubcategoria(productsArray[j - 1]) : '';
+-                            const nextSubcatCheck = j < productsArray.length - 1 ? getSubcategoria(productsArray[j + 1]) : '';
+-				
+-				// Verificar se não vai separar produtos com o mesmo product_code
+-				const prevCode = j > 0 ? (productsArray[j - 1].product_code || '') : '';
+-				const nextCode = j < productsArray.length - 1 ? (productsArray[j + 1].product_code || '') : '';
+-				const candidateCode = candidate.product_code || '';
+-				
+-				// Não inserir se vai separar produtos com o mesmo código
+-				if (prevCode === nextCode && prevCode !== '' && prevCode === produtoParaMoverCode) {
+-                                    continue; // Não inserir entre produtos do mesmo código que o produto a mover
+-				}
+-				// Não inserir se o produto a mover tem o mesmo código que os vizinhos
+-				if ((prevCode === produtoParaMoverCode && prevCode !== '') || 
+-				    (nextCode === produtoParaMoverCode && nextCode !== '')) {
+-                                    continue; // Não inserir entre produtos do mesmo código
+-				}
+-				// Não inserir se vai quebrar um grupo de produtos com o mesmo código
+-				if (prevCode === candidateCode && prevCode !== '') {
+-                                    continue; // Não inserir entre produtos do mesmo código
+-				}
+-				if (nextCode === candidateCode && nextCode !== '') {
+-                                    continue; // Não inserir entre produtos do mesmo código
+-				}
+-                            
+-                            if (prevSubcat !== currentSubcat && nextSubcatCheck !== currentSubcat) {
+-				foundPosition = j;
++                    let valid = true;
++                    for (const occupied of occupiedPositions) {
++                        if (Math.abs(candidate - occupied) < minDistance) {
++                            valid = false;
+ 				break;
+                             }
+ 			}
+-                    }
+                     
+-                    // Se encontrou uma posição, mover
+-                    if (foundPosition !== -1) {
+-			// Remover o produto da posição atual
+-			const produtoMovido = productsArray.splice(i + 1, 1)[0];
+-			// Inserir na nova posição
+-			productsArray.splice(foundPosition, 0, produtoMovido);
++                    if (valid) return candidate;
++                }
++                
++                // Se não encontrou posição ideal, usar a primeira disponível
++                for (let i = 0; i < newOrder.length; i++) {
++                    if (!usedIndices.has(i)) return i;
++                }
++                return -1;
++            };
++            
++            // Processar cada grupo de subcategoria
++            let moved = false;
++            subcatGroups.forEach((group, subcat) => {
++                group.forEach(({ product, originalIndex }) => {
++                    const pos = findNextPosition(subcat, 5);
++                    if (pos !== -1 && pos !== originalIndex) {
++                        newOrder[pos] = { product, originalIndex };
++                        usedIndices.add(pos);
+ 			moved = true;
+-                            foundAdjacent = true;
+-                            break; // Reiniciar a busca após mover
+-			}
++                    } else if (pos === originalIndex) {
++                        newOrder[pos] = { product, originalIndex };
++                        usedIndices.add(pos);
+                     }
+-		}
+-		
+-		// Se não encontrou mais produtos adjacentes, parar
+-		if (!foundAdjacent) break;
+-		
+-		iterations++;
++                });
++            });
++            
++            // Preencher posições vazias com produtos que não foram movidos
++            const remainingProducts = [];
++            productsArray.forEach((product, index) => {
++                if (!usedIndices.has(index)) {
++                    remainingProducts.push(product);
++                }
++            });
++            
++            let remainingIndex = 0;
++            for (let i = 0; i < newOrder.length; i++) {
++                if (newOrder[i] === null && remainingIndex < remainingProducts.length) {
++                    newOrder[i] = { product: remainingProducts[remainingIndex++], originalIndex: -1 };
++                }
+             }
+             
+             // Garantir que produtos com o mesmo product_code fiquem agrupados
+-            const grouped = [];
+             const codeGroups = new Map();
++            const finalOrder = [];
+             
+-            // Agrupar produtos por código
+-            productsArray.forEach(product => {
++            newOrder.forEach(({ product }) => {
+                 const code = product.product_code || '';
+                 if (!codeGroups.has(code)) {
+                     codeGroups.set(code, []);
+\ No newline at end of file
+@@ -3316,35 +3943,30 @@
+                 codeGroups.get(code).push(product);
+             });
+             
+-            // Reordenar: produtos com mesmo código sempre juntos
+             const processedCodes = new Set();
+-            productsArray.forEach(product => {
++            newOrder.forEach(({ product }) => {
+                 const code = product.product_code || '';
+                 if (!processedCodes.has(code)) {
+                     processedCodes.add(code);
+                     const group = codeGroups.get(code) || [product];
+-                    grouped.push(...group);
++                    finalOrder.push(...group);
+                 }
+             });
+             
+-            // Substituir array original pelo agrupado
+-            productsArray.length = 0;
+-            productsArray.push(...grouped);
+-            
+             // Remover produtos do mapa e reinserir na ordem nova
+             if (applyFilters) {
+-		productsArray.forEach(p => activeMap.delete(p.id));
++		finalOrder.forEach(p => activeMap.delete(p.id));
+             } else {
+ 		activeMap.clear();
+             }
+             
+-            productsArray.forEach(p => activeMap.set(p.id, p));
++            finalOrder.forEach(p => activeMap.set(p.id, p));
+             renderPrancheta();
+             
+             if (moved) {
+-		console.log("Divisão de subcategorias concluída.");
++		console.log("Divisão de subcategorias concluída. Produtos da mesma subcategoria agora estão com pelo menos 5 posições de distância.");
+             } else {
+-		alert("Não foram encontrados produtos da mesma subcategoria lado a lado para separar.");
++		console.log("Divisão de subcategorias concluída. Produtos já estavam adequadamente espaçados.");
+             }
+ 	} catch(e) {
+             console.error("Erro ao dividir subcategorias:", e);
+\ No newline at end of file
+@@ -3632,13 +4254,20 @@
+             const initialProductLocations = new Map(); // Map<productCode, Set<locationId>>
+             const currentProductLocations = new Map(); // Map<productCode, Set<locationId>>
+ 
+-            // Popula estado inicial
++            // Popula estado inicial - IMPORTANTE: só adiciona produtos que realmente existem no estado inicial
++            // Não adiciona produtos que já estão alocados (eles já estão no initialMapState)
+             unallocatedProductsMap.forEach(p => {
+-		if (p.product_code !== 'Vazio') {
++		if (p.product_code && p.product_code !== 'Vazio') {
++                    // Verificar se este produto NÃO está no initialMapState (ou seja, realmente está não alocado)
++                    const isInInitialMap = initialMapState.some(s => 
++                        (s.dataset.productCode === p.product_code || s.dataset.productCode2 === p.product_code)
++                    );
++                    if (!isInInitialMap) {
+                     if (!initialProductLocations.has(p.product_code)) {
+                         initialProductLocations.set(p.product_code, new Set());
+                     }
+                     initialProductLocations.get(p.product_code).add(UNALLOCATED_ID);
++                    }
+                 }
+             });
+             initialMapState.forEach(s => {
+\ No newline at end of file
+@@ -3649,9 +4278,19 @@
+                     }
+                     initialProductLocations.get(pc).add(s.id);
+                 }
++                
++                // IMPORTANTE: Também capturar o segundo produto no estado inicial
++                const pc2 = s.dataset.productCode2;
++                if (pc2 && pc2 !== 'Vazio') {
++                    if (!initialProductLocations.has(pc2)) {
++                        initialProductLocations.set(pc2, new Set());
++                    }
++                    initialProductLocations.get(pc2).add(s.id);
++                }
+             });
+ 
+             // Popula estado atual - IMPORTANTE: um produto pode estar em múltiplos escaninhos
++            // NOVO: Suporta escaninhos com 2 produtos
+             currentMapState.forEach(s => {
+ 		// V2.6 - Ignora escaninhos de equipamentos removidos (do DOM)
+ 		const equip = document.getElementById(s.id) ? document.getElementById(s.id).closest('.equipamento') : null;
+\ No newline at end of file
+@@ -3662,9 +4301,21 @@
+                     if (!currentProductLocations.has(pc)) {
+                         currentProductLocations.set(pc, new Set());
+                     }
++                    // Adicionar location_id (sem sufixo, será tratado no backend)
+                     currentProductLocations.get(pc).add(s.id);
+                 }
++                
++                // Verificar se há segundo produto
++                const pc2 = s.dataset.productCode2;
++                if (pc2 && pc2 !== 'Vazio') {
++                    if (!currentProductLocations.has(pc2)) {
++                        currentProductLocations.set(pc2, new Set());
++                    }
++                    // Adicionar location_id com flag para segundo produto
++                    currentProductLocations.get(pc2).add(s.id);
++                }
+             });
++            // Adicionar produtos da prancheta (recolhidos) ao estado atual
+             collectedProducts.forEach(pd => {
+ 		if(pd.product_code && pd.product_code !== 'Vazio') {
+                     if (!currentProductLocations.has(pd.product_code)) {
+\ No newline at end of file
+@@ -3673,6 +4324,22 @@
+                     currentProductLocations.get(pd.product_code).add(PRANCHETA_ID);
+                 }
+             });
++            
++            // Adicionar produtos não alocados ao estado atual (se não estiverem em escaninhos)
++            unallocatedProductsMap.forEach(p => {
++                if (p.product_code && p.product_code !== 'Vazio') {
++                    // Verificar se este produto NÃO está em nenhum escaninho no estado atual
++                    const isInCurrentMap = currentMapState.some(s => 
++                        (s.dataset.productCode === p.product_code || s.dataset.productCode2 === p.product_code)
++                    );
++                    if (!isInCurrentMap) {
++                        if (!currentProductLocations.has(p.product_code)) {
++                            currentProductLocations.set(p.product_code, new Set());
++                        }
++                        currentProductLocations.get(p.product_code).add(UNALLOCATED_ID);
++                    }
++                }
++            });
+ 
+             const allProductCodes = new Set([...initialProductLocations.keys(), ...currentProductLocations.keys()]);
+ 
+\ No newline at end of file
+@@ -3685,11 +4352,29 @@
+ 		// Para cada localização atual, verificar se é diferente da inicial
+ 		// Se um produto estava em UNALLOCATED_ID e agora está em múltiplos escaninhos,
+ 		// criar um movimento para cada escaninho
++		// Verificar se há escaninhos com 2 produtos no estado atual
++		const escaninhosComDoisProdutos = new Map(); // Map<locationId, {product1: code, product2: code}>
++		currentMapState.forEach(s => {
++                    const pc1 = s.dataset.productCode;
++                    const pc2 = s.dataset.productCode2;
++                    if (pc1 && pc1 !== 'Vazio' && pc2 && pc2 !== 'Vazio') {
++                        escaninhosComDoisProdutos.set(s.id, { product1: pc1, product2: pc2 });
++                    }
++                });
++		
+ 		currentLocs.forEach(currentLoc => {
+                     // Verificar se esta localização atual é diferente de todas as iniciais
+                     const isNewLocation = !initialLocs.has(currentLoc);
+                     
+-                    if (isNewLocation && currentLoc !== PRANCHETA_ID) {
++                    // IMPORTANTE: Só criar movimento se:
++                    // 1. É uma nova localização (não estava no estado inicial)
++                    // 2. Não é PRANCHETA_ID (produtos na prancheta não são movimentos para salvar)
++                    // 3. Não é UNALLOCATED_ID se já estava em UNALLOCATED_ID (sem mudança real)
++                    if (isNewLocation && currentLoc !== PRANCHETA_ID && currentLoc !== UNALLOCATED_ID) {
++                        // Verificar se este location_id tem 2 produtos
++                        const doisProdutos = escaninhosComDoisProdutos.get(currentLoc);
++                        const isSecondProduct = doisProdutos && doisProdutos.product2 === productCode;
++                        
+                         // Encontrar a localização anterior mais apropriada
+                         // Se havia múltiplas localizações iniciais, usar UNALLOCATED_ID como padrão
+                         let locAnteriorId = UNALLOCATED_ID;
+\ No newline at end of file
+@@ -3700,16 +4385,20 @@
+                             locAnteriorId = Array.from(initialLocs)[0];
+                         }
+                         
++                        // Verificar se realmente houve mudança (não é o mesmo escaninho)
++                        if (locAnteriorId !== currentLoc) {
+                     const productInfo = allProductDataMap.get(productCode);
+                     if (productInfo) {
+ 			moves.push({
+                             productCode: productCode,
+-                                locAnteriorId: locAnteriorId,
++                            locAnteriorId: locAnteriorId,
+                             locNovoId: currentLoc,
+-                            productInfo: productInfo
++                            productInfo: productInfo,
++                            isSecondProduct: isSecondProduct // Flag para indicar que é segundo produto
+ 			});
+                     } else {
+ 			console.warn(`Dados não encontrados para o produto ${productCode} durante a comparação de estados.`);
++                            }
+                     }
+ 		}
+                 });
+\ No newline at end of file
+@@ -4666,6 +5355,12 @@
+             manageModeCreate.disabled = false;
+             labelManageCreate.classList.remove('disabled');
+             labelManageCreate.title = "Preencha o formulário em uma rua para criar";
++
++            if (manageModeEditType && labelManageEditType) {
++                manageModeEditType.disabled = false;
++                labelManageEditType.classList.remove('disabled');
++                labelManageEditType.title = "Clique no cabeçalho de um equipamento para alterar o tipo";
++            }
+ 
+             // Força o modo 'swap' como padrão ao entrar
+             manageModeSwap.checked = true;
+\ No newline at end of file
+@@ -4721,6 +5416,7 @@
+ 	if (mode === 'swap' && manageModeSwap.disabled) return;
+ 	if (mode === 'remove' && manageModeRemove.disabled) return;
+ 	if (mode === 'create' && manageModeCreate.disabled) return;
++	if (mode === 'edit-type' && manageModeEditType && manageModeEditType.disabled) return;
+ 
+ 	manageModeType = mode;
+ 
+\ No newline at end of file
+@@ -4739,6 +5435,8 @@
+             document.body.classList.add('remove-active');
+ 	} else if (mode === 'create') {
+             document.body.classList.add('create-active');
++        } else if (mode === 'edit-type') {
++            document.body.classList.add('edit-type-active');
+ 	}
+     }
+ 
+\ No newline at end of file

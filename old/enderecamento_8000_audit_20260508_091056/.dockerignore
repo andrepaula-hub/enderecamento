@@ -1,0 +1,18 @@
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+.DS_Store
+
+# Large/archived local data
+planilhas/arquivo/
+planilhas/atuais/
+ETL/
+archive/
+*.xlsx
+
+# Keep credentials mounted at runtime, not baked into image
+.credentials/
