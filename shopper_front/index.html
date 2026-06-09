@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Endereçamento — Shopper</title>
+  <link rel="stylesheet" href="/shopper-static/_ds/shopper-design-system-93bf5de4-604a-4bef-87d7-ff5f60287723/colors_and_type.css">
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; overflow: hidden; }
+    body { font-family: var(--font-sans); font-size: 13px; }
+
+    @keyframes dse-spin { to { transform: rotate(360deg); } }
+
+    /* ── Light theme (default) ── */
+    :root, [data-dse-theme="light"] {
+      --app-bg:             #ECEEF2;  /* neutral warm gray — não azulado */
+      --shopper-navy:       #002D62;
+
+      /* Config panel */
+      --cfg-surface:        #FFFFFF;
+      --cfg-border:         #DDE1E9;
+      --cfg-text:           #1A2535;
+      --cfg-text-muted:     #6B7A90;
+      --cfg-input-bg:       #F7F8FA;
+
+      /* Map — warehouse neutral, sem azul genérico */
+      --map-bg:             #E2E5EA;
+      --map-equip-bg:       #FFFFFF;
+      --map-equip-shadow:   0 1px 4px rgba(0,45,98,0.07);
+      --map-equip-header:   #F4F5F8;
+      /* equipment type header tints — using Shopper sub-brand palette */
+      --map-geladeira-hdr:  #EBF0FB;  /* Programada blue tint */
+      --map-gerador-hdr:    #FEF8E8;  /* Única orange tint */
+      --map-freezer-hdr:    #E8F8FB;
+      --map-quimico-hdr:    #FBE8EA;  /* Now red tint */
+      --map-text:           #2A3548;
+      --map-text-muted:     #8B97AA;
+
+      /* Prancheta */
+      --pran-bg:            #F7F8FA;
+      --pran-border:        #DDE1E9;
+      --pran-text:          #1A2535;
+      --pran-muted:         #8B97AA;
+      --pran-input:         #FFFFFF;
+      --pran-hover:         rgba(0,45,98,0.04);
+
+      /* Panels */
+      --panel-bg:           #FFFFFF;
+      --panel-border:       #DDE1E9;
+      --panel-text:         #1A2535;
+      --panel-muted:        #8B97AA;
+      --panel-surface:      #F7F8FA;
+
+      /* Dropdowns */
+      --dropdown-bg:        #FFFFFF;
+      --dropdown-border:    #DDE1E9;
+      --dropdown-text:      #1A2535;
+      --dropdown-hover:     #F0F2F6;
+    }
+
+    /* ── Dark theme ── */
+    [data-dse-theme="dark"] {
+      --app-bg:             #0D1117;
+
+      /* Config panel */
+      --cfg-surface:        #161B22;
+      --cfg-border:         #21262D;
+      --cfg-text:           #E6EDF3;
+      --cfg-text-muted:     #8B949E;
+      --cfg-input-bg:       #0D1117;
+
+      /* Map */
+      --map-bg:             #080D14;
+      --map-equip-bg:       #161B22;
+      --map-equip-shadow:   0 1px 4px rgba(0,0,0,0.4);
+      --map-equip-header:   #1C2330;
+      --map-geladeira-hdr:  #0F1825;
+      --map-gerador-hdr:    #1A1500;
+      --map-freezer-hdr:    #0A1820;
+      --map-quimico-hdr:    #1A0A0A;
+      --map-text:           #CDD9E5;
+      --map-text-muted:     #4D5566;
+
+      /* Prancheta */
+      --pran-bg:            #0D1117;
+      --pran-border:        #21262D;
+      --pran-text:          #CDD9E5;
+      --pran-muted:         #4D5566;
+      --pran-input:         #161B22;
+      --pran-hover:         rgba(255,255,255,0.04);
+
+      /* Panels */
+      --panel-bg:           #161B22;
+      --panel-border:       #21262D;
+      --panel-text:         #CDD9E5;
+      --panel-muted:        #4D5566;
+      --panel-surface:      #0D1117;
+
+      /* Dropdowns */
+      --dropdown-bg:        #1C2333;
+      --dropdown-border:    #2D3748;
+      --dropdown-text:      #CDD9E5;
+      --dropdown-hover:     rgba(255,255,255,0.06);
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.5); }
+
+    /* Input focus */
+    input:focus, select:focus { outline: 1px solid var(--shopper-green) !important; }
+
+    /* Checkbox */
+    input[type="checkbox"] { accent-color: var(--shopper-green); }
+
+    /* Date input */
+    input[type="date"] { color-scheme: light; }
+    [data-dse-theme="dark"] input[type="date"] { color-scheme: dark; }
+
+    select { appearance: auto; }
+    [data-dse-theme="dark"] select { color-scheme: dark; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Data (no JSX) -->
+  <script src="/shopper-static/dse-data.js"></script>
+
+  <!-- Components (JSX via Babel) -->
+  <script type="text/babel" src="/shopper-static/tweaks-panel.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-config.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-escaninho.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-map.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-prancheta.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-panels.jsx"></script>
+  <script type="text/babel" src="/shopper-static/dse-app.jsx"></script>
+</body>
+</html>

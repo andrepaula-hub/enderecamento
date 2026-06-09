@@ -1,9 +1,9 @@
 services:
   enderecamento:
     build: .
-    container_name: enderecamento-local
+    container_name: enderecamento-shopper-local
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       MB_USER: ${MB_USER:-}
       MB_PASS: ${MB_PASS:-}

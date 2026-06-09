@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 
@@ -87,6 +88,7 @@ from core.agent_tools import (
 )
 
 APP_ROOT = Path(__file__).resolve().parent
+SHOPPER_FRONT_ROOT = APP_ROOT / "shopper_front"
 DEFAULT_XLSX = APP_ROOT / "ETL" / "ENDERECAMENTO_DARK_PINHEIROS (teste) (2).xlsx"
 DATA_XLSX_ENV = os.environ.get("ENDERECAMENTO_XLSX")
 DATA_XLSX_PATH = Path(DATA_XLSX_ENV).resolve() if DATA_XLSX_ENV else None
@@ -99,6 +101,7 @@ AGENT_MASTER_SHEET_LINK = (
 ).strip()
 
 app = FastAPI(title="Enderecamento Local")
+app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
 
 
 @app.exception_handler(Exception)
@@ -174,7 +177,7 @@ def _require_active_sheet() -> dict[str, Any] | None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(
-        APP_ROOT / "Dahsboard.html",
+        SHOPPER_FRONT_ROOT / "index.html",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
