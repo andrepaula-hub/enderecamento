@@ -35,13 +35,13 @@ function ProductItem({ product, isSelected, onClick, onHover, onHoverEnd }) {
   const gs = GROUP_STYLE[product.grupo] || GROUP_STYLE.Neutro;
   const cc = CURVA_COLOR[product.curva] || '#94A3B8';
   const flags = [];
-  if (product.quimico) flags.push({ sym:'⚠', color:'#EF4444', title:'Químico' });
+  if (product.quimico) flags.push({ type:'quimico', color:'#EF4444', title:'Químico' });
   else {
-    if (product.pesado) flags.push({ sym:'⬤', color:'#92400E', title:'Pesado' });
-    if (product.alto)   flags.push({ sym:'↑', color:'#F59E0B', title:'Alto' });
+    if (product.pesado) flags.push({ type:'pesado', color:'#DC2626', title:'Pesado (>5kg)' });
+    if (product.alto)   flags.push({ type:'alto',   color:'#F59E0B', title:'Alto (>30cm)' });
   }
-  if (product.pequeno)          flags.push({ sym:'↓', color:'#0891B2', title:'Pequeno' });
-  if (product.degelo === 'NÃO') flags.push({ sym:'❄', color:'#38BDF8', title:'Degelo NÃO' });
+  if (product.pequeno)          flags.push({ type:'pequeno', color:'#0891B2', title:'Pequeno/compacto' });
+  if (product.degelo === 'NÃO') flags.push({ type:'degelo',  color:'#38BDF8', title:'Degelo NÃO' });
 
   return (
     <div onClick={()=>onClick(product)}
@@ -70,13 +70,53 @@ function ProductItem({ product, isSelected, onClick, onHover, onHoverEnd }) {
       </div>
       {/* Flags */}
       <div style={{ display:'flex', gap:3, flexShrink:0 }}>
-        {flags.slice(0,3).map((f,i)=>(
-          <span key={i} title={f.title} style={{ fontSize:10, color:f.color, fontWeight:800 }}>{f.sym}</span>
-        ))}
+        {flags.slice(0,3).map((f,i)=>(<PranchetaFlag key={i} flag={f} />))}
       </div>
       <span style={{ fontSize:9, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)', flexShrink:0 }}>×{product.escsNec}</span>
     </div>
   );
+}
+
+
+// ── PranchetaFlag ─────────────────────────────────────────────────────────────
+function PranchetaFlag({ flag }) {
+  const { type, color, title } = flag;
+  if (type==='pesado') return (
+    <span title={title} style={{ color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width="13" height="10" viewBox="0 0 12 10" fill="currentColor">
+        <rect x="2" y="4" width="8" height="2" rx="0.5"/>
+        <rect x="0.5" y="1.5" width="2.5" height="7" rx="1.2"/>
+        <rect x="9" y="1.5" width="2.5" height="7" rx="1.2"/>
+      </svg>
+    </span>
+  );
+  if (type==='alto') return (
+    <span title={title} style={{ color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width="14" height="9" viewBox="0 0 13 8" fill="none">
+        <rect x="0.5" y="2" width="12" height="4" rx="0.8" fill="currentColor" opacity="0.2"/>
+        <rect x="0.5" y="2" width="12" height="4" rx="0.8" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="2.5" y1="2" x2="2.5" y2="4" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="4.5" y1="2" x2="4.5" y2="5.5" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="6.5" y1="2" x2="6.5" y2="4" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="8.5" y1="2" x2="8.5" y2="5.5" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="10.5" y1="2" x2="10.5" y2="4" stroke="currentColor" strokeWidth="0.8"/>
+      </svg>
+    </span>
+  );
+  if (type==='pequeno') return (
+    <span title={title} style={{ color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width="12" height="8" viewBox="0 0 11 7" fill="none">
+        <rect x="0.5" y="1.5" width="10" height="4" rx="0.8" fill="currentColor" opacity="0.2"/>
+        <rect x="0.5" y="1.5" width="10" height="4" rx="0.8" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="2" y1="1.5" x2="2" y2="3.5" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="4" y1="1.5" x2="4" y2="4.5" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="6" y1="1.5" x2="6" y2="3.5" stroke="currentColor" strokeWidth="0.8"/>
+        <line x1="8" y1="1.5" x2="8" y2="4.5" stroke="currentColor" strokeWidth="0.8"/>
+      </svg>
+    </span>
+  );
+  const syms = { quimico:'⚠', degelo:'❄' };
+  return <span title={title} style={{ fontSize:10, color, fontWeight:800, flexShrink:0 }}>{syms[type]||'?'}</span>;
 }
 
 // ── Quick-collect button ──────────────────────────────────────────────────────
@@ -102,6 +142,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   const [filterCurvas, setFC]   = useState([]);
   const [filterTipos, setFT]    = useState([]); // 'alto' | 'pesado' | 'pequeno' | 'fragil'
   const [subSearch, setSubSearch]= useState('');
+  const [subOpen, setSubOpen]   = useState(false);
   const [filterSubs, setFSubs]  = useState([]);
   const [showFilters, setShowF] = useState(false);
   const [showQuick, setShowQ]   = useState(false);
@@ -235,13 +276,36 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
           {/* Subcategoria */}
           <div>
             <div style={filterLabel}>Subcategoria</div>
-            <input value={subSearch} onChange={e=>setSubSearch(e.target.value)} placeholder="Buscar subcategoria…"
-              style={{ width:'100%', padding:'4px 8px', fontSize:10, background:'var(--pran-input)', border:'1px solid var(--pran-border)', borderRadius:4, color:'var(--pran-text)', outline:'none', marginBottom:5, fontFamily:'var(--font-sans)' }} />
-            <div style={{ display:'flex', flexWrap:'wrap', gap:3, maxHeight:72, overflowY:'auto' }}>
-              {filteredSubs.map(s=>(
-                <Chip key={s} label={s} active={filterSubs.includes(s)} onClick={()=>toggleSub(s)} />
-              ))}
-              {filterSubs.length>0 && <Chip label="✕ Limpar" active={false} onClick={()=>setFSubs([])} />}
+            {filterSubs.length > 0 && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:3, marginBottom:5 }}>
+                {filterSubs.map(s=>(
+                  <div key={s} style={{ display:'flex', alignItems:'center', gap:2, padding:'2px 6px 2px 8px', background:'rgba(13,171,119,0.12)', border:'1px solid rgba(13,171,119,0.35)', borderRadius:10, fontSize:9, fontWeight:700, color:'var(--shopper-green)', fontFamily:'var(--font-sans)' }}>
+                    {s}
+                    <button onClick={()=>toggleSub(s)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(61,212,166,0.65)', fontSize:11, lineHeight:1, padding:'0 0 0 2px', display:'flex' }}>×</button>
+                  </div>
+                ))}
+                <button onClick={()=>setFSubs([])} style={{ fontSize:9, color:'var(--pran-muted)', background:'none', border:'none', cursor:'pointer', padding:'2px 4px', fontFamily:'var(--font-sans)' }}>Limpar ✕</button>
+              </div>
+            )}
+            <div style={{ position:'relative' }}>
+              <input value={subSearch}
+                onChange={e=>{ setSubSearch(e.target.value); setSubOpen(true); }}
+                onFocus={()=>setSubOpen(true)}
+                onBlur={()=>setTimeout(()=>setSubOpen(false),150)}
+                placeholder={filterSubs.length>0 ? filterSubs.length+' selecionada(s) — buscar mais…' : 'Buscar subcategoria…'}
+                style={{ width:'100%', padding:'4px 8px', fontSize:10, background:'var(--pran-input)', border:'1px solid var(--pran-border)', borderRadius:4, color:'var(--pran-text)', outline:'none', fontFamily:'var(--font-sans)', boxSizing:'border-box' }} />
+              {subOpen && filteredSubs.filter(s=>!filterSubs.includes(s)).length > 0 && (
+                <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:300, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:5, boxShadow:'0 8px 24px rgba(0,0,0,0.25)', maxHeight:150, overflowY:'auto' }}>
+                  {filteredSubs.filter(s=>!filterSubs.includes(s)).map(s=>(
+                    <button key={s} onMouseDown={()=>{ toggleSub(s); setSubSearch(''); }}
+                      style={{ display:'block', width:'100%', padding:'5px 10px', border:'none', cursor:'pointer', textAlign:'left', fontSize:10, fontFamily:'var(--font-sans)', background:'transparent', color:'var(--dropdown-text)' }}
+                      onMouseEnter={e=>e.currentTarget.style.background='var(--dropdown-hover)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

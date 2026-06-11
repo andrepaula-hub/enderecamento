@@ -6,7 +6,7 @@ const CURVA_COLOR = { A:'#0DAB77', B:'#3B82F6', C:'#F59E0B', D:'#F97316', E:'#EF
 
 const GROUP_STYLE = {
   FLV:        { bg:'rgba(13,171,119,0.13)',  badge:'rgba(13,171,119,0.22)',  text:'#0DAB77', label:'FLV' },
-  Alimento:   { bg:'rgba(245,158,11,0.10)',  badge:'rgba(245,158,11,0.22)',  text:'#D97706', label:'ALM' },
+  Alimento:   { bg:'rgba(152,108,60,0.09)',  badge:'rgba(152,108,60,0.20)',  text:'#8B6332', label:'ALM' },
   Bebidas:    { bg:'rgba(59,130,246,0.11)',   badge:'rgba(59,130,246,0.22)',  text:'#2563EB', label:'BEB' },
   Perfumaria: { bg:'rgba(236,72,153,0.10)',  badge:'rgba(236,72,153,0.22)',  text:'#BE185D', label:'PRF' },
   Químico:    { bg:'rgba(239,68,68,0.13)',   badge:'rgba(239,68,68,0.22)',   text:'#DC2626', label:'QMC' },
@@ -21,7 +21,7 @@ const GROUP_STYLE = {
 const FLAG_DEF = {
   quimico:  { sym:'⚠',  color:'#EF4444', title:'Produto Químico — restrição crítica' },
   pesado:   { sym:'⬤',  color:'#92400E', title:'Pesado (>5 kg)' },
-  alto:     { sym:'↑',  color:'#F59E0B', title:'Alto (>30 cm)' },
+  alto:     { sym:'↑',  color:'#EF4444', title:'Alto (>30 cm)' },
   pequeno:  { sym:'↓',  color:'#0891B2', title:'Item pequeno / compacto' },
   fragil:   { sym:'◇',  color:'#A855F7', title:'Frágil' },
   degelo:   { sym:'❄',  color:'#38BDF8', title:'Degelo = NÃO' },
@@ -33,6 +33,42 @@ const FLAG_DEF = {
 function FlagBadge({ type, size = 9 }) {
   const d = FLAG_DEF[type];
   if (!d) return null;
+  if (type === 'pesado') return (
+    <span title={d.title} style={{ color:d.color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width={size} height={size+2} viewBox="0 0 11 13" fill="currentColor">
+        {/* Collar disc at top — like the bag-weight reference */}
+        <circle cx="5.5" cy="2.1" r="2.0"/>
+        {/* Body: narrow at collar top, sweeps wide at bottom */}
+        <path d="M 2.1 4.0 L 0.6 11.5 Q 0.5 12.5 1.6 12.5 L 9.4 12.5 Q 10.5 12.5 10.4 11.5 L 8.9 4.0 Z"/>
+      </svg>
+    </span>
+  );
+  if (type === 'alto') return (
+    <span title={d.title} style={{ color:d.color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width={size-1} height={size+5} viewBox="0 0 8 15" fill="none">
+        {/* Vertical ruler — de pé */}
+        <rect x="1.5" y="0.5" width="5" height="14" rx="0.9" fill="currentColor" opacity="0.2"/>
+        <rect x="1.5" y="0.5" width="5" height="14" rx="0.9" stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="3.5"  x2="4.8" y2="3.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="6.5"  x2="3.5" y2="6.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="9.5"  x2="4.8" y2="9.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="12.5" x2="3.5" y2="12.5" stroke="currentColor" strokeWidth="0.9"/>
+      </svg>
+    </span>
+  );
+  if (type === 'pequeno') return (
+    <span title={d.title} style={{ color:d.color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
+      <svg width={size-1} height={size+5} viewBox="0 0 8 15" fill="none">
+        {/* Vertical ruler — de pé, mesmo tamanho do alto */}
+        <rect x="1.5" y="0.5" width="5" height="14" rx="0.9" fill="currentColor" opacity="0.2"/>
+        <rect x="1.5" y="0.5" width="5" height="14" rx="0.9" stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="3.5"  x2="4.8" y2="3.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="6.5"  x2="3.5" y2="6.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="9.5"  x2="4.8" y2="9.5"  stroke="currentColor" strokeWidth="0.9"/>
+        <line x1="1.5" y1="12.5" x2="3.5" y2="12.5" stroke="currentColor" strokeWidth="0.9"/>
+      </svg>
+    </span>
+  );
   return (
     <span title={d.title} style={{ fontSize: size, color: d.color, lineHeight:1, fontWeight:800, flexShrink:0 }}>
       {d.sym}
@@ -75,7 +111,8 @@ function ProductHalf({ product, compact }) {
 }
 
 // ── Main Escaninho cell ──────────────────────────────────────────────────────
-function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
+function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd, isGroupHovered }) {
+  const [hov, setHov] = useState(false);
   const gs1 = product1 ? (GROUP_STYLE[product1.grupo] || GROUP_STYLE.Neutro) : null;
   const gs2 = product2 ? (GROUP_STYLE[product2.grupo] || GROUP_STYLE.Neutro) : null;
   const cc1 = product1 ? (CURVA_COLOR[product1.curva] || '#94A3B8') : null;
@@ -95,7 +132,7 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   const baseStyle = {
     flex: 1, height: 62, borderRadius: 4, position:'relative', overflow:'hidden', flexShrink:0, minWidth:0,
     cursor: 'pointer', userSelect:'none',
-    transition: 'box-shadow 0.12s, border-color 0.12s',
+    transition: 'box-shadow 0.12s, border-color 0.12s, transform 0.1s',
   };
 
   if (isEmpty || !product1) {
@@ -106,12 +143,13 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   }
 
   if (isDual) {
-    const dualColor = '#F59C00';
+    const dualColor = '#EF4444';
     return (
       <div style={{ ...baseStyle, background: gs1.bg,
           border: isChemical ? chemBorder : `2px solid ${dualColor}`,
-          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : `0 0 6px rgba(245,156,0,0.40)` }}
-        onClick={onClick} onMouseEnter={() => onHover && onHover(product1, product2)} onMouseLeave={onHoverEnd}>
+          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : (hov||isGroupHovered) ? `0 4px 14px rgba(239,68,68,0.60)` : `0 0 6px rgba(239,68,68,0.40)`,
+          transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
+        onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
         {/* Left curva border */}
         <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
         {/* Split layout */}
@@ -137,9 +175,10 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   return (
     <div style={{ ...baseStyle,
         background: gs1.bg,
-        border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : '1px solid transparent'),
-        boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : 'none' }}
-      onClick={onClick} onMouseEnter={() => onHover && onHover(product1, null)} onMouseLeave={onHoverEnd}>
+        border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : (hov||isGroupHovered) ? `1px solid ${cc1}60` : '1px solid transparent'),
+        boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : (hov||isGroupHovered) ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
+        transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
+      onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, null); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
       {/* Curva border left */}
       <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
       <div style={{ paddingLeft:7, paddingRight:4, paddingTop:4, paddingBottom:3, height:'100%', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
@@ -248,4 +287,4 @@ function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMou
 // Export color helpers for map use
 window.DSE_CURVA_COLOR = CURVA_COLOR;
 window.DSE_GROUP_STYLE = GROUP_STYLE;
-Object.assign(window, { DSEEscaninho, DSEProductTooltip, DSE_getFlags: getFlags });
+Object.assign(window, { DSEEscaninho, DSEProductTooltip, DSE_getFlags: getFlags, DSEFlagBadge: FlagBadge, DSE_FLAG_DEF: FLAG_DEF });

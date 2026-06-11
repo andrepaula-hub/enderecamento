@@ -128,6 +128,77 @@ function SearchBar({ allocations, onHighlight }) {
   );
 }
 
+const ALL_SUBCATS = [...new Set(PRODUCTS.map(p => p.sub))].sort();
+
+function CategoryFilter({ subcatFilters, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapRef = useRef(null);
+
+  const filtered = useMemo(() => {
+    if (!search) return ALL_SUBCATS;
+    const q = search.toLowerCase();
+    return ALL_SUBCATS.filter((sub) => sub.toLowerCase().includes(q));
+  }, [search]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggle = (sub) => {
+    if (subcatFilters.includes(sub)) onChange(subcatFilters.filter((value) => value !== sub));
+    else onChange([...subcatFilters, sub]);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ display:'flex', alignItems:'center', gap:4, position:'relative' }}>
+      {subcatFilters.map((sub) => (
+        <div key={sub} style={{ display:'flex', alignItems:'center', gap:3, padding:'2px 6px 2px 8px', background:'rgba(13,171,119,0.18)', border:'1px solid rgba(13,171,119,0.4)', borderRadius:10, fontSize:9, fontWeight:700, color:'#3DD4A6', whiteSpace:'nowrap', fontFamily:'var(--font-sans)' }}>
+          {sub}
+          <button onClick={() => toggle(sub)} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(61,212,166,0.7)', fontSize:10, lineHeight:1, padding:0, display:'flex' }}>×</button>
+        </div>
+      ))}
+      <button onClick={() => { setOpen((value) => !value); setSearch(''); }} title="Filtrar por subcategoria" style={{ width:26, height:26, display:'flex', alignItems:'center', justifyContent:'center', background:subcatFilters.length > 0 ? 'rgba(13,171,119,0.22)' : 'rgba(255,255,255,0.08)', border:subcatFilters.length > 0 ? '1px solid rgba(13,171,119,0.5)' : '1px solid rgba(255,255,255,0.15)', borderRadius:4, cursor:'pointer', color:subcatFilters.length > 0 ? '#3DD4A6' : 'rgba(255,255,255,0.55)' }}>
+        <svg width="13" height="13" viewBox="0 0 12 12" fill="none">
+          <path d="M1 2h10l-4 5v3l-2-1V7L1 2z" fill="currentColor" />
+        </svg>
+      </button>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:500, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:8, boxShadow:'0 12px 36px rgba(0,0,0,0.32)', minWidth:210, overflow:'hidden' }}>
+          <div style={{ padding:'8px 10px 4px' }}>
+            <input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar subcategoria…" style={{ width:'100%', boxSizing:'border-box', padding:'5px 8px', fontSize:11, background:'rgba(255,255,255,0.06)', border:'1px solid var(--dropdown-border)', borderRadius:5, color:'var(--dropdown-text)', outline:'none', fontFamily:'var(--font-sans)' }} />
+          </div>
+          <div style={{ maxHeight:220, overflowY:'auto', padding:'4px 0 6px' }}>
+            {filtered.length === 0 && <div style={{ padding:'8px 12px', fontSize:10, color:'var(--map-text-muted)' }}>Nenhum resultado</div>}
+            {filtered.map((sub) => {
+              const selected = subcatFilters.includes(sub);
+              return (
+                <button key={sub} onClick={() => toggle(sub)} style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'6px 12px', border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:selected ? 'rgba(13,171,119,0.12)' : 'transparent' }} onMouseEnter={(event) => { if (!selected) event.currentTarget.style.background = 'var(--dropdown-hover)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = selected ? 'rgba(13,171,119,0.12)' : 'transparent'; }}>
+                  <div style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:selected ? 'none' : '1px solid var(--dropdown-border)', background:selected ? '#0DAB77' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {selected && <span style={{ fontSize:9, color:'#fff', lineHeight:1 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize:11, color:selected ? 'var(--shopper-green)' : 'var(--dropdown-text)', fontWeight:selected ? 700 : 400 }}>{sub}</span>
+                </button>
+              );
+            })}
+          </div>
+          {subcatFilters.length > 0 && (
+            <div style={{ borderTop:'1px solid var(--dropdown-border)', padding:'6px 10px' }}>
+              <button onClick={() => { onChange([]); setOpen(false); }} style={{ width:'100%', padding:'4px', fontSize:9, fontWeight:700, background:'transparent', border:'1px solid var(--dropdown-border)', borderRadius:4, cursor:'pointer', color:'var(--map-text-muted)', fontFamily:'var(--font-sans)' }}>
+                Limpar filtros de categoria
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Reducer ───────────────────────────────────────────────────────────────────
 const initMapStructure = JSON.parse(JSON.stringify(STREETS_STRUCTURE));
 const initState = {
@@ -140,6 +211,7 @@ const initState = {
   pendingConfirm:null,
   swapSource:null,
   highlightProductId:null,
+  subcatFilters:[],
 };
 
 function commitAllocs(state, newAllocs) {
@@ -242,6 +314,7 @@ function reducer(state, action) {
     case 'SELECT_PRODUCT':  return {...state, selectedProduct:action.productId};
     case 'TOGGLE_2A_LEVA':  return {...state, mode2aLeva:!state.mode2aLeva};
     case 'SET_SEARCH':      return {...state, searchQuery:action.query};
+    case 'SET_SUBCAT_FILTERS': return {...state, subcatFilters:action.filters};
     case 'SET_CONFIRM':     return {...state, pendingConfirm:action.dialog};
     case 'CLEAR_CONFIRM':   return {...state, pendingConfirm:null};
     case 'TOGGLE_EQUIP':    return {...state, equipCollapsed:{...state.equipCollapsed,[action.id]:!state.equipCollapsed[action.id]}};
@@ -255,7 +328,34 @@ function reducer(state, action) {
     case 'SET_SWAP_SOURCE':  return {...state, swapSource:action.equipId};
     case 'CLEAR_SWAP_SOURCE':return {...state, swapSource:null};
     case 'SET_HIGHLIGHT':    return {...state, highlightProductId:action.productId};
+    case 'HIGHLIGHT_AND_NAVIGATE': {
+      const { productId, locs } = action;
+      const equipCollapsed = { ...state.equipCollapsed };
+      const streetCollapsed = { ...state.streetCollapsed };
+      (locs || []).forEach((loc) => {
+        const parts = String(loc).split('-');
+        const streetId = parts[0];
+        const equipId = parts.slice(0, 2).join('-');
+        delete equipCollapsed[equipId];
+        delete streetCollapsed[streetId];
+      });
+      return { ...state, highlightProductId:productId, equipCollapsed, streetCollapsed };
+    }
     case 'CLEAR_HIGHLIGHT':  return {...state, highlightProductId:null};
+    case 'COLLAPSE_STREET_EQUIPS': {
+      const street = state.mapStructure.find((item) => item.id === action.streetId);
+      if (!street) return state;
+      const equipCollapsed = { ...state.equipCollapsed };
+      street.equipment.forEach((eq) => { equipCollapsed[eq.id] = true; });
+      return { ...state, equipCollapsed };
+    }
+    case 'EXPAND_STREET_EQUIPS': {
+      const street = state.mapStructure.find((item) => item.id === action.streetId);
+      if (!street) return state;
+      const equipCollapsed = { ...state.equipCollapsed };
+      street.equipment.forEach((eq) => { delete equipCollapsed[eq.id]; });
+      return { ...state, equipCollapsed };
+    }
 
     case 'ALLOCATE': {
       const {escaninhoId,productId,slot}=action;
@@ -538,7 +638,9 @@ function Toolbar({ state, dispatch, onHighlight, onSave }) {
       </div>
       <div style={{ flex:1 }} />
       {isMap&&(<>
-        <SearchBar allocations={state.allocations} onHighlight={(id,locs)=>dispatch({type:'SET_HIGHLIGHT',productId:id})} />
+        <CategoryFilter subcatFilters={state.subcatFilters} onChange={(filters)=>dispatch({type:'SET_SUBCAT_FILTERS',filters})} />
+        <Sep/>
+        <SearchBar allocations={state.allocations} onHighlight={(id,locs)=>dispatch({type:'HIGHLIGHT_AND_NAVIGATE',productId:id,locs})} />
         <Sep/>
         <TBtn icon="↩" onClick={()=>dispatch({type:'UNDO'})} disabled={!canUndo} title="Desfazer (Ctrl+Z)"/>
         <TBtn icon="↪" onClick={()=>dispatch({type:'REDO'})}  disabled={!canRedo} title="Refazer (Ctrl+Y)"/>
@@ -579,6 +681,11 @@ function App() {
       dispatch({ type:'OPEN_MAP' });
     }
   }, []);
+  useEffect(() => {
+    if (!state.highlightProductId) return undefined;
+    const timer = window.setTimeout(() => dispatch({ type:'CLEAR_HIGHLIGHT' }), 4000);
+    return () => window.clearTimeout(timer);
+  }, [state.highlightProductId]);
 
   useEffect(()=>{
     const h=e=>{
@@ -656,6 +763,7 @@ function App() {
             colWidth={tweaks.colWidth} searchQuery={state.searchQuery} dispatch={dispatch}
             swapSource={state.swapSource} onStartSwap={handleStartSwap} onCompleteSwap={handleCompleteSwap}
             onRecolherRua={handleRecolherRua} highlightProductId={state.highlightProductId}
+            subcatFilters={state.subcatFilters}
           />
 
           {state.pranchetaOpen&&(

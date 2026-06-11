@@ -14,6 +14,10 @@
     body { font-family: var(--font-sans); font-size: 13px; }
 
     @keyframes dse-spin { to { transform: rotate(360deg); } }
+    @keyframes dse-highlight-pulse {
+      0%, 100% { outline-color: #EF4444; }
+      50% { outline-color: rgba(239,68,68,0.18); }
+    }
 
     /* ── Light theme (default) ── */
     :root, [data-dse-theme="light"] {

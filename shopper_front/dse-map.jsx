@@ -13,7 +13,7 @@ const EQUIP_CFG = {
   geladeira_alta:       { label:'Gel. Alta',    short:'GDA', color:'#1A4899', borderColor:'#225CB3', headerBgL:'#E6EDF9', headerBgD:'#080F22' },
   geladeira_gerador:    { label:'Gel. Degelo',  short:'GDG', color:'#B87200', borderColor:'#F59C00', headerBgL:'#FEF8E8', headerBgD:'#1C1200' },
   freezer:              { label:'Freezer',      short:'FRZ', color:'#1549C2', borderColor:'#2563EB', headerBgL:'#E0EAFF', headerBgD:'#070E28' },
-  quimico:              { label:'Zona Química', short:'QMC', color:'#9E1028', borderColor:'#C41230', headerBgL:'#FBE8EA', headerBgD:'#1A0508' },
+  quimico:              { label:'Zona Química', short:'QMC', color:'#DC2626', borderColor:'#EF4444', headerBgL:'#FFF2F2', headerBgD:'#1A0000' },
   perfumaria:           { label:'Perfumaria',   short:'PRF', color:'#A8155A', borderColor:'#F2749E', headerBgL:'#FBE9F3', headerBgD:'#1A0512' },
 };
 
@@ -46,7 +46,7 @@ function FillBar({ filled, total }) {
 }
 
 // ── Equipment ⋮ menu ──────────────────────────────────────────────────────────
-function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap }) {
+function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
   const [mode, setMode] = useState(null);
   const [renameVal, setRenameVal] = useState(eq.id);
   const menuRef = useRef(null);
@@ -69,7 +69,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap }) {
   );
 
   return (
-    <div ref={menuRef} onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'100%', right:0, zIndex:200, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:4, minWidth:196, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
+    <div ref={menuRef} onClick={e=>e.stopPropagation()} style={{ position:'fixed', left:position?.x||0, top:position?.y||0, zIndex:500, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:4, minWidth:196, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
       {mode==='type' && (<>
         <div style={{ padding:'5px 10px 3px', fontSize:9, fontWeight:700, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>Alterar tipo</div>
         {ALL_TYPES.map(t=>(
@@ -121,16 +121,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap }) {
         {item('Renomear equipamento',()=>{setRenameVal(eq.id);setMode('rename');},{icon:'✎'})}
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Trocar conteúdo com…',()=>{onStartSwap(eq.id);onClose();},{icon:'⇄'})}
-        <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
-        {item('+ Adicionar após',()=>{
-          dispatch({type:'SET_CONFIRM',dialog:{
-            title:`Novo equipamento após ${eq.id}`,
-            message:`Adiciona uma nova <strong>Prateleira</strong> após <strong>${eq.id}</strong>. O tipo pode ser alterado depois pelo menu ⋮ do equipamento.`,
-            confirmLabel:'Adicionar',
-            onConfirm:()=>dispatch({type:'ADD_EQUIP',streetId,afterEquipId:eq.id}),
-          }});
-          onClose();
-        },{icon:'+'})}
+
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Remover equipamento',()=>setMode('confirmRemove'),{icon:'✕',danger:true})}
       </>)}
@@ -139,14 +130,16 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId }) {
+function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], hoveredProductId, escW }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({x:0,y:0});
+  const menuBtnRef = useRef(null);
   const [hovHeader, setHovHeader] = useState(false);
   const cfg = EQUIP_CFG[eq.tipo]||EQUIP_CFG.prateleira;
   const isCard175 = !!eq.card175Only;
   const isDark = document.documentElement.getAttribute('data-dse-theme')==='dark';
   const hdrBg = isCard175
-    ? (isDark ? '#1C1200' : '#FFFBEB')
+    ? (isDark ? '#1A0508' : '#FBE8EA')
     : (isDark ? cfg.headerBgD : cfg.headerBgL);
 
   const stats = useMemo(()=>{
@@ -159,10 +152,9 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
 
   const isSwapSource   = swapSource === eq.id;
   const isSwapTarget   = swapSource && swapSource !== eq.id;
-  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (isCard175 ? '#D97706' : cfg.borderColor));
+  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (isCard175 ? '#C41230' : cfg.borderColor));
 
-  const labelW=24, rowPad=8, gap=3;
-  const escW = Math.floor(((colWidth - labelW - rowPad*2 - gap) - gap*(eq.escsPerNivel-1)) / eq.escsPerNivel);
+  const labelW=24, gap=3; // escW is now passed as prop (standardized to geladeira 5-slot size)
 
   const handleHeaderClick = () => {
     if (isSwapTarget) { onCompleteSwap(eq.id); return; }
@@ -170,7 +162,7 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
   };
 
   return (
-    <div style={{ borderLeft:`4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 1px #D97706, 0 2px 10px rgba(217,119,6,0.18)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
+    <div style={{ borderLeft:`4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
       <div style={{ background:hdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
         onClick={handleHeaderClick}
         onMouseEnter={()=>setHovHeader(true)}
@@ -190,7 +182,7 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
         <span style={{ fontSize:10, fontWeight:800, color:cfg.color, fontFamily:'var(--font-numeric)', letterSpacing:'0.05em', flexShrink:0 }}>{eq.id}</span>
         <span style={{ fontSize:8, fontWeight:700, color:cfg.color, background:`${cfg.borderColor}18`, padding:'1px 5px', borderRadius:10, flexShrink:0, lineHeight:1.8 }}>{cfg.label}</span>
         {isCard175 && (
-          <span title="Equipamento presente apenas no Card 175" style={{ fontSize:7, fontWeight:800, color:'#D97706', background:'rgba(217,119,6,0.18)', border:'1px solid rgba(217,119,6,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C175</span>
+          <span title="Equipamento presente apenas no Card 175" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C175</span>
         )}
 
         {/* Swap indicator */}
@@ -203,11 +195,24 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
 
         {(hovHeader||menuOpen) && (
           <div style={{ position:'relative', flexShrink:0, marginLeft:2 }} onClick={e=>e.stopPropagation()}>
-            <button onClick={e=>{e.stopPropagation();setMenuOpen(v=>!v);}}
+            <button ref={menuBtnRef} onClick={e=>{
+              e.stopPropagation();
+              if (!menuOpen && menuBtnRef.current) {
+                const r=menuBtnRef.current.getBoundingClientRect();
+                const MW=200, MH=320, vh=window.innerHeight;
+                const yB=r.bottom+4;
+                const yA=r.top-MH-4;
+                setMenuPos({
+                  x: Math.max(8, Math.min(r.right-MW, window.innerWidth-MW-8)),
+                  y: yB+MH>vh-8 ? Math.max(8,yA) : yB,
+                });
+              }
+              setMenuOpen(v=>!v);
+            }}
               style={{ width:22, height:22, background:menuOpen?`${cfg.borderColor}25`:'transparent', border:`1px solid ${menuOpen?cfg.borderColor:'transparent'}`, borderRadius:4, cursor:'pointer', fontSize:13, color:cfg.color, display:'flex', alignItems:'center', justifyContent:'center' }}>
               ⋮
             </button>
-            {menuOpen && <EquipMenu eq={eq} streetId={streetId} dispatch={dispatch} onClose={()=>{setMenuOpen(false);setHovHeader(false);}} onStartSwap={onStartSwap} />}
+            {menuOpen && <EquipMenu eq={eq} streetId={streetId} dispatch={dispatch} onClose={()=>{setMenuOpen(false);setHovHeader(false);}} onStartSwap={onStartSwap} position={menuPos} />}
           </div>
         )}
       </div>
@@ -216,25 +221,66 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
         <div style={{ padding:'6px 8px', display:'flex', flexDirection:'column', gap:3 }}>
           {Array.from({length:eq.niveis},(_,ni)=>{
             const nivel=ni+1;
+            // Build slot data for this row
+            const slots = Array.from({length:eq.escsPerNivel},(_,si)=>{
+              const pos=si+1, escsId=`${eq.id}-${nivel}-${pos}`;
+              const alloc=allocations[escsId]||{};
+              const p1=alloc.p1?PRODUCT_MAP[alloc.p1]:null;
+              const p2=alloc.p2?PRODUCT_MAP[alloc.p2]:null;
+              return { pos, escsId, alloc, p1, p2, p1id:alloc.p1||null };
+            });
+            // Group consecutive same-product slots (only filled)
+            const runs=[];
+            let cur=null;
+            for(const slot of slots){
+              if(slot.p1id && cur && cur.p1id===slot.p1id){ cur.slots.push(slot); }
+              else{ if(cur) runs.push(cur); cur={ p1id:slot.p1id, slots:[slot] }; }
+            }
+            if(cur) runs.push(cur);
             return (
-              <div key={nivel} style={{ display:'flex', alignItems:'center', gap }}>
-                <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0 }}>N{nivel}</span>
-                {Array.from({length:eq.escsPerNivel},(_,si)=>{
-                  const pos=si+1, escsId=`${eq.id}-${nivel}-${pos}`;
-                  const alloc=allocations[escsId]||{};
-                  const p1=alloc.p1?PRODUCT_MAP[alloc.p1]:null;
-                  const p2=alloc.p2?PRODUCT_MAP[alloc.p2]:null;
-                  const matchSearch = searchQuery && (p1?.nome?.toLowerCase().includes(searchQuery.toLowerCase())||p1?.id?.toLowerCase().includes(searchQuery.toLowerCase())||p2?.nome?.toLowerCase().includes(searchQuery.toLowerCase()));
-                  const isHighlighted = highlightProductId && (p1?.id===highlightProductId||p2?.id===highlightProductId);
+              <div key={nivel} style={{ display:'flex', alignItems:'center', gap, flexWrap:'nowrap' }}>
+                <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0 }}>{nivel}</span>
+                {runs.map((run,ri)=>{
+                  const isGroup = run.slots.length>1 && run.p1id;
+                  const groupColor = isGroup ? (CURVA_COLOR[run.slots[0].p1?.curva]||'#64748B') : null;
+                  const subcatActive = subcatFilters.length>0;
+                  if(!isGroup){
+                    const slot=run.slots[0];
+                    const matchSearch=searchQuery&&(slot.p1?.nome?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p1?.id?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p2?.nome?.toLowerCase().includes(searchQuery.toLowerCase()));
+                    const isHighlighted=highlightProductId&&(slot.p1?.id===highlightProductId||slot.p2?.id===highlightProductId);
+                    const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
+                    return (
+                      <div key={ri} style={{ width:escW, flexShrink:0, outline:isHighlighted?'3px solid #EF4444':matchSearch?'2px solid #F59C00':'none', outlineOffset:isHighlighted?'2px':'0px', borderRadius:5, animation:isHighlighted?'dse-highlight-pulse 0.7s ease-in-out 5':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?5:'auto' }}>
+                        <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
+                          isAllocating={!!selectedProduct&&!slot.p1} isHighlighted={isHighlighted}
+                          equipCap={eq.cap}
+                          onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
+                          onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,pr1,pr2)}
+                          onHoverEnd={onHoverEnd}
+                          isGroupHovered={!!hoveredProductId&&(slot.p1?.id===hoveredProductId||slot.p2?.id===hoveredProductId)}
+                        />
+                      </div>
+                    );
+                  }
+                  // Grouped: same product across multiple consecutive slots
+                  const groupSubcatMatch=!subcatActive||(run.slots[0].p1&&subcatFilters.includes(run.slots[0].p1.sub));
                   return (
-                    <div key={pos} style={{ width:escW, flexShrink:0, outline:matchSearch?'2px solid #F59C00':isHighlighted?'2px solid #F59C00':'none', borderRadius:5, animation:isHighlighted?'dse-pulse 1.2s ease-in-out 3':'none' }}>
-                      <DSEEscaninho escaninhoId={escsId} product1={p1} product2={p2} isEmpty={!p1}
-                        isAllocating={!!selectedProduct&&!p1} isHighlighted={isHighlighted}
-                        equipCap={eq.cap}
-                        onClick={e=>onEscClick(escsId,p1,p2,e)}
-                        onHover={(pr1,pr2)=>onHoverEsc(escsId,pr1,pr2)}
-                        onHoverEnd={onHoverEnd}
-                      />
+                    <div key={ri} style={{ display:'flex', gap:1, outline:`2px solid ${groupColor}`, borderRadius:6, padding:2, background:`${groupColor}14`, flexShrink:0, position:'relative', opacity:groupSubcatMatch?1:0.25, transition:'opacity 0.15s' }}>
+                      {run.slots.map(slot=>{
+                        const isHighlighted=highlightProductId&&slot.p1?.id===highlightProductId;
+                        return (
+                          <div key={slot.pos} style={{ width:escW, flexShrink:0 }}>
+                            <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={false}
+                              isAllocating={false} isHighlighted={isHighlighted}
+                              equipCap={eq.cap}
+                              onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
+                              onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,slot.p1,slot.p2)}
+                              onHoverEnd={onHoverEnd}
+                              isGroupHovered={!!hoveredProductId&&slot.p1?.id===hoveredProductId}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -248,9 +294,11 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
 }
 
 // ── Street column ──────────────────────────────────────────────────────────────
-function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua }) {
+function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[], hoveredProductId }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
+  const [newEquipOpen, setNewEquipOpen] = useState(false);
   const [pairFilter, setPairFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const stats = useMemo(()=>{
@@ -273,17 +321,29 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
     });
   },[street.equipment,pairFilter,typeFilter]);
 
+  // ── Standardised escaninho size (all equips = geladeira 5-slot reference) ──
+  const ESC_LABEL=24, ESC_PAD=8, ESC_GAP=3, REF_ESC=5;
+  const escWFixed = Math.floor((colWidth - ESC_LABEL - ESC_PAD*2) / REF_ESC - ESC_GAP);
+  const effectiveColWidth = useMemo(() => {
+    const maxEscs = street.equipment.reduce((m,eq)=>Math.max(m,eq.escsPerNivel), REF_ESC);
+    return ESC_LABEL + ESC_PAD*2 + maxEscs*(escWFixed + ESC_GAP);
+  },[street.equipment, escWFixed]);
+
   return (
-    <div style={{ flexShrink:0, width:colWidth, display:'flex', flexDirection:'column' }}>
-      <div style={{ background:'var(--shopper-navy)', borderRadius:'6px 6px 0 0', padding:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5 }}
-        onClick={()=>!menuOpen&&!filterOpen&&onToggleStreet()}>
-        <>
+    <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, overflow:(filterOpen||menuOpen||newEquipOpen)?'visible':'hidden', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
+      <div style={{ background:'var(--shopper-navy)', borderRadius:isCollapsed?'6px':'6px 6px 0 0', padding:isCollapsed?0:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5, overflow:(filterOpen||menuOpen||newEquipOpen)?'visible':'hidden' }}
+        onClick={()=>onToggleStreet()}>
+        {isCollapsed ? (
+          <div style={{ width:38, height:36, display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <span style={{ fontSize:13, fontWeight:900, color:'#fff', letterSpacing:'0.04em' }}>{street.id}</span>
+          </div>
+        ) : (<>
           <div>
             <span style={{ fontSize:12, fontWeight:800, color:'#fff', letterSpacing:'0.04em' }}>{street.id}</span>
-            <span style={{ fontSize:9, color:'rgba(255,255,255,0.42)', fontWeight:500, marginLeft:5 }}>{street.nome}</span>
+
           </div>
           <div style={{ flex:1 }} />
-          <span style={{ fontSize:9, color:'rgba(255,255,255,0.45)', fontFamily:'var(--font-numeric)' }}>{stats.filled}/{stats.total}</span>
+          <span style={{ fontSize:9, color:'rgba(255,255,255,0.45)', fontFamily:'var(--font-numeric)' }}>{stats.pct}%</span>
           <div style={{ width:22, height:2, background:'rgba(255,255,255,0.15)', borderRadius:2 }}>
             <div style={{ height:'100%', width:`${stats.pct}%`, background:stats.pct>=75?'#0DAB77':stats.pct>=40?'#F59C00':'#EF4444', borderRadius:2 }} />
           </div>
@@ -297,7 +357,7 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
                 borderRadius:3, cursor:'pointer',
                 color:(pairFilter!=='all'||typeFilter!=='all')?'#3DD4A6':'rgba(255,255,255,0.55)',
                 fontSize:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
-              ▤
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{display:'block'}}><path d="M1 2h10l-4 5v3l-2-1V7L1 2z" fill="currentColor"/></svg>
             </button>
             {filterOpen && (<>
               <div onClick={()=>setFilterOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />
@@ -351,15 +411,57 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
           </div>
 
           {/* + add equip */}
-          <button onClick={e=>{e.stopPropagation();dispatch({type:'SET_CONFIRM',dialog:{
-            title:`Novo equipamento em ${street.id}`,
-            message:`Adiciona uma nova <strong>Prateleira</strong> ao final de <strong>${street.id}</strong>. O tipo pode ser alterado depois pelo menu ⋮ do equipamento.`,
-            confirmLabel:'Adicionar',
-            onConfirm:()=>dispatch({type:'ADD_EQUIP',streetId:street.id}),
-          }});}} title="Adicionar equipamento"
-            style={{ width:20, height:20, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:3, cursor:'pointer', color:'rgba(255,255,255,0.55)', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            +
-          </button>
+          <div style={{ position:'relative' }} onClick={e=>e.stopPropagation()}>
+            <button onClick={()=>setNewEquipOpen(v=>!v)} title="Adicionar equipamento"
+              style={{ width:20, height:20, background:newEquipOpen?'rgba(13,171,119,0.22)':'rgba(255,255,255,0.08)', border:newEquipOpen?'1px solid rgba(13,171,119,0.5)':'1px solid rgba(255,255,255,0.15)', borderRadius:3, cursor:'pointer', color:newEquipOpen?'#3DD4A6':'rgba(255,255,255,0.55)', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              +
+            </button>
+            {newEquipOpen && (<>
+              <div onClick={()=>setNewEquipOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />
+              <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:200, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:8, padding:'10px 12px', minWidth:200, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
+                <div style={{ fontSize:9, fontWeight:700, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:7 }}>Tipo de equipamento</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:3, marginBottom:10 }}>
+                  {[
+                    ['prateleira','Prateleira'],
+                    ['prateleira_pamplona','Prat. Pamplona'],
+                    ['geladeira','Geladeira'],
+                    ['geladeira_alta','Geladeira Alta'],
+                    ['geladeira_gerador','Geladeira Gerador'],
+                    ['freezer','Freezer'],
+                    ['quimico','Químico'],
+                  ].map(([t,label])=>{
+                    const cfg=EQUIP_CFG[t]||EQUIP_CFG.prateleira;
+                    return (
+                      <button key={t} onClick={()=>setNewEquipTipo(t)}
+                        style={{ padding:'5px 8px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', textAlign:'left',
+                          border:newEquipTipo===t?`1px solid ${cfg.borderColor}`:'1px solid var(--dropdown-border)',
+                          background:newEquipTipo===t?`${cfg.borderColor}18`:'transparent',
+                          color:newEquipTipo===t?cfg.color:'var(--dropdown-text)', fontFamily:'var(--font-sans)' }}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button onClick={()=>{
+                  const TIPO_DEF={
+                    prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
+                    prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
+                    geladeira:{niveis:4,escsPerNivel:5,cap:20.00},
+                    geladeira_alta:{niveis:5,escsPerNivel:3,cap:20.00,card175Only:true},
+                    geladeira_gerador:{niveis:4,escsPerNivel:5,cap:20.00},
+                    freezer:{niveis:3,escsPerNivel:4,cap:15.00},
+                    quimico:{niveis:4,escsPerNivel:7,cap:30.24},
+                  };
+                  const d=TIPO_DEF[newEquipTipo]||TIPO_DEF.prateleira;
+                  dispatch({type:'ADD_EQUIP',streetId:street.id,tipo:newEquipTipo,...d});
+                  setNewEquipOpen(false);
+                }}
+                  style={{ width:'100%', padding:'6px', fontSize:10, fontWeight:700, background:'rgba(13,171,119,0.14)', border:'1px solid rgba(13,171,119,0.4)', borderRadius:5, cursor:'pointer', color:'#0DAB77', fontFamily:'var(--font-sans)' }}>
+                  Adicionar ao final de {street.id}
+                </button>
+              </div>
+            </>)}
+          </div>
 
           {/* Street ⋮ menu */}
           <div style={{ position:'relative' }} onClick={e=>e.stopPropagation()}>
@@ -370,8 +472,10 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
             {menuOpen && (
               <>
                 <div onClick={()=>setMenuOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />
-                <div style={{ position:'absolute', top:'calc(100%+4px)', right:0, zIndex:200, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:4, minWidth:180, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
-                  <StreetMI label="Recolher rua" icon="↩" onClick={()=>{ onRecolherRua(street.id); setMenuOpen(false); }}/>
+                <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:200, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:4, minWidth:180, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
+                  <StreetMI label="Recolher SKUs da rua" icon="↩" onClick={()=>{ onRecolherRua(street.id); setMenuOpen(false); }}/>
+                  <StreetMI label="Recolher equipamentos" icon="⊟" onClick={()=>{ dispatch({type:'COLLAPSE_STREET_EQUIPS',streetId:street.id}); setMenuOpen(false); }}/>
+                  <StreetMI label="Expandir equipamentos" icon="⊞" onClick={()=>{ dispatch({type:'EXPAND_STREET_EQUIPS',streetId:street.id}); setMenuOpen(false); }}/>
                   <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
                   <StreetMI label="Remover rua" icon="✕" danger onClick={()=>{
                     dispatch({type:'SET_CONFIRM',dialog:{ title:`Remover ${street.id}?`, message:`Remove <strong>${street.id}</strong> e todos os ${street.equipment.length} equipamentos. Não pode ser desfeito.`, requireText:street.id, danger:true, confirmLabel:'Remover rua', onConfirm:()=>dispatch({type:'REMOVE_STREET',streetId:street.id}) }});
@@ -381,8 +485,8 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
               </>
             )}
           </div>
-          <span style={{ fontSize:10, color:'rgba(255,255,255,0.3)' }}>{isCollapsed?'▶':'▼'}</span>
-        </>
+          <span style={{ fontSize:10, color:'rgba(255,255,255,0.3)' }}>&#9660;</span>
+        </>)}
       </div>
 
       {!isCollapsed && (
@@ -410,7 +514,9 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
               isCollapsed={!!equipCollapsed[eq.id]} onToggleCollapse={()=>onToggleEquip(eq.id)}
               colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
               swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
-              highlightProductId={highlightProductId}
+              highlightProductId={highlightProductId} subcatFilters={subcatFilters}
+            hoveredProductId={hoveredProductId}
+            escW={escWFixed}
             />
           ))}
         </div>
@@ -430,8 +536,9 @@ function StreetMI({ label, icon, onClick, danger }) {
 }
 
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
-function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onCollect, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId }) {
+function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onCollect, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[] }) {
   const [tooltip, setTooltip] = useState(null);
+  const [hoveredProductId, setHoveredProductId] = useState(null);
   const containerRef = useRef(null);
   const closeTimerRef = useRef(null);
 
@@ -451,7 +558,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     });
     if(streetIdx<0) return;
     let scrollX=14;
-    for(let i=0;i<streetIdx;i++) scrollX += (streetCollapsed[mapStructure[i].id]?36:colWidth)+10;
+    for(let i=0;i<streetIdx;i++) scrollX += (streetCollapsed[mapStructure[i].id]?38:colWidth)+10;
     let scrollY=0;
     const street=mapStructure[streetIdx];
     for(let i=0;i<equipIdx;i++){
@@ -475,11 +582,12 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    if(!p1){setTooltip(null);return;}
+    if(!p1){setTooltip(null);setHoveredProductId(null);return;}
     setTooltip(prev=>prev?.escsId===escsId?prev:{escsId,product:p1,product2:p2,x:0,y:0});
+    setHoveredProductId(p1.id);
   },[]);
   const handleHoverEnd = useCallback(()=>{
-    closeTimerRef.current = setTimeout(()=>setTooltip(null), 350);
+    closeTimerRef.current = setTimeout(()=>{setTooltip(null);setHoveredProductId(null);}, 350);
   },[]);
   const handleTooltipEnter = useCallback(()=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -507,7 +615,8 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           isCollapsed={!!streetCollapsed[street.id]} onToggleStreet={()=>onToggleStreet(street.id)}
           colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
           swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
-          highlightProductId={highlightProductId} onRecolherRua={onRecolherRua}
+          highlightProductId={highlightProductId} onRecolherRua={onRecolherRua} subcatFilters={subcatFilters}
+          hoveredProductId={hoveredProductId}
         />
       ))}
 
