@@ -46,3 +46,11 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/node_modules/
+
+# Arquivos legados / histórico local (não pertencem ao repo)
+old/
+
+# macOS e sistema
+.DS_Store
+Thumbs.db
+.ruff_cache/

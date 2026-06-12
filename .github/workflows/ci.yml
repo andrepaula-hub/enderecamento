@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install ruff
-      - run: ruff check backend/ --output-format=github
+      - run: ruff check app.py backend/ --output-format=github
 
   test-backend:
     name: Tests (pytest)
@@ -28,8 +28,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: pytest tests/ -v --junit-xml=test-results.xml
+      - run: pip install -r requirements.txt pytest-cov
+      - run: pytest tests/ -v --junit-xml=test-results.xml --cov=. --cov-report=term-missing --cov-fail-under=70
         env:
           SQLITE_PATH: /tmp/test_app.db
           OUTPUTS_PATH: /tmp/outputs
