@@ -1,0 +1,166 @@
+/* =========================================================
+   SHOPPER DESIGN SYSTEM — Colors & Type
+   Derived from the Shopper Figma (Lojas 2023.1) brand.
+   ========================================================= */
+
+/* ── Local variable fonts (production files) ── */
+@font-face {
+  font-family: 'Raleway';
+  src: url('./fonts/Raleway-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Raleway';
+  src: url('./fonts/Raleway-Italic-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900; font-style: italic; font-display: swap;
+}
+/* Lato (system/UI — textos institucionais) + Inter (numéricos) — Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---------- BRAND (navy + shopper green) ---------- */
+  --shopper-navy:          rgb(0, 45, 98);    /* #002D62 — primary brand navy, headers, nav */
+  --shopper-navy-deep:     rgb(21, 26, 51);   /* #151A33 — deepest navy (footer, hero bg) */
+  --shopper-navy-soft:     rgb(30, 32, 68);   /* #1E2044 — top bar */
+  --shopper-navy-ink:      rgb(2, 7, 63);     /* #02073F */
+  --shopper-green:         rgb(13, 171, 119); /* #0DAB77 — CTA green, Shopper logo leaf */
+  --shopper-green-2:       rgb(7, 167, 118);  /* #07A776 — button pressed / secondary */
+  --shopper-green-3:       rgb(45, 167, 122); /* #2DA77A */
+  --shopper-green-4:       rgb(59, 186, 121); /* #3BBA79 — highlight bar */
+  --shopper-green-soft:    rgb(232, 243, 216);/* #E8F3D8 — hero soft wash */
+  --shopper-green-tint:    rgb(224, 240, 237);/* #E0F0ED — card tint on tela inicial */
+  --shopper-green-deep:    rgb(25, 62, 54);   /* #193E36 — deep green */
+
+  /* ---------- SUB-BRANDS ---------- */
+  --programada-blue:       rgb(34, 92, 179);  /* #225CB3 — Compra Programada accent */
+  --fresh-green:           rgb(133, 206, 43); /* #85CE2B — Fresh accent */
+  --pet-pink:              rgb(242, 116, 158);/* #F2749E — Pet Shopper accent */
+  --unica-orange:          rgb(245, 156, 0);  /* #F59C00 — Compra Única accent */
+  --now-red:               rgb(158, 16, 40);  /* #9E1028 — Shopper Now accent */
+
+  /* ---------- SEMANTIC ---------- */
+  --color-success:         rgb(1, 188, 110);  /* #01BC6E */
+  --color-warning:         rgb(247, 128, 34); /* #F78022 */
+  --color-danger:          rgb(208, 31, 49);  /* #D01F31 — destructive / error */
+  --color-info:            rgb(2, 136, 209);  /* #0288D1 */
+  --color-yellow:          rgb(247, 206, 69); /* #F7CE45 — battery / highlights */
+
+  /* ---------- NEUTRALS ---------- */
+  --fg-1:                  rgb(29, 29, 27);   /* #1D1D1B — primary text */
+  --fg-2:                  rgb(76, 76, 76);   /* #4C4C4C — secondary text */
+  --fg-3:                  rgb(102, 102, 102);/* #666666 — tertiary text / captions */
+  --fg-4:                  rgb(121, 121, 121);/* #797979 */
+  --fg-muted:              rgb(153, 153, 153);/* #999999 — placeholder */
+  --fg-on-brand:           rgb(255, 255, 255);
+
+  --bg-1:                  rgb(255, 255, 255);/* page background */
+  --bg-2:                  rgb(247, 247, 247);/* search field, cards */
+  --bg-3:                  rgb(244, 244, 244);
+  --bg-4:                  rgb(242, 242, 242);
+
+  --border-1:              rgb(226, 226, 226);/* #E2E2E2 — primary divider */
+  --border-2:              rgb(217, 217, 217);/* #D9D9D9 */
+  --border-3:              rgb(188, 188, 188);/* #BCBCBC */
+
+  /* ---------- TYPE FAMILIES ----------
+     Brandbook (2021): Lato = textos institucionais / sistema
+                       Raleway = conteúdo AO e campanhas            */
+  --font-sans:       'Lato', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  --font-display:    'Raleway', 'Lato', sans-serif; /* campanhas, títulos marketing */
+  --font-numeric:    'Inter', 'Lato', system-ui, sans-serif;
+
+  /* ---------- TYPE WEIGHTS ---------- */
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semi:    600;
+  --fw-bold:    700;
+  --fw-black:   900;
+
+  /* ---------- TYPE SCALE (product UI — tight, reads like the app) ---------- */
+  --fs-10: 10px;     /* micro caption */
+  --fs-11: 11px;
+  --fs-12: 12px;     /* caption */
+  --fs-14: 14px;     /* body */
+  --fs-15: 15px;
+  --fs-16: 16px;     /* body-lg / button */
+  --fs-18: 18px;
+  --fs-20: 20px;     /* section title */
+  --fs-22: 22px;
+  --fs-24: 24px;     /* h3 */
+  --fs-28: 28px;
+  --fs-32: 32px;
+  --fs-40: 40px;     /* display small */
+  --fs-48: 48px;
+  --fs-56: 56px;
+  --fs-72: 72px;
+
+  /* ---------- LINE HEIGHTS ---------- */
+  --lh-tight:  1.1;
+  --lh-snug:   1.25;
+  --lh-normal: 1.4;
+  --lh-relaxed:1.5;
+
+  /* ---------- SPACING ---------- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+
+  /* ---------- RADII (capsule-heavy brand) ---------- */
+  --r-sm:   4px;
+  --r-md:   8px;     /* card default */
+  --r-lg:   12px;
+  --r-xl:   16px;
+  --r-pill: 999px;   /* search bar, chips, buttons */
+
+  /* ---------- ELEVATION ---------- */
+  --shadow-xs: 0 1px 2px rgba(0, 45, 98, .06);
+  --shadow-sm: 0 2px 6px rgba(0, 45, 98, .08);
+  --shadow-md: 0 6px 16px rgba(0, 45, 98, .10);
+  --shadow-lg: 0 16px 40px rgba(0, 45, 98, .14);
+
+  /* ---------- MOTION ---------- */
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --ease-out:      cubic-bezier(0, 0, .2, 1);
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+  --dur-slow:   320ms;
+}
+
+/* ========== SEMANTIC TYPE CLASSES ========== */
+.t-display {
+  font-family: var(--font-sans);
+  font-weight: var(--fw-bold);
+  font-size: clamp(40px, 5vw, 72px);
+  line-height: var(--lh-tight);
+  color: var(--fg-1);
+  letter-spacing: -0.01em;
+}
+.t-h1 { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-40); line-height: var(--lh-tight); color: var(--fg-1); }
+.t-h2 { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-28); line-height: var(--lh-snug); color: var(--fg-1); }
+.t-h3 { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-24); line-height: var(--lh-snug); color: var(--fg-1); }
+.t-h4 { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-20); line-height: var(--lh-snug); color: var(--fg-1); }
+.t-section-title { /* signature Shopper green heading on promo blocks */
+  font-family: var(--font-sans);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-24);
+  color: var(--shopper-green);
+  text-align: center;
+}
+.t-body    { font-family: var(--font-sans); font-weight: var(--fw-regular); font-size: var(--fs-14); line-height: var(--lh-normal); color: var(--fg-2); }
+.t-body-lg { font-family: var(--font-sans); font-weight: var(--fw-regular); font-size: var(--fs-16); line-height: var(--lh-normal); color: var(--fg-2); }
+.t-body-bold { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: var(--lh-normal); color: var(--fg-1); }
+.t-caption { font-family: var(--font-sans); font-weight: var(--fw-medium); font-size: var(--fs-12); line-height: var(--lh-normal); color: var(--fg-3); }
+.t-micro   { font-family: var(--font-sans); font-weight: var(--fw-medium); font-size: var(--fs-10); line-height: var(--lh-normal); color: var(--fg-3); }
+.t-button  { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: 1; letter-spacing: 0; }
+.t-price   { font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-18); color: var(--fg-1); }
+.t-price-lg{ font-family: var(--font-sans); font-weight: var(--fw-bold); font-size: var(--fs-22); color: var(--fg-1); }
+.t-price-strike { font-family: var(--font-sans); font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--fg-4); text-decoration: line-through; }
+.t-num     { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }

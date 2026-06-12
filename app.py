@@ -3,17 +3,20 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.barcode import get_product_by_barcode
 from core.bulk_remove import preview_remove_all_products_by_filter_xlsx, remove_all_products_by_filter_xlsx
@@ -100,8 +103,36 @@ AGENT_MASTER_SHEET_LINK = (
     or "https://docs.google.com/spreadsheets/d/1mCoybEaeIFGfr12mt2-vAooeLDRCQJw7NOZlWD5WDxk"
 ).strip()
 
+from backend.logging_config import configure_logging  # noqa: E402
+
+configure_logging()
+
 app = FastAPI(title="Enderecamento Local")
 app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
+
+_http_logger = logging.getLogger("enderecamento.http")
+
+
+class _RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        _http_logger.info(
+            '"method": "%s", "path": "%s", "status": %d, "duration_ms": %s',
+            request.method, request.url.path, response.status_code, duration_ms,
+        )
+        return response
+
+
+app.add_middleware(_RequestLoggingMiddleware)
+
+from backend.entrypoints.api.routes import router as new_router  # noqa: E402
+from backend.application.jobs.job_service import JobService  # noqa: E402
+
+app.include_router(new_router, prefix="")
+
+_app_job_service = JobService()
 
 
 @app.exception_handler(Exception)
@@ -793,8 +824,55 @@ def api_generate_kdabra_enderecar_sheet(_: ScriptRequest | None = None) -> JSONR
     return JSONResponse(result)
 
 
+def _run_etl_legacy_job(
+    job_id: str,
+    target_sheet_id: str,
+    master_sheet_id: str,
+    mix_sheet_id: str,
+) -> None:
+    """Executado em background — wrapper legado do ETL."""
+    try:
+        _app_job_service.update(job_id, "running")
+        result = run_etl_to_base_products(
+            master_sheet_id=master_sheet_id,
+            mix_sheet_id=mix_sheet_id,
+            target_sheet_id=target_sheet_id,
+        )
+        # Geração automática do Plano_Enderecamento_Final se vazio
+        if result.get("success"):
+            try:
+                _tc = GSheetsClient(target_sheet_id)
+                _sheet_names = _tc.list_sheet_names()
+                _plano_values = (
+                    _tc.read_values("Plano_Enderecamento_Final")
+                    if "Plano_Enderecamento_Final" in _sheet_names
+                    else []
+                )
+                if not _plano_values or len(_plano_values) < 2:
+                    _slots = generate_slots_from_cadastro_gsheet(
+                        target_sheet_id,
+                        clear_existing=True,
+                        master_sheet_id=master_sheet_id,
+                    )
+                    if _slots.get("success"):
+                        result["plano_auto_generated"] = True
+                        result["slots_generated"] = _slots.get("slots_generated", 0)
+                        result["plano_sheet_url"] = _slots.get("plano_sheet_url")
+                    else:
+                        result["plano_auto_warning"] = (
+                            _slots.get("error") or "Não foi possível gerar Plano_Enderecamento_Final automaticamente."
+                        )
+            except Exception as slot_exc:
+                result["plano_auto_warning"] = str(slot_exc)
+        _app_job_service.update(job_id, "done", result=result)
+    except Exception as exc:
+        _app_job_service.update(job_id, "failed", error=str(exc))
+
+
 @app.post("/api/runEtlToBaseProducts")
-def api_run_etl_to_base_products(_: ScriptRequest | None = None) -> JSONResponse:
+async def api_run_etl_to_base_products(
+    background_tasks: BackgroundTasks, _: ScriptRequest | None = None
+) -> JSONResponse:
     target = _require_active_sheet()
     master = get_workflow_sheet("master")
     mix = get_workflow_sheet("mix")
@@ -804,33 +882,22 @@ def api_run_etl_to_base_products(_: ScriptRequest | None = None) -> JSONResponse
         return JSONResponse({"success": False, "error": "Conecte a planilha MÃE (ETL) primeiro."})
     if not mix or not mix.get("sheet_id"):
         return JSONResponse({"success": False, "error": "Conecte a planilha MIX primeiro."})
-    try:
-        result = run_etl_to_base_products(
-            master_sheet_id=master["sheet_id"],
-            mix_sheet_id=mix["sheet_id"],
-            target_sheet_id=target["sheet_id"],
-        )
-        # Se o ETL rodou com sucesso e Plano_Enderecamento_Final ainda não existe ou está vazio,
-        # gera automaticamente a partir do Cadastro_Equipamentos (igual ao fluxo prepareWorkflow).
-        if result.get("success"):
-            _tc = GSheetsClient(target["sheet_id"])
-            _sheet_names = _tc.list_sheet_names()
-            _plano_values = _tc.read_values("Plano_Enderecamento_Final") if "Plano_Enderecamento_Final" in _sheet_names else []
-            if not _plano_values or len(_plano_values) < 2:
-                _slots = generate_slots_from_cadastro_gsheet(
-                    target["sheet_id"],
-                    clear_existing=True,
-                    master_sheet_id=master["sheet_id"],
-                )
-                if _slots.get("success"):
-                    result["plano_auto_generated"] = True
-                    result["slots_generated"] = _slots.get("slots_generated", 0)
-                    result["plano_sheet_url"] = _slots.get("plano_sheet_url")
-                else:
-                    result["plano_auto_warning"] = _slots.get("error") or "Não foi possível gerar Plano_Enderecamento_Final automaticamente."
-        return JSONResponse(result)
-    except Exception as exc:
-        return JSONResponse({"success": False, "error": str(exc)})
+    job_id = _app_job_service.enqueue(
+        "etl_legacy",
+        payload={
+            "target": target["sheet_id"],
+            "master": master["sheet_id"],
+            "mix": mix["sheet_id"],
+        },
+    )
+    background_tasks.add_task(
+        _run_etl_legacy_job,
+        job_id,
+        target["sheet_id"],
+        master["sheet_id"],
+        mix["sheet_id"],
+    )
+    return JSONResponse({"success": True, "job_id": job_id, "status": "pending"})
 
 
 @app.post("/api/buildMetabaseSalesTarget")

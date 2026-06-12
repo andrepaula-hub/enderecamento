@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+# Timeout global para chamadas ao Google API (httplib2 respeita socket timeout)
+socket.setdefaulttimeout(30)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",

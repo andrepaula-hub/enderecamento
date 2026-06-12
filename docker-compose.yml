@@ -1,14 +1,31 @@
+version: "3.9"
+
 services:
-  enderecamento:
-    build: .
-    container_name: enderecamento-shopper-local
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8001:8000"
-    environment:
-      MB_USER: ${MB_USER:-}
-      MB_PASS: ${MB_PASS:-}
-      MB_SESSION_ID: ${MB_SESSION_ID:-}
-      APPS_SCRIPT_WEBHOOK_TOKEN: ${APPS_SCRIPT_WEBHOOK_TOKEN:-}
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
     volumes:
-      - ./.credentials:/app/.credentials
-    restart: unless-stopped
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./.credentials:/app/.credentials:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
