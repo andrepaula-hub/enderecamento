@@ -138,8 +138,10 @@ class TestSaveBatchMoves:
 
 class TestSavePlanoVersion:
     def test_returns_200(self):
-        r = client.post("/api/savePlanoVersion", json={"args": ["test-version"]})
-        assert r.status_code == 200
+        p1, p2 = _patch_no_sheet()
+        with p1, p2:
+            r = client.post("/api/savePlanoVersion", json={"args": ["test-version"]})
+            assert r.status_code == 200
 
     def test_without_active_sheet_returns_success_false(self):
         p1, p2 = _patch_no_sheet()
@@ -148,12 +150,16 @@ class TestSavePlanoVersion:
             assert r.json().get("success") is False
 
     def test_response_has_success_field(self):
-        r = client.post("/api/savePlanoVersion", json={"args": ["test-version"]})
-        assert "success" in r.json()
+        p1, p2 = _patch_no_sheet()
+        with p1, p2:
+            r = client.post("/api/savePlanoVersion", json={"args": ["test-version"]})
+            assert "success" in r.json()
 
     def test_accepts_empty_name(self):
-        r = client.post("/api/savePlanoVersion", json={"args": [""]})
-        assert r.status_code == 200
+        p1, p2 = _patch_no_sheet()
+        with p1, p2:
+            r = client.post("/api/savePlanoVersion", json={"args": [""]})
+            assert r.status_code == 200
 
 
 # ── /api/listPlanoVersions ────────────────────────────────────────────────────
