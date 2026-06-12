@@ -13,74 +13,11 @@ from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from core.barcode import get_product_by_barcode
-from core.bulk_remove import preview_remove_all_products_by_filter_xlsx, remove_all_products_by_filter_xlsx
-from core.initial_data import get_initial_data
-from core.kdabra import generate_kdabra_enderecar_sheet, generate_kdabra_sheet
-from core.moves import execute_equipment_swap, execute_swap, save_batch_moves, save_single_move
-from core.reports import generate_sku_report_custom
-from core.versioning import (
-    delete_plano_version_xlsx,
-    list_plano_versions_xlsx,
-    restore_plano_version_xlsx,
-    save_plano_version_xlsx,
-)
-from core.gsheets_backend import (
-    add_new_product_gsheet,
-    change_equipment_type_gsheet,
-    create_new_equipment_gsheet,
-    delete_equipment_and_products_gsheet,
-    delete_plano_version_gsheet,
-    execute_swap_gsheet,
-    execute_equipment_swap_gsheet,
-    generate_slots_from_cadastro_gsheet,
-    generate_layout_atual_gsheet,
-    generate_kdabra_enderecar_sheet_gsheet,
-    generate_kdabra_sheet_gsheet,
-    generate_sku_report_custom_gsheet,
-    get_initial_data_gsheet,
-    get_product_by_barcode_gsheet,
-    preview_remove_all_products_by_filter_gsheet,
-    remove_all_products_by_filter_gsheet,
-    list_plano_versions_gsheet,
-    restore_plano_version_gsheet,
-    save_plano_version_gsheet,
-    save_batch_moves_gsheet,
-    save_single_move_gsheet,
-    update_base_product_gsheet,
-)
-from core.enrichment_pipeline import refresh_single_etl_warning, run_etl_to_base_products, sanitize_mix_duplicates
-from core.etl_warning_mappings import (
-    get_etl_mapping_options,
-    save_etl_warning_mappings,
-    send_warning_group_to_etl,
-    send_missing_volumetria_with_default,
-)
-from core.metabase_sales import (
-    CARD175_CARD_ID,
-    CARD175_STORE_CODE_BY_ID,
-    build_vendas_alvo_from_metabase,
-    extract_metabase_card_id,
-    fetch_card_823_rows,
-    fetch_card_823_rows_result,
-    get_metabase_sales_context,
-    metabase_query_card,
-    resolve_metabase_session,
-    STORE_OPTIONS,
-    write_metabase_rows_to_xlsx,
-)
-from core.gsheets_client import (
-    GSheetsClient,
-    get_active_sheet,
-    set_active_sheet,
-)
-from core.apps_script_client import call_apps_script_webapp_action
-from core.workflow_context import get_workflow_context, get_workflow_sheet, set_workflow_sheet
-from core.card175_snapshot import append_card175_change_logs, import_card175_rows, import_card175_snapshot
 from core.agent_tools import (
     apply_auto_address,
     auto_address_preview,
@@ -88,8 +25,78 @@ from core.agent_tools import (
     infer_store_context,
     validate_plan,
 )
+from core.apps_script_client import call_apps_script_webapp_action
+from core.bulk_remove import (
+    preview_remove_all_products_by_filter_xlsx,
+    remove_all_products_by_filter_xlsx,
+)
+from core.card175_snapshot import (
+    append_card175_change_logs,
+    import_card175_rows,
+    import_card175_snapshot,
+)
+from core.enrichment_pipeline import (
+    refresh_single_etl_warning,
+    run_etl_to_base_products,
+    sanitize_mix_duplicates,
+)
+from core.etl_warning_mappings import (
+    get_etl_mapping_options,
+    save_etl_warning_mappings,
+    send_missing_volumetria_with_default,
+    send_warning_group_to_etl,
+)
+from core.gsheets_backend import (
+    add_new_product_gsheet,
+    change_equipment_type_gsheet,
+    create_new_equipment_gsheet,
+    delete_equipment_and_products_gsheet,
+    delete_plano_version_gsheet,
+    execute_equipment_swap_gsheet,
+    execute_swap_gsheet,
+    generate_kdabra_enderecar_sheet_gsheet,
+    generate_kdabra_sheet_gsheet,
+    generate_layout_atual_gsheet,
+    generate_sku_report_custom_gsheet,
+    generate_slots_from_cadastro_gsheet,
+    get_initial_data_gsheet,
+    get_product_by_barcode_gsheet,
+    list_plano_versions_gsheet,
+    preview_remove_all_products_by_filter_gsheet,
+    remove_all_products_by_filter_gsheet,
+    restore_plano_version_gsheet,
+    save_batch_moves_gsheet,
+    save_plano_version_gsheet,
+    save_single_move_gsheet,
+    update_base_product_gsheet,
+)
+from core.gsheets_client import (
+    GSheetsClient,
+    get_active_sheet,
+    set_active_sheet,
+)
+from core.initial_data import get_initial_data
+from core.metabase_sales import (
+    CARD175_CARD_ID,
+    CARD175_STORE_CODE_BY_ID,
+    STORE_OPTIONS,
+    build_vendas_alvo_from_metabase,
+    extract_metabase_card_id,
+    fetch_card_823_rows_result,
+    get_metabase_sales_context,
+    write_metabase_rows_to_xlsx,
+)
+from core.moves import execute_equipment_swap
+from core.versioning import (
+    delete_plano_version_xlsx,
+    list_plano_versions_xlsx,
+    restore_plano_version_xlsx,
+    save_plano_version_xlsx,
+)
+from core.workflow_context import get_workflow_context, get_workflow_sheet, set_workflow_sheet
 
 APP_ROOT = Path(__file__).resolve().parent
+SHOPPER_FRONT_ROOT = APP_ROOT / "shopper_front"
 DEFAULT_XLSX = APP_ROOT / "ETL" / "ENDERECAMENTO_DARK_PINHEIROS (teste) (2).xlsx"
 DATA_XLSX_ENV = os.environ.get("ENDERECAMENTO_XLSX")
 DATA_XLSX_PATH = Path(DATA_XLSX_ENV).resolve() if DATA_XLSX_ENV else None
@@ -106,6 +113,7 @@ from backend.logging_config import configure_logging  # noqa: E402
 configure_logging()
 
 app = FastAPI(title="Enderecamento Local")
+app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
 
 _http_logger = logging.getLogger("enderecamento.http")
 
@@ -124,8 +132,8 @@ class _RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_RequestLoggingMiddleware)
 
-from backend.entrypoints.api.routes import router as new_router  # noqa: E402
 from backend.application.jobs.job_service import JobService  # noqa: E402
+from backend.entrypoints.api.routes import router as new_router  # noqa: E402
 
 app.include_router(new_router, prefix="")
 
