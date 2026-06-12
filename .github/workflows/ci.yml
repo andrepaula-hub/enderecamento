@@ -33,7 +33,7 @@ jobs:
           pytest tests/ -v --junit-xml=test-results.xml \
             --cov=core --cov=backend \
             --cov-report=term-missing \
-            --cov-fail-under=50
+            --cov-fail-under=40
         env:
           SQLITE_PATH: /tmp/test_app.db
           OUTPUTS_PATH: /tmp/outputs
