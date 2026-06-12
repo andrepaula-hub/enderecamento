@@ -13,7 +13,6 @@ from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -91,7 +90,6 @@ from core.agent_tools import (
 )
 
 APP_ROOT = Path(__file__).resolve().parent
-SHOPPER_FRONT_ROOT = APP_ROOT / "shopper_front"
 DEFAULT_XLSX = APP_ROOT / "ETL" / "ENDERECAMENTO_DARK_PINHEIROS (teste) (2).xlsx"
 DATA_XLSX_ENV = os.environ.get("ENDERECAMENTO_XLSX")
 DATA_XLSX_PATH = Path(DATA_XLSX_ENV).resolve() if DATA_XLSX_ENV else None
@@ -108,7 +106,6 @@ from backend.logging_config import configure_logging  # noqa: E402
 configure_logging()
 
 app = FastAPI(title="Enderecamento Local")
-app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
 
 _http_logger = logging.getLogger("enderecamento.http")
 
