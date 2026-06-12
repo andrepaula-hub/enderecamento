@@ -1,5 +1,5 @@
 // DSE Map v3 — Shopper palette, swap contents, recolher rua, highlight + scroll
-const { useState, useCallback, useMemo, useRef, useEffect } = React;
+const { useState, useCallback, useMemo, useRef, useEffect, memo } = React;
 const { DSEEscaninho, DSEProductTooltip } = window;
 const { PRODUCT_MAP } = window.DSEData;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
@@ -130,7 +130,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], hoveredProductId, escW }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
@@ -162,7 +162,7 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
   };
 
   return (
-    <div style={{ borderLeft:`4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
+    <div style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
       <div style={{ background:hdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
         onClick={handleHeaderClick}
         onMouseEnter={()=>setHovHeader(true)}
@@ -257,7 +257,6 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
                           onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
                           onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,pr1,pr2)}
                           onHoverEnd={onHoverEnd}
-                          isGroupHovered={!!hoveredProductId&&(slot.p1?.id===hoveredProductId||slot.p2?.id===hoveredProductId)}
                         />
                       </div>
                     );
@@ -276,7 +275,6 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
                               onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
                               onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,slot.p1,slot.p2)}
                               onHoverEnd={onHoverEnd}
-                              isGroupHovered={!!hoveredProductId&&slot.p1?.id===hoveredProductId}
                             />
                           </div>
                         );
@@ -291,10 +289,10 @@ function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick,
       )}
     </div>
   );
-}
+});
 
 // ── Street column ──────────────────────────────────────────────────────────────
-function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[], hoveredProductId }) {
+const StreetColumn = memo(function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
@@ -515,15 +513,14 @@ function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHove
               colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
               swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
               highlightProductId={highlightProductId} subcatFilters={subcatFilters}
-            hoveredProductId={hoveredProductId}
-            escW={escWFixed}
+              escW={escWFixed}
             />
           ))}
         </div>
       )}
     </div>
   );
-}
+});
 
 function StreetMI({ label, icon, onClick, danger }) {
   return (
@@ -538,9 +535,9 @@ function StreetMI({ label, icon, onClick, danger }) {
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
 function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onCollect, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[] }) {
   const [tooltip, setTooltip] = useState(null);
-  const [hoveredProductId, setHoveredProductId] = useState(null);
   const containerRef = useRef(null);
   const closeTimerRef = useRef(null);
+  const rafRef = useRef(null);
 
   // Scroll to highlighted product
   useEffect(()=>{
@@ -582,12 +579,19 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    if(!p1){setTooltip(null);setHoveredProductId(null);return;}
+    if(!p1){setTooltip(null);return;}
     setTooltip(prev=>prev?.escsId===escsId?prev:{escsId,product:p1,product2:p2,x:0,y:0});
-    setHoveredProductId(p1.id);
+    const c = containerRef.current;
+    if(c){
+      c.querySelectorAll('.dse-peer-hovered').forEach(el=>el.classList.remove('dse-peer-hovered'));
+      c.querySelectorAll('[data-pid]').forEach(el=>{ if(el.dataset.pid===p1.id) el.classList.add('dse-peer-hovered'); });
+    }
   },[]);
   const handleHoverEnd = useCallback(()=>{
-    closeTimerRef.current = setTimeout(()=>{setTooltip(null);setHoveredProductId(null);}, 350);
+    closeTimerRef.current = setTimeout(()=>{
+      setTooltip(null);
+      containerRef.current?.querySelectorAll('.dse-peer-hovered').forEach(el=>el.classList.remove('dse-peer-hovered'));
+    }, 350);
   },[]);
   const handleTooltipEnter = useCallback(()=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -598,7 +602,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   return (
     <div ref={containerRef} style={{ flex:1, overflow:'auto', padding:'12px 14px', display:'flex', gap:10, alignItems:'flex-start', position:'relative', background:'var(--map-bg)' }}
-      onMouseMove={e=>{ if(tooltip) setTooltip(prev=>prev?{...prev,x:e.clientX+14,y:e.clientY-24}:null); }}>
+      onMouseMove={e=>{ if(tooltip&&!rafRef.current){ const cx=e.clientX,cy=e.clientY; rafRef.current=requestAnimationFrame(()=>{ setTooltip(prev=>prev?{...prev,x:cx+14,y:cy-24}:null); rafRef.current=null; }); } }}>
 
       {/* Swap mode banner */}
       {swapSource && (
@@ -616,7 +620,6 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
           swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
           highlightProductId={highlightProductId} onRecolherRua={onRecolherRua} subcatFilters={subcatFilters}
-          hoveredProductId={hoveredProductId}
         />
       ))}
 

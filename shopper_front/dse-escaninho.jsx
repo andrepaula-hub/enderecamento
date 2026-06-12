@@ -111,7 +111,7 @@ function ProductHalf({ product, compact }) {
 }
 
 // ── Main Escaninho cell ──────────────────────────────────────────────────────
-function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd, isGroupHovered }) {
+function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
   const [hov, setHov] = useState(false);
   const gs1 = product1 ? (GROUP_STYLE[product1.grupo] || GROUP_STYLE.Neutro) : null;
   const gs2 = product2 ? (GROUP_STYLE[product2.grupo] || GROUP_STYLE.Neutro) : null;
@@ -145,9 +145,9 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   if (isDual) {
     const dualColor = '#EF4444';
     return (
-      <div style={{ ...baseStyle, background: gs1.bg,
+      <div data-pid={product1.id} style={{ ...baseStyle, '--cc': '#EF4444', background: gs1.bg,
           border: isChemical ? chemBorder : `2px solid ${dualColor}`,
-          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : (hov||isGroupHovered) ? `0 4px 14px rgba(239,68,68,0.60)` : `0 0 6px rgba(239,68,68,0.40)`,
+          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px rgba(239,68,68,0.60)` : `0 0 6px rgba(239,68,68,0.40)`,
           transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
         onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
         {/* Left curva border */}
@@ -173,10 +173,10 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   // Single product
   const flags = flags1;
   return (
-    <div style={{ ...baseStyle,
+    <div data-pid={product1.id} style={{ ...baseStyle, '--cc': cc1,
         background: gs1.bg,
-        border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : (hov||isGroupHovered) ? `1px solid ${cc1}60` : '1px solid transparent'),
-        boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : (hov||isGroupHovered) ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
+        border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent'),
+        boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : hov ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
         transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
       onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, null); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
       {/* Curva border left */}

@@ -19,6 +19,15 @@
       50% { outline-color: rgba(239,68,68,0.18); }
     }
 
+    /* Peer highlight: escaninhos com o mesmo produto que o hovado */
+    .dse-peer-hovered {
+      outline: 1px solid var(--cc, rgba(59,130,246,0.6)) !important;
+      outline-offset: -1px;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--cc, #3B82F6) 40%, transparent),
+                  0 0 0 1px color-mix(in srgb, var(--cc, #3B82F6) 50%, transparent) !important;
+      z-index: 2;
+    }
+
     /* ── Light theme (default) ── */
     :root, [data-dse-theme="light"] {
       --app-bg:             #ECEEF2;  /* neutral warm gray — não azulado */
