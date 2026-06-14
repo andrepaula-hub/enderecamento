@@ -464,7 +464,13 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
             values = _row_values(row_num)[: len(headers)]
             if row_num <= original_last_row:
                 for col_index, value in enumerate(values, start=1):
-                    plano_ws.cell(row=row_num, column=col_index, value=value)
+                    if value is None:
+                        # openpyxl quirk: assigning None to cell.value does not erase
+                        # the value in the saved file when the cell had a prior value.
+                        # Removing from the internal cell dict is the reliable fix.
+                        plano_ws._cells.pop((row_num, col_index), None)
+                    else:
+                        plano_ws.cell(row=row_num, column=col_index, value=value)
                 updates += 1
             else:
                 plano_ws.append(values)

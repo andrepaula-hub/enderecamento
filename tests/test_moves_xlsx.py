@@ -79,6 +79,12 @@ class TestSaveBatchMoves:
         codes = _read_codes(xlsx)
         assert codes["R1E2-A1"] == "SKU001"
 
+    def test_origem_fica_vazia_apos_mover(self, tmp_path):
+        xlsx = _make_standard_xlsx(tmp_path / "plano.xlsx")
+        save_batch_moves(xlsx, [_move("SKU001", "R1E1-A1", "R1E2-A1")])
+        codes = _read_codes(xlsx)
+        assert codes["R1E1-A1"] is None
+
     def test_alocar_produto_novo_de_unallocated(self, tmp_path):
         xlsx = _make_standard_xlsx(tmp_path / "plano.xlsx")
         r = save_batch_moves(xlsx, [_move("SKU-NOVO", "UNALLOCATED", "R1E2-A1", "Produto Novo")])
@@ -89,6 +95,7 @@ class TestSaveBatchMoves:
         xlsx = _make_standard_xlsx(tmp_path / "plano.xlsx")
         r = save_batch_moves(xlsx, [_move("SKU001", "R1E1-A1", "UNALLOCATED")])
         assert r["success"] is True
+        assert _read_codes(xlsx)["R1E1-A1"] is None
 
     def test_destino_inexistente_retorna_error(self, tmp_path):
         xlsx = _make_standard_xlsx(tmp_path / "plano.xlsx")

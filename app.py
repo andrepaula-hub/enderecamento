@@ -112,7 +112,12 @@ from backend.logging_config import configure_logging  # noqa: E402
 
 configure_logging()
 
-app = FastAPI(title="Enderecamento Local")
+_is_prod = os.environ.get("ENV", "").lower() == "production"
+app = FastAPI(
+    title="Enderecamento Local",
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+)
 app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
 
 _http_logger = logging.getLogger("enderecamento.http")
