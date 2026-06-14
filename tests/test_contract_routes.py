@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import app as app_module
+import routes._state as _state
 from app import app
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -24,15 +24,10 @@ EMPTY_ARGS = {"args": []}
 
 
 def _patch_no_sheet():
-    """Contexto que remove planilha ativa e caminho XLSX local.
-
-    get_active_sheet foi importado diretamente em app.py via
-    `from core.gsheets_client import get_active_sheet`, então o patch
-    deve ser aplicado no namespace de app, não no core.
-    """
+    """Contexto que remove planilha ativa e caminho XLSX local."""
     return (
-        patch.object(app_module, "DATA_XLSX_PATH", None),
-        patch("app.get_active_sheet", return_value=None),
+        patch.object(_state, "DATA_XLSX_PATH", None),
+        patch("routes._state.get_active_sheet", return_value=None),
     )
 
 

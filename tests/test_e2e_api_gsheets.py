@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from fastapi.testclient import TestClient
 
-import app as app_module
 from app import app
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -25,17 +24,20 @@ FAKE_SHEET = {"sheet_id": "fake-id-123", "title": "Planilha Teste"}
 OK = {"success": True}
 FAIL = {"success": False, "error": "erro simulado"}
 
+# Após o split de app.py, get_active_sheet vive em routes._state e as
+# funções de backend vivem em seus módulos de rota específicos.
 
 def _sheet():
     """Contexto que injeta planilha ativa sem credenciais reais."""
-    return patch("app.get_active_sheet", return_value=FAKE_SHEET)
+    return patch("routes._state.get_active_sheet", return_value=FAKE_SHEET)
 
 
 def _no_sheet():
     """Contexto sem planilha ativa e sem XLSX local."""
+    import routes._state as state
     return (
-        patch("app.get_active_sheet", return_value=None),
-        patch.object(app_module, "DATA_XLSX_PATH", None),
+        patch("routes._state.get_active_sheet", return_value=None),
+        patch.object(state, "DATA_XLSX_PATH", None),
     )
 
 
@@ -43,23 +45,23 @@ def _no_sheet():
 
 class TestSaveBatchMovesComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
-        with _sheet(), patch("app.save_batch_moves_gsheet", return_value={**OK, "saved": 2}):
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value={**OK, "saved": 2}):
             r = client.post("/api/saveBatchMoves", json={"args": [[{"locationId": "R1E1-A1"}]]})
         assert r.json()["success"] is True
 
     def test_repassa_lista_de_moves_corretamente(self):
         moves = [{"locationId": "R1E1-A1", "productCode": "SKU001"}]
-        with _sheet(), patch("app.save_batch_moves_gsheet", return_value=OK) as mock_fn:
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK) as mock_fn:
             client.post("/api/saveBatchMoves", json={"args": [moves]})
         assert mock_fn.call_args[0][1] == moves
 
     def test_opcao_skip_full_repassada_como_true(self):
-        with _sheet(), patch("app.save_batch_moves_gsheet", return_value=OK) as mock_fn:
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK) as mock_fn:
             client.post("/api/saveBatchMoves", json={"args": [[], {"skipFull": True}]})
         assert mock_fn.call_args[1].get("skip_full") is True
 
     def test_opcao_skip_full_false_por_padrao(self):
-        with _sheet(), patch("app.save_batch_moves_gsheet", return_value=OK) as mock_fn:
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK) as mock_fn:
             client.post("/api/saveBatchMoves", json={"args": [[]]})
         assert mock_fn.call_args[1].get("skip_full") is False
 
@@ -70,7 +72,7 @@ class TestSaveBatchMovesComSheet:
         assert r.json()["success"] is False
 
     def test_response_e_json_valido(self):
-        with _sheet(), patch("app.save_batch_moves_gsheet", return_value=OK):
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK):
             r = client.post("/api/saveBatchMoves", json={"args": [[]]})
         assert r.status_code == 200
         assert "success" in r.json()
@@ -82,16 +84,16 @@ class TestSaveSingleMoveComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         move = {"locationId": "R1E1-A1", "productCode": "SKU001"}
         with _sheet(), \
-             patch("app.save_single_move_gsheet", return_value=OK), \
-             patch("app.append_card175_change_logs", return_value={"logged": 0}):
+             patch("routes.moves.save_single_move_gsheet", return_value=OK), \
+             patch("routes.moves.append_card175_change_logs", return_value={"logged": 0}):
             r = client.post("/api/saveSingleMove", json={"args": [move]})
         assert r.json()["success"] is True
 
     def test_repassa_move_corretamente(self):
         move = {"locationId": "R1E2-A1", "productCode": "SKU002"}
         with _sheet(), \
-             patch("app.save_single_move_gsheet", return_value=OK) as mock_fn, \
-             patch("app.append_card175_change_logs", return_value={}):
+             patch("routes.moves.save_single_move_gsheet", return_value=OK) as mock_fn, \
+             patch("routes.moves.append_card175_change_logs", return_value={}):
             client.post("/api/saveSingleMove", json={"args": [move]})
         assert mock_fn.call_args[0][1] == move
 
@@ -108,16 +110,16 @@ class TestExecuteSwapComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         swap = {"moveA": {"locationId": "R1E1-A1"}, "moveB": {"locationId": "R1E2-A1"}}
         with _sheet(), \
-             patch("app.execute_swap_gsheet", return_value=OK), \
-             patch("app.append_card175_change_logs", return_value={}):
+             patch("routes.moves.execute_swap_gsheet", return_value=OK), \
+             patch("routes.moves.append_card175_change_logs", return_value={}):
             r = client.post("/api/executeSwap", json={"args": [swap]})
         assert r.json()["success"] is True
 
     def test_repassa_swap_info_corretamente(self):
         swap = {"moveA": {"locationId": "R1E1-A1"}, "moveB": {"locationId": "R1E2-A1"}}
         with _sheet(), \
-             patch("app.execute_swap_gsheet", return_value=OK) as mock_fn, \
-             patch("app.append_card175_change_logs", return_value={}):
+             patch("routes.moves.execute_swap_gsheet", return_value=OK) as mock_fn, \
+             patch("routes.moves.append_card175_change_logs", return_value={}):
             client.post("/api/executeSwap", json={"args": [swap]})
         assert mock_fn.call_args[0][1] == swap
 
@@ -133,15 +135,15 @@ class TestExecuteSwapComSheet:
 class TestCreateEquipmentComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.create_new_equipment_gsheet", return_value={**OK, "equipment_id": "R5E3"}):
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.create_new_equipment_gsheet", return_value={**OK, "equipment_id": "R5E3"}):
             r = client.post("/api/createNewEquipment", json={"args": [5, 3, "prateleira", "tester"]})
         assert r.json()["success"] is True
 
     def test_repassa_rua_equip_e_tipo_corretos(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.create_new_equipment_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.create_new_equipment_gsheet", return_value=OK) as mock_fn:
             client.post("/api/createNewEquipment", json={"args": [5, 3, "prateleira", "tester"]})
         pos_args = mock_fn.call_args[0]
         assert pos_args[1] == 5          # rua_num
@@ -150,8 +152,8 @@ class TestCreateEquipmentComSheet:
 
     def test_user_e_repassado(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.create_new_equipment_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.create_new_equipment_gsheet", return_value=OK) as mock_fn:
             client.post("/api/createNewEquipment", json={"args": [1, 1, "freezer", "andre"]})
         assert mock_fn.call_args[1].get("user") == "andre"
 
@@ -167,13 +169,13 @@ class TestCreateEquipmentComSheet:
 class TestDeleteEquipmentComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         with _sheet(), \
-             patch("app.delete_equipment_and_products_gsheet", return_value={**OK, "deleted": 3}):
+             patch("routes.equipment.delete_equipment_and_products_gsheet", return_value={**OK, "deleted": 3}):
             r = client.post("/api/deleteEquipmentAndProducts", json={"args": ["R1E1", "tester"]})
         assert r.json()["success"] is True
 
     def test_repassa_equip_id_correto(self):
         with _sheet(), \
-             patch("app.delete_equipment_and_products_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.delete_equipment_and_products_gsheet", return_value=OK) as mock_fn:
             client.post("/api/deleteEquipmentAndProducts", json={"args": ["R2E5", "tester"]})
         assert mock_fn.call_args[0][1] == "R2E5"
 
@@ -189,15 +191,15 @@ class TestDeleteEquipmentComSheet:
 class TestChangeEquipmentTypeComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.change_equipment_type_gsheet", return_value=OK):
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.change_equipment_type_gsheet", return_value=OK):
             r = client.post("/api/changeEquipmentType", json={"args": ["R1E1", "geladeira", False]})
         assert r.json()["success"] is True
 
     def test_repassa_equip_id_e_tipo(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.change_equipment_type_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.change_equipment_type_gsheet", return_value=OK) as mock_fn:
             client.post("/api/changeEquipmentType", json={"args": ["R1E1", "geladeira", False]})
         pos = mock_fn.call_args[0]
         assert pos[1] == "R1E1"
@@ -205,15 +207,15 @@ class TestChangeEquipmentTypeComSheet:
 
     def test_recolher_true_repassado(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.change_equipment_type_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.change_equipment_type_gsheet", return_value=OK) as mock_fn:
             client.post("/api/changeEquipmentType", json={"args": ["R1E1", "prateleira", True]})
         assert mock_fn.call_args[0][3] is True
 
     def test_recolher_false_por_padrao(self):
         with _sheet(), \
-             patch("app.get_workflow_sheet", return_value=None), \
-             patch("app.change_equipment_type_gsheet", return_value=OK) as mock_fn:
+             patch("routes.equipment.get_workflow_sheet", return_value=None), \
+             patch("routes.equipment.change_equipment_type_gsheet", return_value=OK) as mock_fn:
             # sem terceiro arg → recolher = False
             client.post("/api/changeEquipmentType", json={"args": ["R1E1", "geladeira"]})
         assert mock_fn.call_args[0][3] is False
@@ -230,13 +232,13 @@ class TestChangeEquipmentTypeComSheet:
 class TestAddNewProductComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         product = {"product_code": "SKU-NOVO", "product_name": "Produto Novo"}
-        with _sheet(), patch("app.add_new_product_gsheet", return_value={**OK, "added": 1}):
+        with _sheet(), patch("routes.catalog.add_new_product_gsheet", return_value={**OK, "added": 1}):
             r = client.post("/api/addNewProduct", json={"args": [product]})
         assert r.json()["success"] is True
 
     def test_repassa_produto_correto(self):
         product = {"product_code": "SKU-NOVO", "product_name": "Produto Novo"}
-        with _sheet(), patch("app.add_new_product_gsheet", return_value=OK) as mock_fn:
+        with _sheet(), patch("routes.catalog.add_new_product_gsheet", return_value=OK) as mock_fn:
             client.post("/api/addNewProduct", json={"args": [product]})
         assert mock_fn.call_args[0][1] == product
 
@@ -252,13 +254,13 @@ class TestAddNewProductComSheet:
 class TestUpdateBaseProductComSheet:
     def test_retorna_success_quando_gsheets_ok(self):
         product = {"product_code": "SKU001", "product_name": "Produto Atualizado"}
-        with _sheet(), patch("app.update_base_product_gsheet", return_value={**OK, "updated": 1}):
+        with _sheet(), patch("routes.catalog.update_base_product_gsheet", return_value={**OK, "updated": 1}):
             r = client.post("/api/updateBaseProduct", json={"args": ["SKU001", product]})
         assert r.json()["success"] is True
 
     def test_repassa_codigo_original_e_produto(self):
         product = {"product_code": "SKU001", "product_name": "Novo Nome"}
-        with _sheet(), patch("app.update_base_product_gsheet", return_value=OK) as mock_fn:
+        with _sheet(), patch("routes.catalog.update_base_product_gsheet", return_value=OK) as mock_fn:
             client.post("/api/updateBaseProduct", json={"args": ["SKU001", product]})
         pos = mock_fn.call_args[0]
         assert pos[1] == "SKU001"   # original_code
