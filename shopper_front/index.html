@@ -1,9 +1,13 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-dse-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Endereçamento — Shopper</title>
+  <!-- Plus Jakarta Sans — premium, legível, moderna -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shopper-static/_ds/shopper-design-system-93bf5de4-604a-4bef-87d7-ff5f60287723/colors_and_type.css">
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
@@ -11,12 +15,23 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; overflow: hidden; }
-    body { font-family: var(--font-sans); font-size: 13px; }
+
+    /* ── Tipografia premium ── */
+    body {
+      font-family: 'Plus Jakarta Sans', var(--font-sans), system-ui, sans-serif;
+      font-size: 13px;
+      font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+      -webkit-font-smoothing: antialiased;
+    }
 
     @keyframes dse-spin { to { transform: rotate(360deg); } }
     @keyframes dse-highlight-pulse {
       0%, 100% { outline-color: #EF4444; }
       50% { outline-color: rgba(239,68,68,0.18); }
+    }
+    @keyframes dse-fade-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
     /* Peer highlight: escaninhos com o mesmo produto que o hovado */
@@ -28,116 +43,129 @@
       z-index: 2;
     }
 
-    /* ── Light theme (default) ── */
+    /* ── Light theme — "Warm Studio" ── */
     :root, [data-dse-theme="light"] {
-      --app-bg:             #ECEEF2;  /* neutral warm gray — não azulado */
-      --shopper-navy:       #002D62;
+      --app-bg:             #F0EBE1;
+      --shopper-navy:       #0F2B1A;
 
-      /* Config panel */
-      --cfg-surface:        #FFFFFF;
-      --cfg-border:         #DDE1E9;
-      --cfg-text:           #1A2535;
-      --cfg-text-muted:     #6B7A90;
-      --cfg-input-bg:       #F7F8FA;
+      --cfg-surface:        #FDFAF6;
+      --cfg-border:         #DDD8CE;
+      --cfg-text:           #1C1914;
+      --cfg-text-muted:     #776D5E;
+      --cfg-input-bg:       #F7F3EE;
 
-      /* Map — warehouse neutral, sem azul genérico */
-      --map-bg:             #E2E5EA;
-      --map-equip-bg:       #FFFFFF;
-      --map-equip-shadow:   0 1px 4px rgba(0,45,98,0.07);
-      --map-equip-header:   #F4F5F8;
-      /* equipment type header tints — using Shopper sub-brand palette */
-      --map-geladeira-hdr:  #EBF0FB;  /* Programada blue tint */
-      --map-gerador-hdr:    #FEF8E8;  /* Única orange tint */
-      --map-freezer-hdr:    #E8F8FB;
-      --map-quimico-hdr:    #FBE8EA;  /* Now red tint */
-      --map-text:           #2A3548;
-      --map-text-muted:     #8B97AA;
+      --map-bg:             #E7E1D6;
+      --map-equip-bg:       #FDFAF6;
+      --map-equip-shadow:   0 1px 3px rgba(28,25,20,0.08), 0 0 0 1px rgba(28,25,20,0.05);
+      --map-equip-header:   #F2EDE6;
+      --map-geladeira-hdr:  #EAF0F9;
+      --map-gerador-hdr:    #FEF8E8;
+      --map-freezer-hdr:    #E6F4F8;
+      --map-quimico-hdr:    #FAE9E9;
+      --map-text:           #2A2318;
+      --map-text-muted:     #9A9080;
 
-      /* Prancheta */
-      --pran-bg:            #F7F8FA;
-      --pran-border:        #DDE1E9;
-      --pran-text:          #1A2535;
-      --pran-muted:         #8B97AA;
-      --pran-input:         #FFFFFF;
-      --pran-hover:         rgba(0,45,98,0.04);
+      --pran-bg:            #F7F3EE;
+      --pran-border:        #DDD8CE;
+      --pran-text:          #1C1914;
+      --pran-muted:         #9A9080;
+      --pran-input:         #FDFAF6;
+      --pran-hover:         rgba(28,25,20,0.04);
 
-      /* Panels */
-      --panel-bg:           #FFFFFF;
-      --panel-border:       #DDE1E9;
-      --panel-text:         #1A2535;
-      --panel-muted:        #8B97AA;
-      --panel-surface:      #F7F8FA;
+      --panel-bg:           #FDFAF6;
+      --panel-border:       #DDD8CE;
+      --panel-text:         #1C1914;
+      --panel-muted:        #9A9080;
+      --panel-surface:      #F7F3EE;
 
-      /* Dropdowns */
-      --dropdown-bg:        #FFFFFF;
-      --dropdown-border:    #DDE1E9;
-      --dropdown-text:      #1A2535;
-      --dropdown-hover:     #F0F2F6;
+      --dropdown-bg:        #FDFAF6;
+      --dropdown-border:    #DDD8CE;
+      --dropdown-text:      #1C1914;
+      --dropdown-hover:     #EDE8E0;
     }
 
-    /* ── Dark theme ── */
+    /* ── Dark theme — "Obsidian Craft" (inspirado em Impeccable + taste-skill) ── */
     [data-dse-theme="dark"] {
-      --app-bg:             #0D1117;
+      --app-bg:             #0B0B09;
+      --shopper-navy:       #0D1F12;
 
-      /* Config panel */
-      --cfg-surface:        #161B22;
-      --cfg-border:         #21262D;
-      --cfg-text:           #E6EDF3;
-      --cfg-text-muted:     #8B949E;
-      --cfg-input-bg:       #0D1117;
+      --cfg-surface:        #131310;
+      --cfg-border:         rgba(255,255,255,0.08);
+      --cfg-text:           #F0EDE8;
+      --cfg-text-muted:     #635F59;
+      --cfg-input-bg:       #0F0F0D;
 
-      /* Map */
-      --map-bg:             #080D14;
-      --map-equip-bg:       #161B22;
-      --map-equip-shadow:   0 1px 4px rgba(0,0,0,0.4);
-      --map-equip-header:   #1C2330;
-      --map-geladeira-hdr:  #0F1825;
-      --map-gerador-hdr:    #1A1500;
-      --map-freezer-hdr:    #0A1820;
-      --map-quimico-hdr:    #1A0A0A;
-      --map-text:           #CDD9E5;
-      --map-text-muted:     #4D5566;
+      --map-bg:             #0D0D0B;
+      --map-equip-bg:       #161613;
+      --map-equip-shadow:   0 2px 12px rgba(0,0,0,0.55),
+                            0 0 0 1px rgba(255,255,255,0.05),
+                            inset 0 1px 0 rgba(255,255,255,0.04);
+      --map-equip-header:   #1C1C19;
+      --map-geladeira-hdr:  #0C141E;
+      --map-gerador-hdr:    #181300;
+      --map-freezer-hdr:    #091318;
+      --map-quimico-hdr:    #180808;
+      --map-text:           #E8E3DC;
+      --map-text-muted:     #4A4740;
 
-      /* Prancheta */
-      --pran-bg:            #0D1117;
-      --pran-border:        #21262D;
-      --pran-text:          #CDD9E5;
-      --pran-muted:         #4D5566;
-      --pran-input:         #161B22;
+      --pran-bg:            #0F0F0D;
+      --pran-border:        rgba(255,255,255,0.07);
+      --pran-text:          #F0EDE8;
+      --pran-muted:         #635F59;
+      --pran-input:         #131310;
       --pran-hover:         rgba(255,255,255,0.04);
 
-      /* Panels */
-      --panel-bg:           #161B22;
-      --panel-border:       #21262D;
-      --panel-text:         #CDD9E5;
-      --panel-muted:        #4D5566;
-      --panel-surface:      #0D1117;
+      --panel-bg:           #131310;
+      --panel-border:       rgba(255,255,255,0.07);
+      --panel-text:         #F0EDE8;
+      --panel-muted:        #635F59;
+      --panel-surface:      #0F0F0D;
 
-      /* Dropdowns */
-      --dropdown-bg:        #1C2333;
-      --dropdown-border:    #2D3748;
-      --dropdown-text:      #CDD9E5;
+      --dropdown-bg:        #1C1C19;
+      --dropdown-border:    rgba(255,255,255,0.09);
+      --dropdown-text:      #F0EDE8;
       --dropdown-hover:     rgba(255,255,255,0.06);
     }
 
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    /* ── Scrollbars refinados ── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.5); }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148,163,184,0.18);
+      border-radius: 2px;
+      transition: background 0.2s;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.35); }
+    [data-dse-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+    [data-dse-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+    /* Transição só nos elementos de UI — nunca no mapa (causaria lag nos 2100+ escaninhos) */
+    button, input, select, textarea, [role="button"] {
+      transition: background-color 0.15s ease, border-color 0.15s ease,
+                  color 0.1s ease, opacity 0.15s ease;
+    }
+
+    /* ── Double-bezel nos dropdowns (taste-skill) ── */
+    [data-dse-theme="dark"] [style*="var(--dropdown-bg)"],
+    [data-dse-theme="dark"] [style*="dropdown-bg"] {
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6),
+                  0 0 0 1px rgba(255,255,255,0.06),
+                  inset 0 1px 0 rgba(255,255,255,0.07) !important;
+    }
+
+    /* ── Feedback de interação ── */
+    button:active:not(:disabled) { transform: scale(0.97); }
 
     /* Input focus */
     input:focus, select:focus { outline: 1px solid var(--shopper-green) !important; }
-
-    /* Checkbox */
     input[type="checkbox"] { accent-color: var(--shopper-green); }
-
-    /* Date input */
     input[type="date"] { color-scheme: light; }
     [data-dse-theme="dark"] input[type="date"] { color-scheme: dark; }
-
     select { appearance: auto; }
     [data-dse-theme="dark"] select { color-scheme: dark; }
+
+    /* ── Animação de entrada nos paineis ── */
+    #root > * { animation: dse-fade-in 0.22s ease; }
   </style>
 </head>
 <body>
