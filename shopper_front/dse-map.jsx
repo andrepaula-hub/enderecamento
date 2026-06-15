@@ -254,8 +254,8 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, s
                         <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
                           isAllocating={!!selectedProduct&&!slot.p1} isHighlighted={isHighlighted}
                           equipCap={eq.cap}
-                          onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
-                          onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,pr1,pr2)}
+                          onClick={onEscClick}
+                          onHover={onHoverEsc}
                           onHoverEnd={onHoverEnd}
                         />
                       </div>
@@ -272,8 +272,8 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, s
                             <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={false}
                               isAllocating={false} isHighlighted={isHighlighted}
                               equipCap={eq.cap}
-                              onClick={e=>onEscClick(slot.escsId,slot.p1,slot.p2,e)}
-                              onHover={(pr1,pr2)=>onHoverEsc(slot.escsId,slot.p1,slot.p2)}
+                              onClick={onEscClick}
+                              onHover={onHoverEsc}
                               onHoverEnd={onHoverEnd}
                             />
                           </div>
@@ -584,7 +584,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const c = containerRef.current;
     if(c){
       c.querySelectorAll('.dse-peer-hovered').forEach(el=>el.classList.remove('dse-peer-hovered'));
-      c.querySelectorAll('[data-pid]').forEach(el=>{ if(el.dataset.pid===p1.id) el.classList.add('dse-peer-hovered'); });
+      c.querySelectorAll(`[data-pid="${p1.id}"]`).forEach(el=>el.classList.add('dse-peer-hovered'));
     }
   },[]);
   const handleHoverEnd = useCallback(()=>{

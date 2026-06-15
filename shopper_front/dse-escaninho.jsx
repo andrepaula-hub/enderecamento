@@ -1,5 +1,5 @@
 // DSE Escaninho — core visual cell + product tooltip
-const { useState, useRef, useEffect } = React;
+const { useState, useRef, useEffect, memo } = React;
 
 // ── Color constants ──────────────────────────────────────────────────────────
 const CURVA_COLOR = { A:'#0DAB77', B:'#3B82F6', C:'#F59E0B', D:'#F97316', E:'#EF4444' };
@@ -111,7 +111,7 @@ function ProductHalf({ product, compact }) {
 }
 
 // ── Main Escaninho cell ──────────────────────────────────────────────────────
-function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
+const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
   const [hov, setHov] = useState(false);
   const gs1 = product1 ? (GROUP_STYLE[product1.grupo] || GROUP_STYLE.Neutro) : null;
   const gs2 = product2 ? (GROUP_STYLE[product2.grupo] || GROUP_STYLE.Neutro) : null;
@@ -138,7 +138,7 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
   if (isEmpty || !product1) {
     return (
       <div style={{ ...baseStyle, ...emptyStyle }}
-        onClick={onClick} onMouseLeave={onHoverEnd} />
+        onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseLeave={onHoverEnd} />
     );
   }
 
@@ -149,7 +149,7 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
           border: isChemical ? chemBorder : `2px solid ${dualColor}`,
           boxShadow: isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px rgba(239,68,68,0.60)` : `0 0 6px rgba(239,68,68,0.40)`,
           transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
-        onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
+        onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
         {/* Left curva border */}
         <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
         {/* Split layout */}
@@ -178,7 +178,7 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
         border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent'),
         boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : hov ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
         transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
-      onClick={onClick} onMouseEnter={() => { setHov(true); onHover && onHover(product1, null); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
+      onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
       {/* Curva border left */}
       <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
       <div style={{ paddingLeft:7, paddingRight:4, paddingTop:4, paddingBottom:3, height:'100%', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
@@ -200,7 +200,7 @@ function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, is
       {isChemical && <div style={{ position:'absolute', inset:0, border:'2px solid #EF4444', borderRadius:4, pointerEvents:'none' }} />}
     </div>
   );
-}
+}); // end memo(DSEEscaninho)
 
 // ── Product Tooltip ──────────────────────────────────────────────────────────
 function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMouseEnter, onMouseLeave }) {
