@@ -1,6 +1,6 @@
 // DSE Config Panel — Fluxo 1 (nova loja) + Fluxo 2 (Card 175) + logs
 const { useState, useEffect, useRef } = React;
-const { STORES } = window.DSEData;
+const { STORES, METABASE_SALES } = window.DSEData;
 
 // ── Log item visual ──────────────────────────────────────────────────────────
 function LogItem({ entry }) {
@@ -99,7 +99,10 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     mapaEq: (workflow.target && (workflow.target.url || workflow.target.sheet_id)) || '',
   });
   const [loja, setLoja] = useState('');
-  const [dates, setDates] = useState({ ini:'2026-01-01', fim:'2026-01-31' });
+  const [dates, setDates] = useState({
+    ini: (METABASE_SALES && METABASE_SALES.data_inicial) || new Date().toISOString().slice(0,10),
+    fim: (METABASE_SALES && METABASE_SALES.data_final)   || new Date().toISOString().slice(0,10),
+  });
   const [lojas, setLojas] = useState([]);
   const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState(null); // { val: 0-100, label: '' }
@@ -299,7 +302,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         {flow === 1 && (
           <div style={{ background:'var(--cfg-input-bg)', border:'1px solid var(--cfg-border)', borderRadius:8, padding:'12px 14px' }}>
             <div style={sectionLabel}>Vendas Alvo via Metabase <span style={{ color:'#94A3B8', fontWeight:400 }}>(card 823)</span></div>
-            <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+            <div style={{ display:'flex', gap:8, marginBottom:6 }}>
               <div style={{ flex:1 }}>
                 <label style={fieldLabel}>Data inicial</label>
                 <input type="date" value={dates.ini} onChange={e=>setDates(d=>({...d,ini:e.target.value}))}
@@ -310,6 +313,13 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
                 <input type="date" value={dates.fim} onChange={e=>setDates(d=>({...d,fim:e.target.value}))}
                   style={{ width:'100%', padding:'5px 8px', fontSize:11, background:'var(--cfg-surface)', border:'1px solid var(--cfg-border)', borderRadius:4, color:'var(--cfg-text)' }} />
               </div>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <button
+                onClick={()=>setDates({ ini: (METABASE_SALES && METABASE_SALES.earliest_date) || '2020-01-01', fim: new Date().toISOString().slice(0,10) })}
+                style={smallBtnStyle('transparent','var(--cfg-border)','var(--cfg-text-muted)')}>
+                ⟵ Período completo
+              </button>
             </div>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
               <span style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Lojas</span>

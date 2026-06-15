@@ -22,6 +22,7 @@ DEFAULT_METABASE_URL = "https://metabase.kdabra.com.br"
 METABASE_PROXY_SCRIPT_ID = "1Ypp21M1kGmv0dL5bYCl6q9JfbVg7sOhs9qttK89u9iBFzq2fmEBEUffl"
 DEFAULT_CARD_ID = 823
 DEFAULT_TIMEOUT_SECONDS = 60
+METABASE_EARLIEST_DATE = "2020-01-01"
 SHEET_VENDAS_ALVO = "Vendas Alvo"
 VENDAS_ALVO_HEADERS = ["cod_produto", "desc_produto", "qtd_total"]
 METABASE_CONTEXT_PATH = CREDENTIALS_DIR / "metabase_sales_context.json"
@@ -129,6 +130,7 @@ def get_metabase_sales_context() -> dict[str, Any]:
         "data_final": default_final,
         "stores": stores,
         "available_stores": STORE_OPTIONS,
+        "earliest_date": METABASE_EARLIEST_DATE,
         "base_url": DEFAULT_METABASE_URL,
         "card_id": DEFAULT_CARD_ID,
     }

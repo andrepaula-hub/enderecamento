@@ -1,18 +1,16 @@
 (function () {
   'use strict';
 
-  var STORES = [
-    { id: 'AP', nome: 'Alto de Pinheiros', codigo: 'LOJA_AP_01' },
-    { id: 'BF', nome: 'Barra Funda', codigo: 'LOJA_BF_02' },
-    { id: 'BK', nome: 'Brooklin', codigo: 'LOJA_BK_03' },
-    { id: 'HI', nome: 'Higienopolis', codigo: 'LOJA_HI_04' },
-    { id: 'MO', nome: 'Moema', codigo: 'LOJA_MO_05' },
-    { id: 'MB', nome: 'Morumbi', codigo: 'LOJA_MB_06' },
-    { id: 'JP', nome: 'Jardins / Pamplona', codigo: 'LOJA_JP_07' },
-    { id: 'PI', nome: 'Pinheiros', codigo: 'LOJA_PI_08' },
-    { id: 'VM', nome: 'Vila Mariana', codigo: 'LOJA_VM_09' },
-    { id: 'VO', nome: 'Vila Olimpia', codigo: 'LOJA_VO_10' },
-  ];
+  function buildStoresFromWorkflow(workflowPayload) {
+    var metabaseSales = workflowPayload && workflowPayload.metabase_sales;
+    var card175 = workflowPayload && workflowPayload.card175;
+    var availableStores = metabaseSales && metabaseSales.available_stores;
+    var storeCodeById = card175 && card175.store_code_by_id || {};
+    if (!availableStores || !availableStores.length) return [];
+    return availableStores.map(function (s) {
+      return { id: s.value, nome: s.label, codigo: storeCodeById[s.value] || '' };
+    });
+  }
 
   function postApi(funcName, args) {
     var xhr = new XMLHttpRequest();
@@ -242,9 +240,11 @@
     var parsedMap = parseMap(rawData.content_html || '');
     var workflowPayload = workflow && workflow.success ? workflow : {};
     var activeSheet = workflowPayload.target || (workflowPayload.sheet || null);
+    var metabaseSales = workflowPayload.metabase_sales || {};
 
     return {
-      STORES: STORES,
+      STORES: buildStoresFromWorkflow(workflowPayload),
+      METABASE_SALES: metabaseSales,
       PRODUCTS: productsBundle.products,
       PRODUCT_MAP: productsBundle.productMap,
       STREETS_STRUCTURE: parsedMap.streets,
@@ -290,6 +290,7 @@
   window.DSEBootstrap = BOOTSTRAP;
   window.DSEData = {
     STORES: BOOTSTRAP.STORES,
+    METABASE_SALES: BOOTSTRAP.METABASE_SALES,
     PRODUCTS: BOOTSTRAP.PRODUCTS,
     PRODUCT_MAP: BOOTSTRAP.PRODUCT_MAP,
     STREETS_STRUCTURE: BOOTSTRAP.STREETS_STRUCTURE,
