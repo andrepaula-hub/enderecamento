@@ -3,6 +3,17 @@ const { useState, useCallback, useMemo, useRef, useEffect, memo } = React;
 const { DSEEscaninho, DSEProductTooltip } = window;
 const { PRODUCT_MAP } = window.DSEData;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
+const GROUP_STYLE = window.DSE_GROUP_STYLE;
+const DSEHelpers = window.DSEHelpers || {};
+
+function parseBoardEntryCode(entryId) {
+  if (typeof DSEHelpers.parseBoardEntryCode === 'function') {
+    return DSEHelpers.parseBoardEntryCode(entryId);
+  }
+  const raw = String(entryId || '').trim();
+  const match = raw.match(/^(?:unallocated|collected)::(.+?)::\d+$/);
+  return match ? match[1] : raw;
+}
 
 // ── Equipment type config — Shopper brand palette ────────────────────────────
 // Colors pulled from Shopper sub-brands: Programada #225CB3, Única #F59C00, Now #9E1028, Pet #F2749E
@@ -254,7 +265,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                 <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0 }}>{nivel}</span>
                 {runs.map((run,ri)=>{
                   const isGroup = run.slots.length>1 && run.p1id;
-                  const groupColor = isGroup ? (CURVA_COLOR[run.slots[0].p1?.curva]||'#64748B') : null;
+                  const groupColor = isGroup ? ((GROUP_STYLE[run.slots[0].p1?.grupo] || GROUP_STYLE.Neutro).text || '#64748B') : null;
                   const subcatActive = subcatFilters.length>0;
                   if(!isGroup){
                     const slot=run.slots[0];
@@ -276,7 +287,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                   // Grouped: same product across multiple consecutive slots
                   const groupSubcatMatch=!subcatActive||(run.slots[0].p1&&subcatFilters.includes(run.slots[0].p1.sub));
                   return (
-                    <div key={ri} style={{ display:'flex', gap:1, outline:`2px solid ${groupColor}`, borderRadius:6, padding:2, background:`${groupColor}14`, flexShrink:0, position:'relative', opacity:groupSubcatMatch?1:0.25, transition:'opacity 0.15s' }}>
+                    <div key={ri} style={{ display:'flex', gap:1, outline:`2px solid ${groupColor}`, borderRadius:6, padding:2, background:`${groupColor}10`, flexShrink:0, position:'relative', opacity:groupSubcatMatch?1:0.25, transition:'opacity 0.15s' }}>
                       {run.slots.map(slot=>{
                         const isHighlighted=highlightProductId&&slot.p1?.id===highlightProductId;
                         return (
@@ -545,8 +556,9 @@ function StreetMI({ label, icon, onClick, danger }) {
 }
 
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
-function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[] }) {
+function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[] }) {
   const [tooltip, setTooltip] = useState(null);
+  const [smartFillProgress, setSmartFillProgress] = useState(null);
   const containerRef = useRef(null);
   const closeTimerRef = useRef(null);
   const rafRef = useRef(null);
@@ -586,10 +598,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   // Score a slot for a specific product based on tipo_fisico rules from agent_scoring.py
   const scoreSlotForProduct = useCallback((escaninhoId, productId) => {
     const { level, equipId } = parseEscId(escaninhoId);
-    // queueProductIds uses boardEntryId format: "unallocated::CODE::N" or just the code directly
-    const raw = String(productId || '');
-    const m = raw.match(/^(?:unallocated|collected)::(.+?)::\d+$/);
-    const productCode = m ? m[1] : raw;
+    const productCode = parseBoardEntryCode(productId);
     const product = PRODUCT_MAP[productCode];
     if (!product) return -level * 2;
     let eq = null;
@@ -598,7 +607,8 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       if (eq) break;
     }
     const isPrateleira = eq && (eq.tipo || '').includes('prateleira');
-    if (!isPrateleira) return -level * 2;
+    const isGeladeira = eq && (eq.tipo || '').includes('geladeira');
+    if (!isPrateleira && !isGeladeira) return -level * 2;
     const niveis = eq ? eq.niveis : 5;
     let score = 0;
     // pesado: bloqueia topo, prefere níveis 3-4
@@ -612,6 +622,15 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     if ((product.grupo || '').toUpperCase() === 'FLV') {
       if (level === 1 || level === niveis) return -99999;
       score += 30;
+    }
+    if (isGeladeira && (product.grupo || '').toUpperCase() === 'FLV') {
+      const { pos } = parseEscId(escaninhoId);
+      if (pos === 1 || pos === 5) return -99999;
+      score += 30;
+    }
+    const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
+    if (isEgg && (level < 2 || level > 4)) {
+      return -99999;
     }
     // frágil/alto: prefere topo (nível 1)
     if (product.fragil || product.alto) {
@@ -666,6 +685,90 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     })).filter((item) => !!item.productId);
   }, [allocations, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
 
+  const buildScopedBackendAllocations = useCallback((allowedTargetIds) => {
+    const allowed = new Set(allowedTargetIds || []);
+    const scoped = {};
+    mapStructure.forEach((street) => {
+      street.equipment.forEach((eq) => {
+        for (let level = 1; level <= eq.niveis; level += 1) {
+          for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
+            const escaninhoId = `${eq.id}-${level}-${pos}`;
+            const current = allocations[escaninhoId] || {};
+            const p1 = current.p1 || null;
+            const p2 = current.p2 || null;
+            if (allowed.has(escaninhoId) || p1 || p2) {
+              scoped[escaninhoId] = { p1, p2 };
+            } else {
+              scoped[escaninhoId] = { p1: '__BLOCKED__', p2: null };
+            }
+          }
+        }
+      });
+    });
+    return scoped;
+  }, [allocations, mapStructure]);
+
+  const handleSmartFill = useCallback(async (clickedEscaninhoId) => {
+    const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
+    if (selectedProduct || queue.length <= 1) return null;
+    const parsed = parseEscId(clickedEscaninhoId);
+    const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment');
+    const targets = candidateIds.filter((escaninhoId) => {
+      const alloc = allocations[escaninhoId] || {};
+      return !alloc.p1;
+    });
+    if (!targets.length) return [];
+
+    const codeToEntryIds = {};
+    const unallocatedCodes = queue
+      .map((productId) => {
+        const productCode = parseBoardEntryCode(productId);
+        if (!productCode) return '';
+        if (!codeToEntryIds[productCode]) codeToEntryIds[productCode] = [];
+        codeToEntryIds[productCode].push(productId);
+        return productCode;
+      })
+      .filter(Boolean);
+
+    if (!unallocatedCodes.length) return [];
+
+    const response = await fetch('/api/addressing/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unallocated_codes: unallocatedCodes,
+        products_data: Object.values(PRODUCT_MAP),
+        map_structure: mapStructure,
+        allocations: buildScopedBackendAllocations(targets),
+        options: {
+          allow_top_level: true,
+          allow_second_slot: false,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Smart fill falhou com HTTP ${response.status}.`);
+    }
+
+    const result = await response.json();
+    if (!result || !result.success) {
+      throw new Error((result && result.error) || 'Smart fill não retornou sucesso.');
+    }
+
+    const targetSet = new Set(targets);
+    return (result.moves || [])
+      .map((move) => {
+        const queueForCode = codeToEntryIds[move.productCode] || [];
+        return {
+          escaninhoId: move.escaninhoId,
+          productId: queueForCode.shift() || move.productCode,
+          slot: move.slot || 1,
+        };
+      })
+      .filter((item) => item.productId && targetSet.has(item.escaninhoId));
+  }, [allocations, buildScopedBackendAllocations, mapStructure, orderedEscaninhos, queueProductIds, selectedProduct]);
+
   const buildCollectBatch = useCallback((clickedEscaninhoId, scope) => {
     const parsed = parseEscId(clickedEscaninhoId);
     const candidateIds = scope === 'equipment'
@@ -706,11 +809,34 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     containerRef.current.scrollTop  = Math.max(0,scrollY-40);
   },[highlightProductId]);
 
-  const handleEscClick = useCallback((escsId,p1,p2,e)=>{
+  const handleEscClick = useCallback(async (escsId,p1,p2,e)=>{
     setTooltip(null);
     const scope = (e && (e.metaKey || e.ctrlKey)) ? 'equipment' : (e && e.shiftKey) ? 'level' : 'single';
     const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
     if (hasAllocationSource) {
+      if (scope === 'equipment' && !wantsSecondSlot && !selectedProduct && (queueProductIds || []).length > 1) {
+        try {
+          setSmartFillProgress({ label:'Calculando alocação em lote…', done:0, total:1, indeterminate:true });
+          const smartBatch = await handleSmartFill(escsId);
+          if (smartBatch && smartBatch.length) {
+            if (typeof onAllocateManyProgressive === 'function') {
+              setSmartFillProgress({ label:'Aplicando alocação em lote…', done:0, total:smartBatch.length, indeterminate:false });
+              await onAllocateManyProgressive(smartBatch, (done, total) => {
+                setSmartFillProgress({ label:'Aplicando alocação em lote…', done, total, indeterminate:false });
+              });
+            } else {
+              onAllocateMany(smartBatch);
+            }
+            setSmartFillProgress({ label:'Alocação concluída.', done:smartBatch.length, total:smartBatch.length, indeterminate:false });
+            window.setTimeout(() => setSmartFillProgress(null), 700);
+            return;
+          }
+          setSmartFillProgress(null);
+        } catch (error) {
+          setSmartFillProgress(null);
+          console.error('Smart fill backend error:', error);
+        }
+      }
       const allocationBatch = buildAllocationBatch(escsId, { scope, slot:wantsSecondSlot ? 2 : 1 });
       if (allocationBatch.length > 1) {
         onAllocateMany(allocationBatch);
@@ -737,7 +863,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     } else {
       if(p1) onCollect(escsId,p1);
     }
-  },[selectedProduct,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,onAllocate,onAllocateMany,onCollect,onCollectMany]);
+  },[selectedProduct,queueProductIds,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,handleSmartFill,onAllocate,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -765,6 +891,27 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   return (
     <div ref={containerRef} style={{ flex:1, overflowX:'auto', overflowY:'hidden', padding:'12px 14px', display:'flex', gap:10, alignItems:'stretch', position:'relative', background:'var(--map-bg)' }}
       onMouseMove={e=>{ if(tooltip&&!rafRef.current){ const cx=e.clientX,cy=e.clientY; rafRef.current=requestAnimationFrame(()=>{ setTooltip(prev=>prev?{...prev,x:cx+14,y:cy-24}:null); rafRef.current=null; }); } }}>
+
+      {smartFillProgress && (
+        <div style={{ position:'fixed', top:60, left:'50%', transform:'translateX(-50%)', zIndex:110, minWidth:320, maxWidth:430, background:'rgba(16,26,21,0.96)', border:'1px solid rgba(61,212,166,0.28)', borderRadius:12, padding:'10px 12px', color:'#fff', boxShadow:'0 10px 28px rgba(0,0,0,0.28)', pointerEvents:'none' }}>
+          <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>{smartFillProgress.label}</div>
+          {!smartFillProgress.indeterminate && (
+            <div style={{ fontSize:10, color:'rgba(255,255,255,0.72)', marginBottom:6 }}>
+              {smartFillProgress.done} de {smartFillProgress.total}
+            </div>
+          )}
+          <div style={{ height:6, background:'rgba(255,255,255,0.12)', borderRadius:999, overflow:'hidden' }}>
+            <div style={{
+              height:'100%',
+              width: smartFillProgress.indeterminate ? '35%' : `${Math.max(4, Math.round((smartFillProgress.done / Math.max(smartFillProgress.total, 1)) * 100))}%`,
+              background:'linear-gradient(90deg, #0DAB77, #3DD4A6)',
+              borderRadius:999,
+              transition:'width 0.12s ease',
+              animation: smartFillProgress.indeterminate ? 'dse-progress-slide 1.15s linear infinite' : 'none',
+            }} />
+          </div>
+        </div>
+      )}
 
       {/* Swap mode banner */}
       {swapSource && (

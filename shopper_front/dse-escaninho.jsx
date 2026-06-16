@@ -127,8 +127,6 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
     cursor: isAllocating ? 'pointer' : 'default',
   };
 
-  const chemBorder = isChemical ? '2px solid #EF4444' : 'none';
-
   const baseStyle = {
     flex: 1, height: 62, borderRadius: 4, position:'relative', overflow:'hidden', flexShrink:0, minWidth:0,
     cursor: onClick ? 'pointer' : 'default', userSelect:'none',
@@ -143,11 +141,11 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
   }
 
   if (isDual) {
-    const dualColor = '#EF4444';
+    const dualColor = gs1?.text || '#64748B';
     return (
       <div data-pid={product1.id} style={{ ...baseStyle, '--cc': '#EF4444', background: gs1.bg,
-          border: isChemical ? chemBorder : `2px solid ${dualColor}`,
-          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px rgba(239,68,68,0.60)` : `0 0 6px rgba(239,68,68,0.40)`,
+          border: `2px solid ${dualColor}`,
+          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px ${dualColor}55` : `0 0 6px ${dualColor}33`,
           transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
         onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
         {/* Left curva border */}
@@ -161,11 +159,9 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
             <ProductHalf product={product2} compact />
           </div>
         </div>
-        {/* Dual badge — destaque igual a químico */}
-        <div style={{ position:'absolute', top:2, right:2, background: dualColor, borderRadius:3, padding:'1px 4px', lineHeight:1 }} title="Slot duplo — 2 produtos neste escaninho">
-          <span style={{ fontSize:8, fontWeight:900, color:'#fff' }}>2×</span>
+        <div style={{ position:'absolute', top:2, right:2, background:'rgba(255,255,255,0.92)', border:`1px solid ${dualColor}`, borderRadius:3, padding:'1px 4px', lineHeight:1 }} title="Slot duplo — 2 produtos neste escaninho">
+          <span style={{ fontSize:8, fontWeight:900, color:dualColor }}>2×</span>
         </div>
-        {isChemical && <div style={{ position:'absolute', inset:0, border:'2px solid #EF4444', borderRadius:4, pointerEvents:'none' }} />}
       </div>
     );
   }
@@ -175,7 +171,7 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
   return (
     <div data-pid={product1.id} style={{ ...baseStyle, '--cc': cc1,
         background: gs1.bg,
-        border: isChemical ? chemBorder : (isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent'),
+        border: isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent',
         boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : hov ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
         transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
       onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
@@ -196,8 +192,6 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
           {product1.nome}
         </div>
       </div>
-      {/* Chemical full border overlay */}
-      {isChemical && <div style={{ position:'absolute', inset:0, border:'2px solid #EF4444', borderRadius:4, pointerEvents:'none' }} />}
     </div>
   );
 }); // end memo(DSEEscaninho)

@@ -101,7 +101,9 @@
     return 'prateleira';
   }
 
-  function parseEquipId(ruaNum, equipNum) {
+  function parseEquipId(actualId, ruaNum, equipNum) {
+    var normalizedActualId = normalizeText(actualId);
+    if (normalizedActualId) return normalizedActualId;
     return 'R' + ruaNum + '-E' + equipNum;
   }
 
@@ -187,7 +189,7 @@
         var first = bins[0];
         var equipNum = toInt(first.getAttribute('data-equip-num'), 0);
         if (!equipNum) return;
-        var equipId = parseEquipId(ruaNum, equipNum);
+        var equipId = parseEquipId(equipEl.id, ruaNum, equipNum);
         var levels = {};
         var maxPos = 0;
         bins.forEach(function (binEl) {

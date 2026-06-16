@@ -793,6 +793,16 @@ function App() {
 
   const handleAllocate  = useCallback((id,pid,slot)=>dispatch({type:'ALLOCATE',escaninhoId:id,productId:pid,slot}),[]);
   const handleAllocateMany = useCallback((items)=>dispatch({type:'ALLOCATE_MANY',items}),[]);
+  const handleAllocateManyProgressive = useCallback(async (items, onProgress)=>{
+    const batch = Array.isArray(items) ? items : [];
+    const total = batch.length;
+    for (let index = 0; index < total; index += 1) {
+      const item = batch[index];
+      dispatch({ type:'ALLOCATE', escaninhoId:item.escaninhoId, productId:item.productId, slot:item.slot });
+      if (onProgress) onProgress(index + 1, total);
+      if (index < total - 1) await new Promise((resolve) => window.setTimeout(resolve, 28));
+    }
+  },[]);
   const handleCollect   = useCallback((id,p)=>dispatch({type:'COLLECT',escaninhoId:id,product:p}),[]);
   const handleCollectMany = useCallback((escaninhoIds)=>dispatch({type:'COLLECT_MANY',escaninhoIds}),[]);
   const handleStartSwap = useCallback(eqId=>dispatch({type:'SET_SWAP_SOURCE',equipId:eqId}),[]);
@@ -848,6 +858,7 @@ function App() {
             onToggleEquip={id=>dispatch({type:'TOGGLE_EQUIP',id})}
             onToggleStreet={id=>dispatch({type:'TOGGLE_STREET',id})}
             onAllocate={handleAllocate} onAllocateMany={handleAllocateMany}
+            onAllocateManyProgressive={handleAllocateManyProgressive}
             onCollect={handleCollect} onCollectMany={handleCollectMany}
             selectedProduct={state.selectedProduct} mode2aLeva={state.mode2aLeva}
             colWidth={tweaks.colWidth} searchQuery={state.searchQuery} dispatch={dispatch}
@@ -861,13 +872,6 @@ function App() {
               selectedProduct={state.selectedProduct} onSelectProduct={id=>dispatch({type:'SELECT_PRODUCT',productId:id})}
               mode2aLeva={state.mode2aLeva} onToggle2aLeva={()=>dispatch({type:'TOGGLE_2A_LEVA'})} width={300}
               onVisibleProductsChange={setVisibleQueue}/>
-          )}
-
-          {/* Allocation hint */}
-          {(state.selectedProduct || (visibleQueue.tab==='nao_alocados' && visibleQueue.productIds.length>0))&&(
-            <div style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:100, background:'rgba(13,171,119,0.96)', borderRadius:20, padding:'7px 18px', fontSize:11, fontWeight:700, color:'#fff', pointerEvents:'none', boxShadow:'0 4px 20px rgba(13,171,119,0.4)' }}>
-              Clique em escaninho vazio para alocar da fila · Shift nível · Cmd/Ctrl equipamento · Alt 2º slot · ESC cancela
-            </div>
           )}
         </>)}
 

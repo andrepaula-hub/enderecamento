@@ -17,6 +17,11 @@ const TIPO_FISICO_OPTIONS = [
   { id:'fragil',  label:'Frágil', flag:'fragil'  },
 ];
 
+const DEGELO_OPTIONS = [
+  { id:'PODE', label:'Pode sofrer' },
+  { id:'NÃO',  label:'Não pode sofrer' },
+];
+
 const EQUIP_METODO_LABELS = {
   prateleira:'Prateleira', prateleira_pamplona:'Pamplona', prateleira_lateral:'Lat.',
   geladeira:'Geladeira', geladeira_alta:'Gelad. Alta', geladeira_gerador:'Gelad. Ger.',
@@ -160,6 +165,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   const [filterGrupos, setFG]   = useState([]);
   const [filterCurvas, setFC]   = useState([]);
   const [filterTipos, setFT]    = useState([]); // 'alto' | 'pesado' | 'pequeno' | 'fragil'
+  const [filterDegelo, setFD]   = useState([]);
   const [filterMetodos, setFM]  = useState([]);
   const [subSearch, setSubSearch]= useState('');
   const [subOpen, setSubOpen]   = useState(false);
@@ -199,6 +205,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         });
         if (!match) return false;
       }
+      if (filterDegelo.length && !filterDegelo.includes(p.degelo)) return false;
       if (filterMetodos.length && !filterMetodos.includes(p.arm)) return false;
       if (filterSubs.length && !filterSubs.includes(p.sub)) return false;
       return true;
@@ -206,7 +213,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
       boardEntryId: entry.entryId,
       boardProductCode: entry.productCode,
     }));
-  }, [activeEntries, search, filterGrupos, filterCurvas, filterTipos, filterMetodos, filterSubs]);
+  }, [activeEntries, search, filterGrupos, filterCurvas, filterTipos, filterDegelo, filterMetodos, filterSubs]);
 
   const selectedBoardProduct = useMemo(() => {
     if (!selectedProduct) return null;
@@ -227,16 +234,28 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   const toggleGrupo  = g => setFG(prev=>prev.includes(g)?prev.filter(x=>x!==g):[...prev,g]);
   const toggleCurva  = c => setFC(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c]);
   const toggleTipo   = t => setFT(prev=>prev.includes(t)?prev.filter(x=>x!==t):[...prev,t]);
+  const toggleDegelo = d => setFD(prev=>prev.includes(d)?prev.filter(x=>x!==d):[...prev,d]);
   const toggleMetodo = m => setFM(prev=>prev.includes(m)?prev.filter(x=>x!==m):[...prev,m]);
   const toggleSub    = s => setFSubs(prev=>prev.includes(s)?prev.filter(x=>x!==s):[...prev,s]);
 
   const allMetodos = useMemo(() => {
     const s = new Set();
     activeEntries.forEach(e => { if (e.product?.arm && e.product.arm !== 'N/A') s.add(e.product.arm); });
-    return [...s].sort();
+    const priority = {
+      'Itens de prateleira': 0,
+      'Prateleira': 0,
+      'Geladeira': 1,
+      'Freezer': 2,
+    };
+    return [...s].sort((a, b) => {
+      const pa = Object.prototype.hasOwnProperty.call(priority, a) ? priority[a] : 99;
+      const pb = Object.prototype.hasOwnProperty.call(priority, b) ? priority[b] : 99;
+      if (pa !== pb) return pa - pb;
+      return String(a).localeCompare(String(b), 'pt-BR');
+    });
   }, [activeEntries]);
 
-  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterMetodos.length + filterSubs.length;
+  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterDegelo.length + filterMetodos.length + filterSubs.length;
 
   const handleHover = (product, e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -261,14 +280,14 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         </div>
         {/* Tabs */}
         <div style={{ display:'flex', gap:4 }}>
-          {[['nao_alocados','Não alocados',unallocated.length],['recolhidos','Recolhidos',collected.length]].map(([v,label,count])=>(
+          {[['nao_alocados','Não alocados'],['recolhidos','Recolhidos']].map(([v,label])=>(
             <button key={v} onClick={()=>setTab(v)} style={{
               flex:1, padding:'5px 0', fontSize:10, fontWeight:700, borderRadius:5, cursor:'pointer', fontFamily:'var(--font-sans)',
               border:tab===v?'1px solid var(--shopper-green)':'1px solid var(--pran-border)',
               background:tab===v?'rgba(13,171,119,0.10)':'transparent',
               color:tab===v?'var(--shopper-green)':'var(--pran-muted)',
             }}>
-              {label} <span style={{ opacity:0.65 }}>({count})</span>
+              {label}
             </button>
           ))}
         </div>
@@ -289,7 +308,9 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
       </div>
       <div style={{ padding:'5px 10px 7px', borderBottom:showFilters?'1px solid var(--pran-border)':'none', flexShrink:0 }}>
         <div style={{ fontSize:10, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)' }}>
-          {filtered.length} de {activeList.length} item(ns)
+          {tab === 'nao_alocados' ? 'Não alocados ' : 'Recolhidos '}
+          <strong style={{ color:'var(--pran-text)', fontWeight:800 }}>{filtered.length}</strong>
+          {' '}de {activeList.length}
         </div>
       </div>
 
@@ -323,6 +344,16 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
                 <Chip key={t.id} label={t.label} active={filterTipos.includes(t.id)} onClick={()=>toggleTipo(t.id)} />
               ))}
               {filterTipos.length>0 && <Chip label="✕" active={false} onClick={()=>setFT([])} />}
+            </div>
+          </div>
+
+          <div>
+            <div style={filterLabel}>Degelo</div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+              {DEGELO_OPTIONS.map(d=>(
+                <Chip key={d.id} label={d.label} active={filterDegelo.includes(d.id)} onClick={()=>toggleDegelo(d.id)} />
+              ))}
+              {filterDegelo.length>0 && <Chip label="✕" active={false} onClick={()=>setFD([])} />}
             </div>
           </div>
 
@@ -377,7 +408,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
 
           {/* Clear all */}
           {totalFilters>0 && (
-            <button onClick={()=>{setFG([]);setFC([]);setFT([]);setFM([]);setFSubs([]);}} style={{ padding:'4px', fontSize:10, fontWeight:700, background:'transparent', border:'1px solid var(--pran-border)', borderRadius:4, cursor:'pointer', color:'var(--pran-muted)', fontFamily:'var(--font-sans)' }}>
+            <button onClick={()=>{setFG([]);setFC([]);setFT([]);setFD([]);setFM([]);setFSubs([]);}} style={{ padding:'4px', fontSize:10, fontWeight:700, background:'transparent', border:'1px solid var(--pran-border)', borderRadius:4, cursor:'pointer', color:'var(--pran-muted)', fontFamily:'var(--font-sans)' }}>
               Limpar todos os filtros
             </button>
           )}

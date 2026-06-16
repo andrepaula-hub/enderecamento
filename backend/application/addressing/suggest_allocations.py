@@ -185,6 +185,7 @@ def _slots_from_map(
                         capacity_l=cap,
                         is_top_level=(nivel == 1),
                         is_bottom_level=(nivel == niveis),
+                        max_level=niveis,
                         occupant_count=occupant_count,
                     ))
     return slots
@@ -237,6 +238,7 @@ def _slot_from_location_id(
                     capacity_l=cap,
                     is_top_level=(nivel == 1),
                     is_bottom_level=(nivel == niveis),
+                    max_level=niveis,
                     occupant_count=occupant_count,
                 )
     return None

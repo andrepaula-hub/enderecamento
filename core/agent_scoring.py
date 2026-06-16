@@ -46,6 +46,7 @@ class Slot:
     capacity_l: float | None
     is_top_level: bool
     is_bottom_level: bool
+    max_level: int | None = None
     occupant_count: int = 0
     occupant_codes: list[str] | None = None
     occupant_subcategories: set[str] | None = None
@@ -174,6 +175,7 @@ def _slot_from_row(
         capacity_l=parse_number(row.get("capacidade_l")),
         is_top_level=parse_bool_flag(row.get("is_nivel_alto")) or level == 1,
         is_bottom_level=parse_bool_flag(row.get("is_nivel_inferior")),
+        max_level=None,
         occupant_count=occupant_count,
         occupant_codes=occupied_codes,
         occupant_subcategories=occupied_subcats,
@@ -185,6 +187,10 @@ def _slot_from_row(
 
 def _is_prateleira(slot: Slot) -> bool:
     return "prateleira" in slot.equip_type
+
+
+def _is_geladeira(slot: Slot) -> bool:
+    return "geladeira" in slot.equip_type
 
 
 def _is_egg(product: dict[str, Any]) -> bool:
@@ -220,13 +226,14 @@ def _hard_rule_violations(
         reasons.append("Ovos fora dos niveis intermediarios permitidos.")
 
     if _is_prateleira(slot):
-        if group == "flv" and slot.level in set(rules.flv_blocked_prateleira_levels):
+        if group == "flv" and (slot.is_top_level or slot.is_bottom_level):
             reasons.append("FLV em nivel proibido de prateleira.")
         peso = parse_number(product.get("peso_kg_unitario")) or 0
-        if peso > 2 and slot.level is not None and slot.level != rules.heavy_over_2kg_required_level:
-            reasons.append(f"Produto >2kg fora do nivel {rules.heavy_over_2kg_required_level}.")
-        if parse_bool_flag(product.get("is_pesado")) and slot.is_top_level:
+        if (peso > 2 or parse_bool_flag(product.get("is_pesado"))) and slot.is_top_level:
             reasons.append("Produto pesado no nivel de topo.")
+    if _is_geladeira(slot):
+        if group == "flv" and slot.position in {1, 5}:
+            reasons.append("FLV em parede de geladeira.")
 
     if slot.occupant_count >= 2:
         reasons.append("Endereco ja tem 2 produtos.")
@@ -249,10 +256,22 @@ def _hard_rule_violations(
 def _sort_products_for_allocation(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     curve_order = {"A": 0, "B": 1, "C": 2}
 
-    def key(row: dict[str, Any]) -> tuple[int, int, str]:
-        group_rank = 0 if _group(row) == "quimico" else 1
+    def key(row: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
+        peso = parse_number(row.get("peso_kg_unitario")) or 0
+        is_heavy = 0 if (peso > 2 or parse_bool_flag(row.get("is_pesado"))) else 1
+        is_egg = 0 if _is_egg(row) else 1
+        is_flv = 0 if _group(row) == "flv" else 1
+        is_fragile_or_tall = 0 if (parse_bool_flag(row.get("is_fragil")) or parse_bool_flag(row.get("is_alto"))) else 1
         curve = normalize_string(row.get("curva")).upper()[:1]
-        return (group_rank, curve_order.get(curve, 9), normalize_string(row.get("product_name")))
+        group_rank = 0 if _group(row) == "quimico" else 1
+        return (
+            group_rank,
+            is_egg,
+            is_heavy,
+            is_flv,
+            is_fragile_or_tall,
+            f"{curve_order.get(curve, 9)}::{normalize_string(row.get('product_name'))}",
+        )
 
     return sorted(products, key=key)
 
@@ -337,20 +356,38 @@ def _score_slot(product: dict[str, Any], slot: Slot, placement_index: dict[tuple
     score = 0.0
     group = _group(product)
     curve = normalize_string(product.get("curva")).upper()[:1]
+    max_level = slot.max_level or max(slot.level or 1, 1)
     if group == "quimico":
         score += 500
     if curve == "A" and not slot.is_top_level:
         score += 40
     if curve == "C" and slot.is_top_level:
         score += 20
-    if _is_prateleira(slot) and parse_bool_flag(product.get("is_pesado")) and slot.level in {3, 4}:
-        score += 70
+    if _is_prateleira(slot):
+        peso = parse_number(product.get("peso_kg_unitario")) or 0
+        is_heavy = peso > 2 or parse_bool_flag(product.get("is_pesado"))
+        if is_heavy:
+            if slot.level == 4:
+                score += 70
+            elif slot.level == 3:
+                score += 50
+            elif slot.level == 2:
+                score += 10
+        if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
+            score += 30
+        if parse_bool_flag(product.get("is_fragil")) or parse_bool_flag(product.get("is_alto")):
+            if slot.level is not None:
+                score += max(0, max_level - slot.level) * 12
+        if parse_bool_flag(product.get("is_pequeno")) and slot.level is not None:
+            score += slot.level * 6
+    if _is_geladeira(slot) and group == "flv" and slot.position is not None and slot.position not in {1, 5}:
+        score += 30
     if slot.occupant_count == 0:
         score += 30
     else:
         score -= 80
     if slot.level is not None:
-        score -= abs(slot.level - 3) * 2
+        score -= slot.level * 2
     score += _curve_zone_score(curve, slot, curve_zone_map)
     score -= _adjacency_penalty(product, slot, placement_index)
     return score
