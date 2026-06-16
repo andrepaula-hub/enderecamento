@@ -1,10 +1,10 @@
 // MapPage — substitui dse-map.jsx + lógica do dse-app.jsx para a view de mapa
 // Estado gerenciado por Zustand. Sem funções de normalização de dados.
-import { useState, useEffect, useCallback, useReducer, useRef } from 'react'
+import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react'
 import { useAddressingStore } from '../store/addressing'
 import { useTweaksStore } from '../store/tweaks'
 import { useConfigStore } from '../store/config'
-import { getInitialData } from '../api/addressing'
+import { getInitialData, suggestAllocations } from '../api/addressing'
 import { saveVersion } from '../api/versions'
 import { generateLayoutAtual, generateKdabraSheet, generateKdabraEnderecarSheet, downloadFile } from '../api/exports'
 import SearchBar from '../components/SearchBar'
@@ -86,6 +86,7 @@ type MapAction =
   | { type: 'REDO' }
   | { type: 'RECOLHER_RUA'; streetId: string }
   | { type: 'TOGGLE_CONFIG' }
+  | { type: 'BULK_ALLOCATE'; moves: Array<{ escaninhoId: string; productCode: string }> }
 
 function reducer(state: MapState, action: MapAction): MapState {
   switch (action.type) {
@@ -183,6 +184,18 @@ function reducer(state: MapState, action: MapAction): MapState {
       return { ...commitAllocs(state, newA), collected: newCollected, streetCollapsed: { ...state.streetCollapsed, [action.streetId]: false } }
     }
     case 'TOGGLE_CONFIG': return { ...state, configOpen: !state.configOpen }
+    case 'BULK_ALLOCATE': {
+      let newA = { ...state.allocations }
+      const newUnallocated = [...state.unallocated]
+      for (const { escaninhoId, productCode } of action.moves) {
+        const prev = newA[escaninhoId] ?? { p1: null, p2: null }
+        if (!prev.p1) newA = { ...newA, [escaninhoId]: { p1: productCode, p2: prev.p2 } }
+        else if (!prev.p2) newA = { ...newA, [escaninhoId]: { p1: prev.p1, p2: productCode } }
+        const idx = newUnallocated.indexOf(productCode)
+        if (idx !== -1) newUnallocated.splice(idx, 1)
+      }
+      return { ...commitAllocs(state, newA), unallocated: newUnallocated }
+    }
     default: return state
   }
 }
@@ -326,67 +339,104 @@ function ActionsDropdown({ dispatch }: { dispatch: React.Dispatch<MapAction> }) 
   )
 }
 
+// ── Regras de alocação (client-side, espelha core/agent_scoring.py) ────────────
+function canPlace(product: Product, equipTipo: string, nivel: number, totalNiveis: number): boolean {
+  const arm = product.arm.toLowerCase()
+  const tipo = equipTipo.toLowerCase()
+  if (arm.includes('congelado') || arm.includes('freezer')) {
+    if (!tipo.includes('freezer')) return false
+  } else if (arm.includes('refrigerado') || arm.includes('geladeira')) {
+    if (!tipo.includes('geladeira')) return false
+  } else {
+    if (tipo.includes('geladeira') || tipo.includes('freezer')) return false
+  }
+  if (tipo.includes('prateleira')) {
+    if (nivel === 1) return false  // nível mais alto bloqueado por padrão
+    const grupo = product.grupo.toLowerCase()
+    const isFLV = grupo === 'flv' || grupo === 'flvs' || grupo.includes('flv')
+    if (isFLV && (nivel === 1 || nivel === totalNiveis)) return false
+    if (product.pesado && nivel !== 4) return false
+  }
+  return true
+}
+
 // ── Map canvas ─────────────────────────────────────────────────────────────────
-function EquipmentBlock({ equip, allocations, productMap, collapsed, onToggle, selectedProduct, onAllocate, onCollect, highlightProductId, compact }: {
-  equip: Equipment; allocations: Record<string, Allocation>; productMap: Record<string, Product>; collapsed: boolean; onToggle: () => void; selectedProduct: string | null; onAllocate: (id: string, pid: string, slot: 1 | 2) => void; onCollect: (id: string, p: Product) => void; highlightProductId: string | null; compact: boolean
+const EQUIP_TYPE_LABELS: Record<string, string> = {
+  prateleira: 'PRT', prateleira_pamplona: 'PMP', geladeira: 'GLD', geladeira_alta: 'GDA', geladeira_gerador: 'GDG', freezer: 'FRZ', quimico: 'QMC',
+}
+const EQUIP_TYPE_COLORS: Record<string, string> = {
+  prateleira: '#64748B', prateleira_pamplona: '#7C3AED', geladeira: '#2563EB', geladeira_alta: '#1D4ED8', geladeira_gerador: '#D97706', freezer: '#0891B2', quimico: '#DC2626',
+}
+
+function EquipmentBlock({ equip, allocations, productMap, collapsed, onToggle, selectedProduct, onAllocate, onBulkFill, onCollect, highlightProductId, compact }: {
+  equip: Equipment; allocations: Record<string, Allocation>; productMap: Record<string, Product>; collapsed: boolean; onToggle: (e: React.MouseEvent) => void; selectedProduct: string | null; onAllocate: (id: string, pid: string, slot: 1 | 2) => void; onBulkFill: (equipId: string, nivel: number | null) => void; onCollect: (id: string, p: Product) => void; highlightProductId: string | null; compact: boolean
 }) {
-  const TYPE_LABELS: Record<string, string> = {
-    prateleira: 'PRT', prateleira_pamplona: 'PMP', geladeira: 'GLD', geladeira_alta: 'GDA', geladeira_gerador: 'GDG', freezer: 'FRZ', quimico: 'QMC',
-  }
-  const TYPE_COLORS: Record<string, string> = {
-    prateleira: '#64748B', prateleira_pamplona: '#7C3AED', geladeira: '#2563EB', geladeira_alta: '#1D4ED8', geladeira_gerador: '#D97706', freezer: '#0891B2', quimico: '#DC2626',
-  }
+  const TYPE_LABELS = EQUIP_TYPE_LABELS
+  const TYPE_COLORS = EQUIP_TYPE_COLORS
   const label = TYPE_LABELS[equip.tipo] ?? equip.tipo.toUpperCase().slice(0, 3)
   const color = TYPE_COLORS[equip.tipo] ?? '#64748B'
   const CELL_W = compact ? 56 : 72
 
   return (
     <div style={{ marginBottom: 4, flexShrink: 0 }}>
-      <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', cursor: 'pointer', borderRadius: 4, background: 'var(--map-equip-header)' }}>
-        <span style={{ fontSize: 9, fontWeight: 800, color, background: `${color}20`, padding: '1px 4px', borderRadius: 3 }}>{label}</span>
-        <span style={{ fontSize: 9, color: 'var(--map-text-muted)', flex: 1 }}>{equip.id}</span>
-        <span style={{ fontSize: 9, color: 'var(--map-text-muted)' }}>{collapsed ? '▸' : '▾'}</span>
+      <div
+        onClick={e => {
+          if ((e.metaKey || e.ctrlKey) && selectedProduct) { onBulkFill(equip.id, null); return }
+          onToggle(e)
+        }}
+        title={selectedProduct ? 'Cmd+clique para preencher todo o equipamento com regras' : undefined}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', cursor: 'pointer', borderRadius: 4, background: 'var(--map-equip-header)' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color, background: `${color}20`, padding: '1px 5px', borderRadius: 3 }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--map-text-muted)', flex: 1 }}>{equip.id}</span>
+        <span style={{ fontSize: 10, color: 'var(--map-text-muted)' }}>{collapsed ? '▸' : '▾'}</span>
       </div>
       {!collapsed && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
-          {Array.from({ length: equip.niveis }, (_, ni) => (
-            <div key={ni} style={{ display: 'flex', gap: 2 }}>
-              {Array.from({ length: equip.escsPerNivel }, (_, si) => {
-                const id = `${equip.id}-${ni + 1}-${si + 1}`
-                const alloc = allocations[id]
-                const p1 = alloc?.p1 ? (productMap[alloc.p1] ?? null) : null
-                const p2 = alloc?.p2 ? (productMap[alloc.p2] ?? null) : null
-                const isHighlighted = !!highlightProductId && (alloc?.p1 === highlightProductId || alloc?.p2 === highlightProductId)
-                const bg = isHighlighted ? 'rgba(13,171,119,0.15)' : p1 ? 'var(--esc-occupied)' : 'var(--esc-empty)'
-                return (
-                  <div key={id} style={{ width: CELL_W, minHeight: compact ? 22 : 28, border: `1px solid ${isHighlighted ? '#0DAB77' : 'var(--esc-border)'}`, borderRadius: 3, background: bg, fontSize: compact ? 8 : 9, overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}
-                    onClick={() => {
-                      if (selectedProduct && !p1) { onAllocate(id, selectedProduct, 1); return }
-                      if (selectedProduct && p1 && !p2) { onAllocate(id, selectedProduct, 2); return }
-                      if (p1) onCollect(id, p1)
-                    }}>
-                    {p1 && (
-                      <div style={{ padding: '1px 3px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: 'var(--esc-text)', lineHeight: 1.3 }}>
-                        {p1.nome.slice(0, 10)}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ))}
+          {Array.from({ length: equip.niveis }, (_, ni) => {
+            const nivel = ni + 1
+            return (
+              <div key={ni}
+                onClick={e => { if (e.shiftKey && selectedProduct) { e.stopPropagation(); onBulkFill(equip.id, nivel) } }}
+                title={selectedProduct ? `Shift+clique para preencher nível ${nivel} com regras` : undefined}
+                style={{ display: 'flex', gap: 2 }}>
+                {Array.from({ length: equip.escsPerNivel }, (_, si) => {
+                  const id = `${equip.id}-${nivel}-${si + 1}`
+                  const alloc = allocations[id]
+                  const p1 = alloc?.p1 ? (productMap[alloc.p1] ?? null) : null
+                  const p2 = alloc?.p2 ? (productMap[alloc.p2] ?? null) : null
+                  const isHighlighted = !!highlightProductId && (alloc?.p1 === highlightProductId || alloc?.p2 === highlightProductId)
+                  const bg = isHighlighted ? 'rgba(13,171,119,0.15)' : p1 ? 'var(--esc-occupied)' : 'var(--esc-empty)'
+                  return (
+                    <div key={id} style={{ width: CELL_W, minHeight: compact ? 22 : 28, border: `1px solid ${isHighlighted ? '#0DAB77' : 'var(--esc-border)'}`, borderRadius: 3, background: bg, fontSize: compact ? 8 : 9, overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}
+                      onClick={e => {
+                        if (e.shiftKey || e.metaKey || e.ctrlKey) return  // handled by parent
+                        if (selectedProduct && !p1) { onAllocate(id, selectedProduct, 1); return }
+                        if (selectedProduct && p1 && !p2) { onAllocate(id, selectedProduct, 2); return }
+                        if (p1) onCollect(id, p1)
+                      }}>
+                      {p1 && (
+                        <div style={{ padding: '1px 3px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: 'var(--esc-text)', lineHeight: 1.3 }}>
+                          {p1.nome.slice(0, 10)}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-function StreetColumn({ street, allocations, productMap, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, selectedProduct, onAllocate, onCollect, highlightProductId, colWidth, compact }: {
-  street: Street; allocations: Record<string, Allocation>; productMap: Record<string, Product>; equipCollapsed: Record<string, boolean>; streetCollapsed: Record<string, boolean>; onToggleEquip: (id: string) => void; onToggleStreet: (id: string) => void; selectedProduct: string | null; onAllocate: (id: string, pid: string, slot: 1 | 2) => void; onCollect: (id: string, p: Product) => void; highlightProductId: string | null; colWidth: number; compact: boolean
+function StreetColumn({ street, allocations, productMap, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, selectedProduct, onAllocate, onBulkFill, onCollect, highlightProductId, colWidth, compact }: {
+  street: Street; allocations: Record<string, Allocation>; productMap: Record<string, Product>; equipCollapsed: Record<string, boolean>; streetCollapsed: Record<string, boolean>; onToggleEquip: (id: string) => void; onToggleStreet: (id: string) => void; selectedProduct: string | null; onAllocate: (id: string, pid: string, slot: 1 | 2) => void; onBulkFill: (equipId: string, nivel: number | null) => void; onCollect: (id: string, p: Product) => void; highlightProductId: string | null; colWidth: number; compact: boolean
 }) {
   const collapsed = !!streetCollapsed[street.id]
   return (
-    <div style={{ width: colWidth, flexShrink: 0, borderRight: '1px solid var(--map-col-border)', paddingRight: 8 }}>
+    <div style={{ width: colWidth, flexShrink: 0, borderRight: '1px solid var(--map-col-border)', paddingRight: 8, overflowY: 'auto', minHeight: 0 }}>
       <div onClick={() => onToggleStreet(street.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px', cursor: 'pointer', marginBottom: 4, borderBottom: '1px solid var(--map-col-border)' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--map-street-text)' }}>{street.nome}</span>
         <span style={{ fontSize: 9, color: 'var(--map-text-muted)', marginLeft: 'auto' }}>{street.equipment.length} equip.</span>
@@ -395,8 +445,8 @@ function StreetColumn({ street, allocations, productMap, equipCollapsed, streetC
       {!collapsed && street.equipment.map(eq => (
         <EquipmentBlock
           key={eq.id} equip={eq} allocations={allocations} productMap={productMap}
-          collapsed={!!equipCollapsed[eq.id]} onToggle={() => onToggleEquip(eq.id)}
-          selectedProduct={selectedProduct} onAllocate={onAllocate} onCollect={onCollect}
+          collapsed={!!equipCollapsed[eq.id]} onToggle={e => { if (!e.metaKey && !e.ctrlKey) onToggleEquip(eq.id) }}
+          selectedProduct={selectedProduct} onAllocate={onAllocate} onBulkFill={onBulkFill} onCollect={onCollect}
           highlightProductId={highlightProductId} compact={compact}
         />
       ))}
@@ -409,6 +459,8 @@ export default function MapPage() {
   const [mapState, dispatch] = useReducer(reducer, initState)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [tweakOpen, setTweakOpen] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
   const addrStore = useAddressingStore()
   const configStore = useConfigStore()
   const tweaks = useTweaksStore()
@@ -420,8 +472,11 @@ export default function MapPage() {
       getInitialData().then(data => {
         addrStore.setFromApiResponse(data)
         const locationMap = JSON.parse(data.product_location_map_json ?? '{}') as Record<string, Allocation>
-        const unallocatedMap = JSON.parse(data.unallocated_products_json ?? '{}') as Record<string, Product>
-        const unallocated = Object.keys(unallocatedMap)
+        const unallocatedMap = JSON.parse(data.unallocated_products_json ?? '{}') as Record<string, Record<string, unknown>>
+        // Use product_code as ID so it matches productMap keys
+        const unallocated = Object.values(unallocatedMap)
+          .map((p) => String(p.product_code ?? p.id ?? '').trim())
+          .filter(Boolean)
         // Build map structure from equipTypes
         const equipTypes = JSON.parse(data.equipTypesJson ?? '[]') as Array<{ id: string; type: string; niveis?: number; escsPerNivel?: number; cap?: number }>
         const streetMap: Record<string, Street> = {}
@@ -472,6 +527,51 @@ export default function MapPage() {
 
   const handleAllocate = useCallback((id: string, pid: string, slot: 1 | 2) => dispatch({ type: 'ALLOCATE', escaninhoId: id, productId: pid, slot }), [])
   const handleCollect = useCallback((id: string, p: Product) => dispatch({ type: 'COLLECT', escaninhoId: id, product: p }), [])
+
+  const handleBulkFill = useCallback((equipId: string, nivel: number | null) => {
+    const pid = mapState.selectedProduct
+    if (!pid) return
+    const product = addrStore.productMap[pid]
+    if (!product) return
+    const equip = mapState.mapStructure.flatMap(s => s.equipment).find(e => e.id === equipId)
+    if (!equip) return
+    const moves: Array<{ escaninhoId: string; productCode: string }> = []
+    const niveis = nivel !== null ? [nivel] : Array.from({ length: equip.niveis }, (_, i) => i + 1)
+    for (const nv of niveis) {
+      if (!canPlace(product, equip.tipo, nv, equip.niveis)) continue
+      for (let si = 1; si <= equip.escsPerNivel; si++) {
+        const locId = `${equipId}-${nv}-${si}`
+        const alloc = mapState.allocations[locId]
+        if (alloc?.p1) continue  // slot ocupado
+        moves.push({ escaninhoId: locId, productCode: pid })
+      }
+    }
+    if (moves.length > 0) dispatch({ type: 'BULK_ALLOCATE', moves })
+  }, [mapState.selectedProduct, mapState.mapStructure, mapState.allocations, addrStore.productMap])
+
+  const handleSuggest = useCallback(async () => {
+    if (suggesting || mapState.unallocated.length === 0) return
+    setSuggesting(true)
+    setSuggestError(null)
+    try {
+      const productMap = addrStore.productMap
+      const products = mapState.unallocated.map(code => productMap[code]).filter(Boolean) as Product[]
+      const res = await suggestAllocations({
+        unallocated_codes: mapState.unallocated,
+        products_data: products,
+        map_structure: mapState.mapStructure,
+        allocations: mapState.allocations as Record<string, { p1: string | null; p2: string | null }>,
+        options: {},
+      })
+      if (!res.success) { setSuggestError(res.error ?? 'Erro ao sugerir alocações.'); return }
+      if (res.moves.length === 0) { setSuggestError('Nenhum produto pôde ser alocado com as regras atuais.'); return }
+      dispatch({ type: 'BULK_ALLOCATE', moves: res.moves })
+    } catch (e) {
+      setSuggestError(String(e))
+    } finally {
+      setSuggesting(false)
+    }
+  }, [suggesting, mapState.unallocated, mapState.mapStructure, mapState.allocations, addrStore.productMap])
 
   const handleSaveVersion = useCallback(async (name: string, setProgress: (n: number) => void) => {
     setProgress(45)
@@ -526,6 +626,11 @@ export default function MapPage() {
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {suggestError && (
+          <div onClick={() => setSuggestError(null)} style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: '#7F1D1D', color: '#FCA5A5', fontSize: 12, padding: '8px 14px', borderRadius: 7, cursor: 'pointer', maxWidth: 440, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+            {suggestError} <span style={{ opacity: 0.6, marginLeft: 8 }}>✕</span>
+          </div>
+        )}
         {addrStore.loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--app-bg)', zIndex: 10 }}>
             <div style={{ fontSize: 14, color: 'var(--map-text-muted)' }}>Carregando mapa…</div>
@@ -537,8 +642,8 @@ export default function MapPage() {
           </div>
         )}
 
-        {/* Map canvas */}
-        <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', gap: 12 }}>
+        {/* Map canvas — horizontal scroll only; columns stretch to full height and scroll independently */}
+        <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 12, display: 'flex', gap: 12 }}>
           {mapState.mapStructure.map(street => (
             <StreetColumn
               key={street.id} street={street} allocations={mapState.allocations} productMap={productMap}
@@ -546,7 +651,7 @@ export default function MapPage() {
               onToggleEquip={id => dispatch({ type: 'TOGGLE_EQUIP', id })}
               onToggleStreet={id => dispatch({ type: 'TOGGLE_STREET', id })}
               selectedProduct={mapState.selectedProduct}
-              onAllocate={handleAllocate} onCollect={handleCollect}
+              onAllocate={handleAllocate} onBulkFill={handleBulkFill} onCollect={handleCollect}
               highlightProductId={mapState.highlightProductId}
               colWidth={tweaks.colWidth} compact={compact}
             />

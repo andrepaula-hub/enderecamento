@@ -54,6 +54,14 @@ class KdabraRequest(BaseModel):
     sheet_id: str = ""
 
 
+class SuggestAllocationsRequest(BaseModel):
+    unallocated_codes: list[str] = []
+    products_data: list[dict[str, Any]] = []
+    map_structure: list[dict[str, Any]] = []
+    allocations: dict[str, dict[str, str | None]] = {}
+    options: dict[str, Any] = {}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -236,6 +244,22 @@ async def health() -> JSONResponse:
     except Exception:
         version = "unknown"
     return JSONResponse({"status": "ok", "service": "enderecamento", "fastapi_version": version})
+
+
+@router.post("/api/addressing/suggest")
+def new_suggest_allocations(req: SuggestAllocationsRequest) -> JSONResponse:
+    from backend.application.addressing.suggest_allocations import suggest_allocations
+    try:
+        result = suggest_allocations(
+            unallocated_codes=req.unallocated_codes,
+            products_data=req.products_data,
+            map_structure=req.map_structure,
+            allocations=req.allocations,
+            options=req.options,
+        )
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)})
 
 
 @router.get("/api/stores")

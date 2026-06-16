@@ -14,6 +14,12 @@ const TIPO_FISICO_OPTIONS = [
   { id: 'fragil',  label: 'Frágil',  flag: 'fragil' },
 ]
 
+const EQUIP_METODO_LABELS: Record<string, string> = {
+  prateleira: 'Prateleira', prateleira_pamplona: 'Pamplona',
+  geladeira: 'Geladeira', geladeira_alta: 'Gelad. Alta', geladeira_gerador: 'Gelad. Gerador',
+  freezer: 'Freezer', quimico: 'Químico',
+}
+
 interface ChipProps {
   label: string
   active: boolean
@@ -98,6 +104,7 @@ export default function Prancheta({
   const [filterGrupos, setFG] = useState<string[]>([])
   const [filterCurvas, setFC] = useState<string[]>([])
   const [filterTipos, setFT] = useState<string[]>([])
+  const [filterMetodos, setFM] = useState<string[]>([])
   const [subSearch, setSubSearch] = useState('')
   const [subOpen, setSubOpen] = useState(false)
   const [filterSubs, setFSubs] = useState<string[]>([])
@@ -118,6 +125,12 @@ export default function Prancheta({
     [allSubs, subSearch]
   )
 
+  const allMetodos = useMemo(() => {
+    const s = new Set<string>()
+    activeList.forEach(pid => { const p = productMap[pid]; if (p?.metodo) s.add(p.metodo) })
+    return [...s].sort()
+  }, [activeList, productMap])
+
   const filtered = useMemo(() => {
     return activeList
       .filter(pid => {
@@ -136,19 +149,21 @@ export default function Prancheta({
           })
           if (!match) return false
         }
+        if (filterMetodos.length && !filterMetodos.includes(p.metodo)) return false
         if (filterSubs.length && !filterSubs.includes(p.sub)) return false
         return true
       })
       .map(pid => productMap[pid])
       .filter((p): p is Product => p !== undefined)
-  }, [activeList, search, filterGrupos, filterCurvas, filterTipos, filterSubs, productMap])
+  }, [activeList, search, filterGrupos, filterCurvas, filterTipos, filterMetodos, filterSubs, productMap])
 
-  const toggleGrupo = (g: string) => setFG(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g])
-  const toggleCurva = (c: string) => setFC(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
-  const toggleTipo  = (t: string) => setFT(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
-  const toggleSub   = (s: string) => setFSubs(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
+  const toggleGrupo  = (g: string) => setFG(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g])
+  const toggleCurva  = (c: string) => setFC(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
+  const toggleTipo   = (t: string) => setFT(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  const toggleMetodo = (m: string) => setFM(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
+  const toggleSub    = (s: string) => setFSubs(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
 
-  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterSubs.length
+  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterMetodos.length + filterSubs.length
 
   return (
     <div style={{ width, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--pran-bg)', borderLeft: '1px solid var(--pran-border)', overflow: 'hidden', position: 'relative' }}>
@@ -168,7 +183,9 @@ export default function Prancheta({
         <div style={{ display: 'flex', gap: 4 }}>
           {(['nao_alocados', 'recolhidos'] as const).map(v => {
             const label = v === 'nao_alocados' ? 'Não alocados' : 'Recolhidos'
-            const count = v === 'nao_alocados' ? unallocated.length : collected.length
+            const total = v === 'nao_alocados' ? unallocated.length : collected.length
+            const isActive = tab === v
+            const hasFilters = isActive && (totalFilters > 0 || search.length > 0)
             return (
               <button key={v} onClick={() => setTab(v)} style={{
                 flex: 1, padding: '5px 0', fontSize: 10, fontWeight: 700, borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-sans)',
@@ -176,7 +193,11 @@ export default function Prancheta({
                 background: tab === v ? 'rgba(13,171,119,0.10)' : 'transparent',
                 color: tab === v ? 'var(--shopper-green)' : 'var(--pran-muted)',
               }}>
-                {label} <span style={{ opacity: 0.65 }}>({count})</span>
+                {label}{' '}
+                {hasFilters
+                  ? <span style={{ opacity: 0.65 }}>(<strong style={{ opacity: 1 }}>{filtered.length}</strong> de {total})</span>
+                  : <span style={{ opacity: 0.65 }}>({total})</span>
+                }
               </button>
             )
           })}
@@ -227,6 +248,17 @@ export default function Prancheta({
               {filterTipos.length > 0 && <Chip label="✕" active={false} onClick={() => setFT([])} />}
             </div>
           </div>
+          {allMetodos.length > 1 && (
+            <div>
+              <div style={filterLabel}>Equipamento</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                {allMetodos.map(m => (
+                  <Chip key={m} label={EQUIP_METODO_LABELS[m] ?? m} active={filterMetodos.includes(m)} onClick={() => toggleMetodo(m)} />
+                ))}
+                {filterMetodos.length > 0 && <Chip label="✕" active={false} onClick={() => setFM([])} />}
+              </div>
+            </div>
+          )}
           <div>
             <div style={filterLabel}>Subcategoria</div>
             {filterSubs.length > 0 && (
@@ -268,7 +300,7 @@ export default function Prancheta({
             </div>
           </div>
           {totalFilters > 0 && (
-            <button onClick={() => { setFG([]); setFC([]); setFT([]); setFSubs([]) }} style={{ padding: '4px', fontSize: 10, fontWeight: 700, background: 'transparent', border: '1px solid var(--pran-border)', borderRadius: 4, cursor: 'pointer', color: 'var(--pran-muted)', fontFamily: 'var(--font-sans)' }}>
+            <button onClick={() => { setFG([]); setFC([]); setFT([]); setFM([]); setFSubs([]) }} style={{ padding: '4px', fontSize: 10, fontWeight: 700, background: 'transparent', border: '1px solid var(--pran-border)', borderRadius: 4, cursor: 'pointer', color: 'var(--pran-muted)', fontFamily: 'var(--font-sans)' }}>
               Limpar todos os filtros
             </button>
           )}
@@ -286,7 +318,7 @@ export default function Prancheta({
         </div>
       )}
 
-      {/* Product list */}
+      {/* Product list — limited to 150 visible to avoid browser freeze */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 6px' }}>
         {filtered.length === 0 && (
           <div style={{ padding: '14px 8px', textAlign: 'center', color: 'var(--pran-muted)', fontSize: 11, lineHeight: 1.6 }}>
@@ -295,7 +327,7 @@ export default function Prancheta({
               : 'Nenhum resultado para o filtro atual.'}
           </div>
         )}
-        {filtered.map(product => (
+        {filtered.slice(0, 150).map(product => (
           <ProductItem
             key={product.id}
             product={product}
@@ -303,6 +335,11 @@ export default function Prancheta({
             onClick={p => onSelectProduct(p.id === selectedProduct ? null : p.id)}
           />
         ))}
+        {filtered.length > 150 && (
+          <div style={{ padding: '8px', textAlign: 'center', color: 'var(--pran-muted)', fontSize: 10, borderTop: '1px solid var(--pran-border)', marginTop: 4 }}>
+            Mostrando 150 de {filtered.length} — use filtros para refinar
+          </div>
+        )}
       </div>
 
       {/* Quick-collect */}

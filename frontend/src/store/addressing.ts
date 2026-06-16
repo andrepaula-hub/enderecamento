@@ -69,29 +69,51 @@ export const useAddressingStore = create<AddressingStoreState>((set) => ({
   metrics: {},
   barcodeMap: {},
 
-  setFromApiResponse: (data) =>
+  setFromApiResponse: (data) => {
+    const isFlagTrue = (v: unknown) =>
+      v === true || v === 1 || String(v ?? '').toUpperCase() === 'SIM'
+
+    const rawMap = safeJson<Record<string, Record<string, unknown>>>(data.all_products_data_map_json, {})
+    const productMap: Record<string, Product> = {}
+    for (const [code, raw] of Object.entries(rawMap)) {
+      const toNum = (v: unknown) => parseFloat(String(v ?? '0').replace(',', '.')) || 0
+      const toInt = (v: unknown) => parseInt(String(v ?? '0')) || 0
+      productMap[code] = {
+        id: String(raw.product_code ?? code),
+        nome: String(raw.product_name ?? raw.nome ?? ''),
+        grupo: String(raw.grupo ?? 'Neutro'),
+        curva: String(raw.curva ?? 'E'),
+        sub: String(raw.subcategoria ?? raw.sub ?? ''),
+        altura: toNum(raw.altura_cm),
+        peso: toNum(raw.peso_kg),
+        vol: toNum(raw.vol_L_unitario),
+        qtd: toInt(raw.quantidade),
+        degelo: String(raw.degelo ?? ''),
+        metodo: String(raw.tipo_equipamento_base ?? ''),
+        escsNec: toInt(raw.escaninhos_necessarios) || 1,
+        pequeno: isFlagTrue(raw.is_pequeno),
+        fragil: isFlagTrue(raw.is_fragil),
+        pesado: isFlagTrue(raw.is_pesado),
+        alto: isFlagTrue(raw.is_alto),
+        quimico: String(raw.grupo ?? '').toLowerCase().includes('quim'),
+        arm: String(raw.categoria_armazenagem ?? ''),
+      }
+    }
+
     set({
       loaded: true,
       loading: false,
       error: null,
       title: data.spreadsheet_title,
       products: safeJson<Product[]>(data.all_products_json, []),
-      productMap: safeJson<Record<string, Product>>(
-        data.all_products_data_map_json,
-        {}
-      ),
-      allocations: safeJson<Record<string, Allocation>>(
-        data.product_location_map_json,
-        {}
-      ),
-      unallocated: safeJson<Record<string, Product>>(
-        data.unallocated_products_json,
-        {}
-      ),
+      productMap,
+      allocations: safeJson<Record<string, Allocation>>(data.product_location_map_json, {}),
+      unallocated: safeJson<Record<string, Product>>(data.unallocated_products_json, {}),
       equipTypes: safeJson<unknown[]>(data.equipTypesJson, []),
       metrics: safeJson<unknown>(data.metrics_panel_data_json, {}),
       barcodeMap: safeJson<Record<string, string>>(data.barcode_map_json, {}),
-    }),
+    })
+  },
 
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
