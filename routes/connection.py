@@ -1,8 +1,11 @@
 """Rotas de conexão com planilhas e carregamento de dados iniciais."""
 from __future__ import annotations
 
+import os
+import re
+
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from core.gsheets_backend import get_initial_data_gsheet
 from core.gsheets_client import GSheetsClient, get_active_sheet, set_active_sheet
@@ -22,9 +25,20 @@ router = APIRouter()
 
 
 @router.get("/")
-def index() -> FileResponse:
-    return FileResponse(
-        SHOPPER_FRONT_ROOT / "index.html",
+def index() -> HTMLResponse:
+    # Bust Babel's URL-keyed compile cache by appending mtime of JSX/JS files
+    mtime = max(
+        (int(os.path.getmtime(p)) for p in SHOPPER_FRONT_ROOT.glob("*.jsx") if p.is_file()),
+        default=0,
+    )
+    html = (SHOPPER_FRONT_ROOT / "index.html").read_text(encoding="utf-8")
+    html = re.sub(
+        r'(src="/shopper-static/[^"]+\.(?:jsx|js))"',
+        rf'\1?v={mtime}"',
+        html,
+    )
+    return HTMLResponse(
+        content=html,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
