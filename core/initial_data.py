@@ -830,7 +830,7 @@ def _compute_metrics(
             continue
         rua_str = str(rua_int)
         equip_num = row.get("equipamento_num")
-        equip_id = f"R{rua_str}-E{int(equip_num)}"
+        equip_id = f"R{rua_str}-{int(equip_num):03d}"
         tipo_equip = row.get("tipo_equipamento_final") or row.get("tipo_equipamento")
         tipo_raw_norm = _normalize_equip_type(tipo_equip)
 
@@ -1321,7 +1321,7 @@ def _build_content_html(
         for equip_num in sorted(equipamentos.keys()):
             equip_group = equipamentos[equip_num]
             info_equip = equip_group[0]
-            equip_id = f"R{rua_num}-E{equip_num}"
+            equip_id = f"R{rua_num}-{int(equip_num):03d}"
             tipo_equip_final = info_equip.get("tipo_equipamento_final") or info_equip.get("tipo_equipamento")
             tipo_equip_final = normalize_string(tipo_equip_final)
             only_in_cadastro = bool(info_equip.get("card175_only_in_cadastro"))
@@ -1808,7 +1808,7 @@ def _build_products_for_search(dashboard_data: list[dict[str, Any]]) -> tuple[di
 
     for row in dashboard_data:
         try:
-            equip_id = f"R{int(row.get('rua_num'))}-E{int(row.get('equipamento_num'))}"
+            equip_id = f"R{int(row.get('rua_num'))}-{int(row.get('equipamento_num')):03d}"
         except (TypeError, ValueError):
             equip_id = None
 
@@ -2460,7 +2460,13 @@ def get_initial_data(source: Any) -> dict[str, Any]:
         "failed_products_section": failed_products_html,
         "all_products_json": _json_dumps(list(products_for_search.values())),
         "product_location_map_json": _json_dumps(product_location_map),
-        "unallocated_products_json": _json_dumps({p["id"]: p for p in unallocated_products_list}),
+        "unallocated_products_json": _json_dumps(
+            {
+                normalize_string(p.get("instance_id") or p.get("id")): p
+                for p in unallocated_products_list
+                if normalize_string(p.get("instance_id") or p.get("id"))
+            }
+        ),
         "all_products_data_map_json": _json_dumps(base_produtos_map),
         "equipTypesJson": _json_dumps(equip_types),
         "metrics_panel_data_json": _json_dumps(metrics),

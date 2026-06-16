@@ -1,7 +1,9 @@
 // DSE Prancheta v2 — direita, tooltip, subcategoria, tipo físico
-const { useState, useMemo, useRef } = React;
+const { useState, useMemo, useRef, useEffect } = React;
 const { DSEProductTooltip } = window;
 const { PRODUCTS, PRODUCT_MAP } = window.DSEData;
+const BOOTSTRAP = window.DSEBootstrap || {};
+const HELPERS = window.DSEHelpers || {};
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 
@@ -14,6 +16,23 @@ const TIPO_FISICO_OPTIONS = [
   { id:'pequeno', label:'Pequeno',flag:'pequeno' },
   { id:'fragil',  label:'Frágil', flag:'fragil'  },
 ];
+
+const EQUIP_METODO_LABELS = {
+  prateleira:'Prateleira', prateleira_pamplona:'Pamplona', prateleira_lateral:'Lat.',
+  geladeira:'Geladeira', geladeira_alta:'Gelad. Alta', geladeira_gerador:'Gelad. Ger.',
+  freezer:'Freezer', 'freezer horizontal':'Freezer H.', quimico:'Químico',
+};
+
+function resolveBoardEntry(entryId) {
+  var raw = HELPERS.normalizeText ? HELPERS.normalizeText(entryId) : String(entryId || '').trim();
+  if (!raw) return { entryId:'', productCode:'', product:null };
+  var item = (BOOTSTRAP.RAW_UNALLOCATED_MAP || {})[raw] || {};
+  var productCode = HELPERS.parseBoardEntryCode
+    ? HELPERS.parseBoardEntryCode(item.product_code || raw)
+    : String(item.product_code || raw).trim();
+  var product = PRODUCT_MAP[productCode] || null;
+  return { entryId:raw, productCode:productCode, product:product, raw:item };
+}
 
 // ── Chip ──────────────────────────────────────────────────────────────────────
 function Chip({ label, active, onClick, color }) {
@@ -135,12 +154,13 @@ function QuickBtn({ label, onClick }) {
 }
 
 // ── Main Prancheta ────────────────────────────────────────────────────────────
-function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width }) {
+function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width, onVisibleProductsChange }) {
   const [tab, setTab]           = useState('nao_alocados');
   const [search, setSearch]     = useState('');
   const [filterGrupos, setFG]   = useState([]);
   const [filterCurvas, setFC]   = useState([]);
   const [filterTipos, setFT]    = useState([]); // 'alto' | 'pesado' | 'pequeno' | 'fragil'
+  const [filterMetodos, setFM]  = useState([]);
   const [subSearch, setSubSearch]= useState('');
   const [subOpen, setSubOpen]   = useState(false);
   const [filterSubs, setFSubs]  = useState([]);
@@ -149,21 +169,22 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   const [tooltip, setTooltip]   = useState(null); // { product, x, y }
 
   const activeList = tab === 'recolhidos' ? collected : unallocated;
+  const activeEntries = useMemo(() => activeList.map(resolveBoardEntry), [activeList]);
 
   // Collect all subcategories from current list
   const allSubs = useMemo(() => {
     const s = new Set();
-    activeList.forEach(pid => { const p=PRODUCT_MAP[pid]; if(p) s.add(p.sub); });
+    activeEntries.forEach(entry => { if (entry.product) s.add(entry.product.sub); });
     return [...s].sort();
-  }, [activeList]);
+  }, [activeEntries]);
 
   const filteredSubs = useMemo(() =>
     subSearch ? allSubs.filter(s=>s.toLowerCase().includes(subSearch.toLowerCase())) : allSubs,
     [allSubs, subSearch]);
 
   const filtered = useMemo(() => {
-    return activeList.filter(pid => {
-      const p = PRODUCT_MAP[pid];
+    return activeEntries.filter(entry => {
+      const p = entry.product;
       if (!p) return false;
       if (search && !p.nome.toLowerCase().includes(search.toLowerCase()) && !p.id.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterGrupos.length && !filterGrupos.includes(p.grupo)) return false;
@@ -178,17 +199,44 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         });
         if (!match) return false;
       }
+      if (filterMetodos.length && !filterMetodos.includes(p.metodo)) return false;
       if (filterSubs.length && !filterSubs.includes(p.sub)) return false;
       return true;
-    }).map(pid=>PRODUCT_MAP[pid]).filter(Boolean);
-  }, [activeList, search, filterGrupos, filterCurvas, filterTipos, filterSubs]);
+    }).map(entry => Object.assign({}, entry.product, {
+      boardEntryId: entry.entryId,
+      boardProductCode: entry.productCode,
+    }));
+  }, [activeEntries, search, filterGrupos, filterCurvas, filterTipos, filterMetodos, filterSubs]);
 
-  const toggleGrupo = g => setFG(prev=>prev.includes(g)?prev.filter(x=>x!==g):[...prev,g]);
-  const toggleCurva = c => setFC(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c]);
-  const toggleTipo  = t => setFT(prev=>prev.includes(t)?prev.filter(x=>x!==t):[...prev,t]);
-  const toggleSub   = s => setFSubs(prev=>prev.includes(s)?prev.filter(x=>x!==s):[...prev,s]);
+  const selectedBoardProduct = useMemo(() => {
+    if (!selectedProduct) return null;
+    return resolveBoardEntry(selectedProduct).product || PRODUCT_MAP[selectedProduct] || null;
+  }, [selectedProduct]);
 
-  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterSubs.length;
+  useEffect(() => {
+    if (onVisibleProductsChange) {
+      onVisibleProductsChange({
+        tab: tab,
+        total: activeList.length,
+        filtered: filtered.length,
+        productIds: filtered.map(product => product.boardEntryId || product.id),
+      });
+    }
+  }, [onVisibleProductsChange, tab, activeList.length, filtered]);
+
+  const toggleGrupo  = g => setFG(prev=>prev.includes(g)?prev.filter(x=>x!==g):[...prev,g]);
+  const toggleCurva  = c => setFC(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c]);
+  const toggleTipo   = t => setFT(prev=>prev.includes(t)?prev.filter(x=>x!==t):[...prev,t]);
+  const toggleMetodo = m => setFM(prev=>prev.includes(m)?prev.filter(x=>x!==m):[...prev,m]);
+  const toggleSub    = s => setFSubs(prev=>prev.includes(s)?prev.filter(x=>x!==s):[...prev,s]);
+
+  const allMetodos = useMemo(() => {
+    const s = new Set();
+    activeEntries.forEach(e => { if (e.product?.metodo && e.product.metodo !== 'N/A') s.add(e.product.metodo); });
+    return [...s].sort();
+  }, [activeEntries]);
+
+  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterMetodos.length + filterSubs.length;
 
   const handleHover = (product, e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -239,6 +287,11 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
           {showFilters?'▲':'▼'} {totalFilters>0?`(${totalFilters})`:'Filtros'}
         </button>
       </div>
+      <div style={{ padding:'5px 10px 7px', borderBottom:showFilters?'1px solid var(--pran-border)':'none', flexShrink:0 }}>
+        <div style={{ fontSize:10, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)' }}>
+          {filtered.length} de {activeList.length} item(ns)
+        </div>
+      </div>
 
       {/* Filters panel */}
       {showFilters && (
@@ -272,6 +325,19 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
               {filterTipos.length>0 && <Chip label="✕" active={false} onClick={()=>setFT([])} />}
             </div>
           </div>
+
+          {/* Equipamento */}
+          {allMetodos.length > 1 && (
+            <div>
+              <div style={filterLabel}>Equipamento</div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                {allMetodos.map(m=>(
+                  <Chip key={m} label={EQUIP_METODO_LABELS[m]||m} active={filterMetodos.includes(m)} onClick={()=>toggleMetodo(m)} />
+                ))}
+                {filterMetodos.length>0 && <Chip label="✕" active={false} onClick={()=>setFM([])} />}
+              </div>
+            </div>
+          )}
 
           {/* Subcategoria */}
           <div>
@@ -311,7 +377,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
 
           {/* Clear all */}
           {totalFilters>0 && (
-            <button onClick={()=>{setFG([]);setFC([]);setFT([]);setFSubs([]);}} style={{ padding:'4px', fontSize:10, fontWeight:700, background:'transparent', border:'1px solid var(--pran-border)', borderRadius:4, cursor:'pointer', color:'var(--pran-muted)', fontFamily:'var(--font-sans)' }}>
+            <button onClick={()=>{setFG([]);setFC([]);setFT([]);setFM([]);setFSubs([]);}} style={{ padding:'4px', fontSize:10, fontWeight:700, background:'transparent', border:'1px solid var(--pran-border)', borderRadius:4, cursor:'pointer', color:'var(--pran-muted)', fontFamily:'var(--font-sans)' }}>
               Limpar todos os filtros
             </button>
           )}
@@ -323,7 +389,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         <div style={{ padding:'6px 12px', background:'rgba(13,171,119,0.10)', borderBottom:'1px solid rgba(13,171,119,0.22)', flexShrink:0 }}>
           <div style={{ fontSize:8, fontWeight:700, color:'var(--shopper-green)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:2 }}>Alocando</div>
           <div style={{ fontSize:10, fontWeight:600, color:'var(--pran-text)', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>
-            {PRODUCT_MAP[selectedProduct]?.nome}
+            {selectedBoardProduct?.nome}
           </div>
           <div style={{ fontSize:9, color:'var(--pran-muted)', marginTop:1 }}>Clique em escaninho vazio · ESC cancela</div>
         </div>
@@ -339,9 +405,9 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
           </div>
         )}
         {filtered.map(product=>(
-          <ProductItem key={product.id} product={product}
-            isSelected={selectedProduct===product.id}
-            onClick={p=>onSelectProduct(p.id===selectedProduct?null:p.id)}
+          <ProductItem key={product.boardEntryId || product.id} product={product}
+            isSelected={selectedProduct===(product.boardEntryId || product.id)}
+            onClick={p=>onSelectProduct((p.boardEntryId || p.id)===selectedProduct?null:(p.boardEntryId || p.id))}
             onHover={handleHover}
             onHoverEnd={()=>setTooltip(null)}
           />

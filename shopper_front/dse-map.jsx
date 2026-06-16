@@ -19,6 +19,18 @@ const EQUIP_CFG = {
 
 const ALL_TYPES = Object.entries(EQUIP_CFG).map(([id,cfg])=>({id,...cfg}));
 
+function parseEscId(escaninhoId) {
+  const parts = String(escaninhoId || '').split('-');
+  const pos = parseInt(parts.pop() || '', 10);
+  const level = parseInt(parts.pop() || '', 10);
+  return {
+    escaninhoId: String(escaninhoId || ''),
+    equipId: parts.join('-'),
+    level: Number.isFinite(level) ? level : 0,
+    pos: Number.isFinite(pos) ? pos : 0,
+  };
+}
+
 // ── Dominant curva ────────────────────────────────────────────────────────────
 function getDominantCurva(eq, allocations) {
   const counts = {};
@@ -130,7 +142,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
@@ -179,8 +191,8 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, s
           </div>
         )}
 
-        <span style={{ fontSize:10, fontWeight:800, color:cfg.color, fontFamily:'var(--font-numeric)', letterSpacing:'0.05em', flexShrink:0 }}>{eq.id}</span>
-        <span style={{ fontSize:8, fontWeight:700, color:cfg.color, background:`${cfg.borderColor}18`, padding:'1px 5px', borderRadius:10, flexShrink:0, lineHeight:1.8 }}>{cfg.label}</span>
+        <span style={{ fontSize:13, fontWeight:800, color:cfg.color, fontFamily:'var(--font-numeric)', letterSpacing:'0.05em', flexShrink:0 }}>{eq.id}</span>
+        <span style={{ fontSize:10, fontWeight:700, color:cfg.color, background:`${cfg.borderColor}18`, padding:'1px 5px', borderRadius:10, flexShrink:0, lineHeight:1.8 }}>{cfg.label}</span>
         {isCard175 && (
           <span title="Equipamento presente apenas no Card 175" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C175</span>
         )}
@@ -247,12 +259,12 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, s
                   if(!isGroup){
                     const slot=run.slots[0];
                     const matchSearch=searchQuery&&(slot.p1?.nome?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p1?.id?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p2?.nome?.toLowerCase().includes(searchQuery.toLowerCase()));
-                    const isHighlighted=highlightProductId&&(slot.p1?.id===highlightProductId||slot.p2?.id===highlightProductId);
-                    const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
-                    return (
-                      <div key={ri} style={{ width:escW, flexShrink:0, outline:isHighlighted?'3px solid #EF4444':matchSearch?'2px solid #F59C00':'none', outlineOffset:isHighlighted?'2px':'0px', borderRadius:5, animation:isHighlighted?'dse-highlight-pulse 0.7s ease-in-out 5':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?5:'auto' }}>
-                        <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
-                          isAllocating={!!selectedProduct&&!slot.p1} isHighlighted={isHighlighted}
+                        const isHighlighted=highlightProductId&&(slot.p1?.id===highlightProductId||slot.p2?.id===highlightProductId);
+                        const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
+                        return (
+                          <div key={ri} style={{ width:escW, flexShrink:0, outline:isHighlighted?'3px solid #EF4444':matchSearch?'2px solid #F59C00':'none', outlineOffset:isHighlighted?'2px':'0px', borderRadius:5, animation:isHighlighted?'dse-highlight-pulse 0.7s ease-in-out 5':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?5:'auto' }}>
+                            <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
+                          isAllocating={hasAllocationSource&&(!slot.p1 || !slot.p2)} isHighlighted={isHighlighted}
                           equipCap={eq.cap}
                           onClick={onEscClick}
                           onHover={onHoverEsc}
@@ -292,7 +304,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, s
 });
 
 // ── Street column ──────────────────────────────────────────────────────────────
-const StreetColumn = memo(function StreetColumn({ street, allocations, selectedProduct, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[] }) {
+const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
@@ -328,7 +340,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, selectedP
   },[street.equipment, escWFixed]);
 
   return (
-    <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, overflow:(filterOpen||menuOpen||newEquipOpen)?'visible':'hidden', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
+    <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
       <div style={{ background:'var(--shopper-navy)', borderRadius:isCollapsed?'6px':'6px 6px 0 0', padding:isCollapsed?0:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5, overflow:(filterOpen||menuOpen||newEquipOpen)?'visible':'hidden' }}
         onClick={()=>onToggleStreet()}>
         {isCollapsed ? (
@@ -488,7 +500,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, selectedP
       </div>
 
       {!isCollapsed && (
-        <div style={{ flex:1, paddingTop:6, paddingBottom:12 }}>
+        <div style={{ flex:1, minHeight:0, overflowY:'auto', overflowX:'hidden', paddingTop:6, paddingBottom:12 }}>
           {street.equipment.length===0 && (
             <div style={{ padding:'14px 8px', textAlign:'center', color:'var(--map-text-muted)', fontSize:10 }}>
               Nenhum equipamento.<br />
@@ -507,7 +519,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, selectedP
           )}
           {visibleEquipment.map(eq=>(
             <EquipmentCard key={eq.id} eq={eq} streetId={street.id}
-              allocations={allocations} selectedProduct={selectedProduct}
+              allocations={allocations} hasAllocationSource={hasAllocationSource}
               onEscClick={onEscClick} onHoverEsc={onHoverEsc} onHoverEnd={onHoverEnd}
               isCollapsed={!!equipCollapsed[eq.id]} onToggleCollapse={()=>onToggleEquip(eq.id)}
               colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
@@ -533,11 +545,79 @@ function StreetMI({ label, icon, onClick, danger }) {
 }
 
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
-function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onCollect, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[] }) {
+function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[] }) {
   const [tooltip, setTooltip] = useState(null);
   const containerRef = useRef(null);
   const closeTimerRef = useRef(null);
   const rafRef = useRef(null);
+  const hasAllocationSource = !!selectedProduct || (queueProductIds || []).length > 0;
+
+  const orderedEscaninhos = useCallback((equipId, level, clickedEscaninhoId, scope) => {
+    const parsedClick = parseEscId(clickedEscaninhoId);
+    const rows = [];
+    mapStructure.forEach((street) => {
+      street.equipment.forEach((eq) => {
+        if (eq.id !== equipId) return;
+        for (let n = 1; n <= eq.niveis; n += 1) {
+          if (scope === 'level' && n !== level) continue;
+          for (let s = 1; s <= eq.escsPerNivel; s += 1) {
+            const escaninhoId = `${eq.id}-${n}-${s}`;
+            rows.push({ escaninhoId, level:n, pos:s });
+          }
+        }
+      });
+    });
+    rows.sort((a, b) => {
+      if (a.escaninhoId === clickedEscaninhoId) return -1;
+      if (b.escaninhoId === clickedEscaninhoId) return 1;
+      const aClickedLevel = a.level === parsedClick.level ? 0 : 1;
+      const bClickedLevel = b.level === parsedClick.level ? 0 : 1;
+      if (aClickedLevel !== bClickedLevel) return aClickedLevel - bClickedLevel;
+      if (a.level !== b.level) return a.level - b.level;
+      const aClickedPos = a.pos >= parsedClick.pos ? 0 : 1;
+      const bClickedPos = b.pos >= parsedClick.pos ? 0 : 1;
+      if (aClickedPos !== bClickedPos) return aClickedPos - bClickedPos;
+      return a.pos - b.pos;
+    });
+    return rows.map((item) => item.escaninhoId);
+  }, [mapStructure]);
+
+  const buildAllocationBatch = useCallback((clickedEscaninhoId, opts) => {
+    const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
+    if (!queue.length) return [];
+    const parsed = parseEscId(clickedEscaninhoId);
+    const scope = opts.scope || 'single';
+    const slot = opts.slot || 1;
+    const candidateIds = scope === 'equipment'
+      ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
+      : scope === 'level'
+        ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'level')
+        : [clickedEscaninhoId];
+    const targets = candidateIds.filter((escaninhoId) => {
+      const alloc = allocations[escaninhoId] || {};
+      if (slot === 2) return !!alloc.p1 && !alloc.p2;
+      return !alloc.p1;
+    });
+    const limit = selectedProduct ? 1 : queue.length;
+    return targets.slice(0, limit).map((escaninhoId, index) => ({
+      escaninhoId,
+      productId: selectedProduct || queue[index],
+      slot,
+    })).filter((item) => !!item.productId);
+  }, [allocations, orderedEscaninhos, queueProductIds, selectedProduct]);
+
+  const buildCollectBatch = useCallback((clickedEscaninhoId, scope) => {
+    const parsed = parseEscId(clickedEscaninhoId);
+    const candidateIds = scope === 'equipment'
+      ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
+      : scope === 'level'
+        ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'level')
+        : [clickedEscaninhoId];
+    return candidateIds.filter((escaninhoId) => {
+      const alloc = allocations[escaninhoId] || {};
+      return !!alloc.p1;
+    });
+  }, [allocations, orderedEscaninhos]);
 
   // Scroll to highlighted product
   useEffect(()=>{
@@ -568,14 +648,36 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   const handleEscClick = useCallback((escsId,p1,p2,e)=>{
     setTooltip(null);
+    const scope = (e && (e.metaKey || e.ctrlKey)) ? 'equipment' : (e && e.shiftKey) ? 'level' : 'single';
+    const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
+    if (hasAllocationSource) {
+      const allocationBatch = buildAllocationBatch(escsId, { scope, slot:wantsSecondSlot ? 2 : 1 });
+      if (allocationBatch.length > 1) {
+        onAllocateMany(allocationBatch);
+        return;
+      }
+      if (allocationBatch.length === 1) {
+        const item = allocationBatch[0];
+        onAllocate(item.escaninhoId, item.productId, item.slot);
+        return;
+      }
+    }
+    if (p1) {
+      const collectBatch = buildCollectBatch(escsId, scope);
+      if (collectBatch.length > 1) {
+        onCollectMany(collectBatch);
+        return;
+      }
+      if (!wantsSecondSlot && p1) onCollect(escsId,p1);
+      return;
+    }
     if(selectedProduct){
       if(!p1) onAllocate(escsId,selectedProduct,1);
-      else if(mode2aLeva&&!p2) onAllocate(escsId,selectedProduct,2);
-      else if(!mode2aLeva) onCollect(escsId,p1);
+      else if(wantsSecondSlot&&!p2) onAllocate(escsId,selectedProduct,2);
     } else {
       if(p1) onCollect(escsId,p1);
     }
-  },[selectedProduct,mode2aLeva,onAllocate,onCollect]);
+  },[selectedProduct,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,onAllocate,onAllocateMany,onCollect,onCollectMany]);
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -601,7 +703,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   },[]);
 
   return (
-    <div ref={containerRef} style={{ flex:1, overflow:'auto', padding:'12px 14px', display:'flex', gap:10, alignItems:'flex-start', position:'relative', background:'var(--map-bg)' }}
+    <div ref={containerRef} style={{ flex:1, overflowX:'auto', overflowY:'hidden', padding:'12px 14px', display:'flex', gap:10, alignItems:'stretch', position:'relative', background:'var(--map-bg)' }}
       onMouseMove={e=>{ if(tooltip&&!rafRef.current){ const cx=e.clientX,cy=e.clientY; rafRef.current=requestAnimationFrame(()=>{ setTooltip(prev=>prev?{...prev,x:cx+14,y:cy-24}:null); rafRef.current=null; }); } }}>
 
       {/* Swap mode banner */}
@@ -613,7 +715,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
       {mapStructure.map(street=>(
         <StreetColumn key={street.id} street={street}
-          allocations={allocations} selectedProduct={selectedProduct}
+          allocations={allocations} hasAllocationSource={hasAllocationSource}
           onEscClick={handleEscClick} onHoverEsc={handleHover} onHoverEnd={handleHoverEnd}
           equipCollapsed={equipCollapsed} onToggleEquip={onToggleEquip}
           isCollapsed={!!streetCollapsed[street.id]} onToggleStreet={()=>onToggleStreet(street.id)}
