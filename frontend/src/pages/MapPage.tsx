@@ -475,8 +475,11 @@ export default function MapPage() {
         const unallocated = Object.values(unallocatedMap)
           .map((p) => String(p.product_code ?? p.id ?? '').trim())
           .filter(Boolean)
-        // Build map structure from equipTypes
-        const equipTypes = JSON.parse(data.equipTypesJson ?? '[]') as Array<{ id: string; type: string; niveis?: number; escsPerNivel?: number; cap?: number }>
+        // Build map structure from equipTypes (may be objects or bare type-strings)
+        const equipTypesRaw = JSON.parse(data.equipTypesJson ?? '[]') as unknown[]
+        const equipTypes = equipTypesRaw.filter((et): et is { id: string; type: string; niveis?: number; escsPerNivel?: number; cap?: number } =>
+          typeof et === 'object' && et !== null && 'id' in et
+        )
         const streetMap: Record<string, Street> = {}
         equipTypes.forEach(et => {
           const parts = et.id.split('-')
