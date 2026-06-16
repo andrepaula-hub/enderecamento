@@ -114,6 +114,33 @@ def _run_metabase_sales_target_job(
         job_service.update(job_id, "failed", error=str(exc))
 
 
+def _run_send_etl_warning_group_job(
+    job_service,
+    job_id: str,
+    target_sheet_id: str,
+    master_sheet_id: str,
+    warning_type: str,
+) -> None:
+    """Executado em background — envia um grupo de alerta ETL para a aba correta."""
+    try:
+        job_service.update(
+            job_id,
+            "running",
+            result={
+                "progress_pct": 22,
+                "progress_label": "Lendo Base_Produtos e identificando itens do alerta…",
+            },
+        )
+        result = send_warning_group_to_etl(master_sheet_id, target_sheet_id, warning_type)
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "Falha ao enviar grupo do alerta para o ETL.")
+        result["progress_pct"] = 100
+        result["progress_label"] = "Grupo enviado para a planilha do ETL."
+        job_service.update(job_id, "done", result=result)
+    except Exception as exc:
+        job_service.update(job_id, "failed", error=str(exc))
+
+
 @router.post("/api/runEtlToBaseProducts")
 async def api_run_etl_to_base_products(
     background_tasks: BackgroundTasks, _: ScriptRequest | None = None
@@ -277,6 +304,50 @@ def api_send_etl_warning_group(req: ScriptRequest) -> JSONResponse:
         return JSONResponse({"success": False, "error": "Conecte a planilha ETL primeiro."})
     warning_type = req.args[0] if len(req.args) > 0 else ""
     return JSONResponse(send_warning_group_to_etl(master["sheet_id"], target["sheet_id"], warning_type))
+
+
+@router.post("/api/sendEtlWarningGroupJob")
+async def api_send_etl_warning_group_job(
+    req: ScriptRequest, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    from backend.application.jobs.job_service import JobService  # noqa: PLC0415
+
+    target = _require_active_sheet()
+    if not target:
+        return JSONResponse({"success": False, "error": "Conecte a planilha de Endereçamento primeiro."})
+    master = get_workflow_sheet("master")
+    if not master or not master.get("sheet_id"):
+        return JSONResponse({"success": False, "error": "Conecte a planilha ETL primeiro."})
+    warning_type = req.args[0] if len(req.args) > 0 else ""
+    if not str(warning_type or "").strip():
+        return JSONResponse({"success": False, "error": "Informe o tipo do alerta a ser enviado."})
+
+    job_service = JobService()
+    job_id = job_service.enqueue(
+        "etl_warning_group",
+        payload={
+            "target": target["sheet_id"],
+            "master": master["sheet_id"],
+            "warning_type": warning_type,
+        },
+    )
+    background_tasks.add_task(
+        _run_send_etl_warning_group_job,
+        job_service,
+        job_id,
+        target["sheet_id"],
+        master["sheet_id"],
+        warning_type,
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "job_id": job_id,
+            "status": "pending",
+            "progress_pct": 12,
+            "progress_label": "Job de envio do alerta enfileirado…",
+        }
+    )
 
 
 @router.post("/api/sendMissingVolumetriaDefault")

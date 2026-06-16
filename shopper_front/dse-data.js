@@ -327,6 +327,8 @@
     connectWorkflowSheets: function (target, master, mix) { return postApi('connectWorkflowSheets', [target, master, mix]); },
     getWorkflowSheets: function () { return postApi('getWorkflowSheets', []); },
     runEtl: function () { return postApi('runEtlToBaseProducts', []); },
+    sendEtlWarningGroupAsync: function (warningType) { return postApiAsync('sendEtlWarningGroupJob', [warningType]); },
+    refreshEtlWarningAsync: function (warningType) { return postApiAsync('refreshEtlWarning', [warningType]); },
     generateSlots: function () { return postApi('generateSlotsFromCadastro', [true]); },
     buildSalesTarget: function (payload) { return postApi('buildMetabaseSalesTarget', [payload]); },
     buildSalesTargetAsync: function (payload) { return postApiAsync('buildMetabaseSalesTargetJob', [payload]); },

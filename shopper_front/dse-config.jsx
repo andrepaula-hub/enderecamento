@@ -18,7 +18,8 @@ function LogItem({ entry }) {
 }
 
 // ── ETL Alert card ───────────────────────────────────────────────────────────
-function AlertCard({ alert, onSend, onRefresh }) {
+function AlertCard({ alert, onSend, onRefresh, sending, refreshing }) {
+  const disableActions = !!sending || !!refreshing;
   return (
     <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:6, padding:'8px 10px', marginBottom:6 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
@@ -30,15 +31,15 @@ function AlertCard({ alert, onSend, onRefresh }) {
         {alert.exemplos.length > 2 && <div style={{ color:'#94A3B8' }}>+ {alert.exemplos.length - 2} mais…</div>}
       </div>
       <div style={{ display:'flex', gap:6 }}>
-        <button onClick={() => onSend(alert)} style={smallBtnStyle('rgba(13,171,119,0.10)','rgba(13,171,119,0.32)','var(--shopper-green)')}>Enviar p/ ETL</button>
-        <button onClick={() => onRefresh(alert)} style={smallBtnStyle('rgba(59,130,246,0.10)','rgba(59,130,246,0.28)','#2563EB')}>↻ Refresh</button>
+        <button disabled={disableActions} onClick={() => onSend(alert)} style={smallBtnStyle('rgba(13,171,119,0.10)','rgba(13,171,119,0.32)','var(--shopper-green)', disableActions)}>{sending ? 'Enviando…' : 'Enviar p/ ETL'}</button>
+        <button disabled={disableActions} onClick={() => onRefresh(alert)} style={smallBtnStyle('rgba(59,130,246,0.10)','rgba(59,130,246,0.28)','#2563EB', disableActions)}>{refreshing ? 'Atualizando…' : '↻ Refresh'}</button>
       </div>
     </div>
   );
 }
 
-function smallBtnStyle(bg, border, color) {
-  return { background: bg, border: `1px solid ${border}`, color, fontSize:10, fontWeight:600, padding:'3px 8px', borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)' };
+function smallBtnStyle(bg, border, color, disabled) {
+  return { background: bg, border: `1px solid ${border}`, color, fontSize:10, fontWeight:600, padding:'3px 8px', borderRadius:4, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.55 : 1, fontFamily:'var(--font-sans)' };
 }
 
 function normalizeEtlAlerts(warnings) {
@@ -133,6 +134,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const [status, setStatus] = useState({ msg:'Aguardando configuração.', type:'info' });
   const [running, setRunning] = useState(null); // which action is running
   const [alerts, setAlerts] = useState([]);
+  const [alertAction, setAlertAction] = useState(null); // { id, mode }
   const [autoOpen, setAutoOpen] = useState(false);
   const logsEndRef = useRef(null);
   const runningProgressTimerRef = useRef(null);
@@ -171,6 +173,133 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         return { val: Math.min(maxVal, nextVal), label: prev.label || label };
       });
     }, 900);
+  };
+
+  const pollJobResult = async (jobId, handlers) => {
+    return await new Promise((resolve, reject) => {
+      const iv = setInterval(async () => {
+        try {
+          const r = await fetch('/api/jobs/' + jobId);
+          const job = await r.json();
+          if (job.status === 'done') {
+            clearInterval(iv);
+            resolve(job.result || {});
+            return;
+          }
+          if (job.status === 'failed') {
+            clearInterval(iv);
+            reject(new Error(job.error || 'Job falhou.'));
+            return;
+          }
+          if (handlers && typeof handlers.onUpdate === 'function') {
+            handlers.onUpdate(job);
+          }
+        } catch (e) {
+          clearInterval(iv);
+          reject(e);
+        }
+      }, handlers && handlers.intervalMs ? handlers.intervalMs : 1800);
+    });
+  };
+
+  const applyRefreshedAlert = (warningPayload) => {
+    if (!warningPayload || !warningPayload.warning) return;
+    const normalized = normalizeEtlAlerts([warningPayload.warning])[0];
+    if (!normalized) return;
+    setAlerts(prev => {
+      if (warningPayload.resolved || normalized.count <= 0) {
+        return prev.filter(function (item) { return item.id !== normalized.id; });
+      }
+      const exists = prev.some(function (item) { return item.id === normalized.id; });
+      if (!exists) return prev.concat([normalized]);
+      return prev.map(function (item) { return item.id === normalized.id ? normalized : item; });
+    });
+  };
+
+  const handleRefreshAlert = async (alert) => {
+    const warningType = String(alert && alert.raw && alert.raw.type || '');
+    if (!warningType) return;
+    setAlertAction({ id: alert.id, mode: 'refresh' });
+    setProgress({ val:20, label:'Atualizando alerta ETL…' });
+    addLog(`Atualizando alerta "${alert.titulo}"…`, 'info');
+    try {
+      const result = await window.DSEApi.refreshEtlWarningAsync(warningType);
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Falha ao atualizar alerta ETL.');
+      }
+      applyRefreshedAlert(result);
+      if (result.resolved || !result.warning || Number(result.warning.count || 0) <= 0) {
+        addLog(`Alerta "${alert.titulo}" resolvido.`, 'success');
+      } else {
+        addLog(`Alerta "${alert.titulo}" atualizado: ${result.warning.count || 0} item(ns) ainda pendente(s).`, 'warn');
+      }
+      setStatusMsg('Alerta ETL atualizado.', 'success');
+      setProgress({ val:100, label:'Alerta atualizado.' });
+    } catch (err) {
+      addLog(String(err), 'error');
+      setStatusMsg(String(err), 'error');
+    } finally {
+      setAlertAction(null);
+      setTimeout(() => setProgress(null), 500);
+    }
+  };
+
+  const handleSendAlert = async (alert) => {
+    const warningType = String(alert && alert.raw && alert.raw.type || '');
+    if (!warningType) return;
+    setAlertAction({ id: alert.id, mode: 'send' });
+    setProgress({ val:12, label:'Enfileirando envio do alerta…' });
+    addLog(`Enviando grupo "${alert.titulo}" para o ETL…`, 'info');
+    try {
+      const response = await window.DSEApi.sendEtlWarningGroupAsync(warningType);
+      if (!response || (!response.success && !response.job_id)) {
+        throw new Error((response && response.error) || 'Falha ao enviar grupo do alerta para o ETL.');
+      }
+      const jobId = response.job_id;
+      if (!jobId) {
+        throw new Error('Job de envio do alerta não retornou identificador.');
+      }
+      startRunningProgress(24, 'Montando grupo e escrevendo na planilha ETL…', 90);
+      const result = await pollJobResult(jobId, {
+        intervalMs: 1600,
+        onUpdate: function (job) {
+          if (job.status === 'pending') {
+            setProgress({ val:18, label:'Job de envio do alerta enfileirado…' });
+          } else if (job.status === 'running' && job.result && job.result.progress_pct) {
+            setProgress({
+              val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+              label: job.result.progress_label || 'Enviando grupo para a planilha ETL…',
+            });
+          }
+        },
+      });
+      stopRunningProgress();
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Falha ao enviar grupo do alerta para o ETL.');
+      }
+      setProgress({ val:100, label:'Grupo enviado para o ETL.' });
+      addLog(`Grupo "${alert.titulo}" enviado: ${result.queued_count || 0} item(ns), ${result.inserted_count || 0} inserido(s), ${result.already_present_count || 0} já existia(m).`, 'success');
+      if (result.target_sheet_url) {
+        addLog(`Destino: <a href="${result.target_sheet_url}" target="_blank" style="color:var(--shopper-green);text-decoration:underline">${result.target_sheet || 'Aba ETL'}</a>.`, 'info');
+      }
+      const refreshed = await window.DSEApi.refreshEtlWarningAsync(warningType);
+      if (refreshed && refreshed.success) {
+        applyRefreshedAlert(refreshed);
+        if (refreshed.resolved || !refreshed.warning || Number(refreshed.warning.count || 0) <= 0) {
+          addLog(`Alerta "${alert.titulo}" resolvido após o envio.`, 'success');
+        } else {
+          addLog(`Alerta "${alert.titulo}" ainda possui ${refreshed.warning.count || 0} item(ns) pendente(s) após o envio.`, 'warn');
+        }
+      }
+      setStatusMsg('Grupo enviado para o ETL.', 'success');
+    } catch (err) {
+      stopRunningProgress();
+      addLog(String(err), 'error');
+      setStatusMsg(String(err), 'error');
+    } finally {
+      setAlertAction(null);
+      setTimeout(() => setProgress(null), 500);
+    }
   };
 
   const handleSaveLinks = async () => {
@@ -533,7 +662,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
           <div style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Alertas ETL</div>
           {alerts.length === 0
             ? <div style={{ fontSize:11, color:'var(--cfg-text-muted)' }}>Nenhum alerta crítico no ETL.</div>
-            : alerts.map(a => <AlertCard key={a.id} alert={a} onSend={al=>addLog(`Enviando grupo "${al.titulo}" para o ETL…`,'info')} onRefresh={al=>addLog(`Alerta "${al.titulo}": atualizado.`,'info')} />)
+            : alerts.map(a => <AlertCard key={a.id} alert={a} onSend={handleSendAlert} onRefresh={handleRefreshAlert} sending={alertAction && alertAction.id === a.id && alertAction.mode === 'send'} refreshing={alertAction && alertAction.id === a.id && alertAction.mode === 'refresh'} />)
           }
         </div>
       </div>
