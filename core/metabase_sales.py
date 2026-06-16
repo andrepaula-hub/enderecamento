@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta
@@ -12,9 +13,13 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+
 from openpyxl import Workbook
 
-from .apps_script_client import call_apps_script_function
+from .apps_script_client import get_metabase_session_from_script
 from .gsheets_client import CREDENTIALS_DIR, GSheetsClient
 from .utils import normalize_string, parse_number
 
@@ -28,6 +33,8 @@ VENDAS_ALVO_HEADERS = ["cod_produto", "desc_produto", "qtd_total"]
 METABASE_CONTEXT_PATH = CREDENTIALS_DIR / "metabase_sales_context.json"
 METABASE_ENV_PATH = CREDENTIALS_DIR / "metabase.env"
 METABASE_CREDENTIALS_JSON_PATH = CREDENTIALS_DIR / "metabase_credentials.json"
+METABASE_STORES_CACHE_PATH = CREDENTIALS_DIR / "metabase_stores_cache.json"
+STORES_CACHE_TTL_HOURS = 12
 
 STORE_OPTIONS: list[dict[str, str]] = [
     {"value": "altoDePinheiros", "label": "Alto de Pinheiros"},
@@ -35,10 +42,13 @@ STORE_OPTIONS: list[dict[str, str]] = [
     {"value": "brooklin", "label": "Brooklin"},
     {"value": "campinas", "label": "Campinas"},
     {"value": "higienopolis", "label": "Higienópolis"},
+    {"value": "ibirapuera", "label": "Ibirapuera"},
     {"value": "moema", "label": "Moema"},
     {"value": "morumbi", "label": "Morumbi"},
     {"value": "pamplona", "label": "Jardins / Pamplona"},
     {"value": "pinheiros", "label": "Pinheiros"},
+    {"value": "saoCaetanoDoSul", "label": "São Caetano do Sul"},
+    {"value": "tatupae", "label": "Tatuapé"},
     {"value": "vilaMariana", "label": "Vila Mariana"},
     {"value": "vilaOlimpia", "label": "Vila Olímpia"},
 ]
@@ -54,10 +64,13 @@ STORE_KEYWORDS_BY_ID = {
     "brooklin": ["brooklin"],
     "campinas": ["campinas"],
     "higienopolis": ["higienopolis"],
+    "ibirapuera": ["ibirapuera"],
     "moema": ["moema"],
     "morumbi": ["morumbi"],
-    "pamplona": ["pamplona", "jardins"],
-    "pinheiros": ["pinheiros"],
+    "pamplona": ["jardins"],
+    "pinheiros": ["dark store pinheiros"],  # específico para não colidir com alto de pinheiros
+    "saoCaetanoDoSul": ["sao caetano do sul"],
+    "tatupae": ["tatuape"],
     "vilaMariana": ["vila mariana"],
     "vilaOlimpia": ["vila olimpia"],
 }
@@ -124,12 +137,13 @@ def _normalize_store_ids(raw_stores: Any) -> list[str]:
 def get_metabase_sales_context() -> dict[str, Any]:
     context = _load_context()
     default_initial, default_final = _default_sales_range()
-    stores = _normalize_store_ids(context.get("stores")) or [item["value"] for item in STORE_OPTIONS]
+    available_stores = _fetch_store_options_from_metabase()
+    stores = _normalize_store_ids(context.get("stores")) or [item["value"] for item in available_stores]
     return {
         "data_inicial": default_initial,
         "data_final": default_final,
         "stores": stores,
-        "available_stores": STORE_OPTIONS,
+        "available_stores": available_stores,
         "earliest_date": METABASE_EARLIEST_DATE,
         "base_url": DEFAULT_METABASE_URL,
         "card_id": DEFAULT_CARD_ID,
@@ -236,22 +250,135 @@ def _min_available_row_date(rows: list[dict[str, Any]]) -> str:
     return min(dates).isoformat()
 
 
-def _fetch_rows_via_apps_script(
+def _assign_store_to_rows(rows: list[dict[str, Any]], stores: list[str]) -> list[dict[str, Any]]:
+    """Atribui _requested_store a cada row com base nos keywords, do mais específico ao menos."""
+    ordered = sorted(stores, key=lambda s: max((len(kw) for kw in STORE_KEYWORDS_BY_ID.get(s, [s])), default=0), reverse=True)
+    result = []
+    for row in rows:
+        dark = _norm_text(row.get("dark_store") or "")
+        if not dark:
+            continue
+        for store_id in ordered:
+            keywords = STORE_KEYWORDS_BY_ID.get(store_id, [store_id.lower()])
+            if any(kw in dark for kw in keywords):
+                row["_requested_store"] = store_id
+                result.append(row)
+                break
+    return result
+
+
+def _fetch_rows_directly(
     *,
     data_inicial: str,
     data_final: str,
     stores: list[str],
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    result = call_apps_script_function(
-        "fetchCard823Rows",
-        {"data_inicial": data_inicial, "data_final": data_final, "stores": stores},
-        script_id=METABASE_PROXY_SCRIPT_ID,
-        timeout_seconds=max(timeout_seconds, 90),
+    """Busca dados do card 823 direto do Metabase sem filtro de Loja, filtra em Python."""
+    session_id = resolve_metabase_session(timeout_seconds=timeout_seconds)
+    params = [
+        {"type": "date/single", "value": data_inicial, "target": ["variable", ["template-tag", "data_inicial"]]},
+        {"type": "date/single", "value": data_final, "target": ["variable", ["template-tag", "data_final"]]},
+    ]
+    all_rows = metabase_query_card(
+        base_url=DEFAULT_METABASE_URL,
+        card_id=DEFAULT_CARD_ID,
+        session_id=session_id,
+        parameters=params,
+        timeout_seconds=timeout_seconds,
     )
-    if not isinstance(result, dict):
-        raise RuntimeError("Proxy Metabase retornou payload inválido para card 823.")
-    return result
+    filtered = _assign_store_to_rows(all_rows, stores)
+    return {
+        "rows": filtered,
+        "data_inicial_effective": data_inicial,
+        "data_final_effective": data_final,
+        "fallback_applied": False,
+        "fallback_reason": "",
+    }
+
+
+def _read_stores_cache() -> list[dict[str, str]] | None:
+    """Lê o cache de lojas se ele existir e for válido (< STORES_CACHE_TTL_HOURS horas)."""
+    if not METABASE_STORES_CACHE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(METABASE_STORES_CACHE_PATH.read_text(encoding="utf-8"))
+        cached_at = datetime.fromisoformat(str(payload.get("cached_at") or ""))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours > STORES_CACHE_TTL_HOURS:
+            return None
+        stores = payload.get("stores")
+        if isinstance(stores, list) and stores:
+            return stores
+    except Exception:
+        pass
+    return None
+
+
+def _write_stores_cache(stores: list[dict[str, str]]) -> None:
+    try:
+        METABASE_STORES_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        METABASE_STORES_CACHE_PATH.write_text(
+            json.dumps({"cached_at": datetime.now().isoformat(), "stores": stores}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _fetch_store_options_from_metabase(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> list[dict[str, str]]:
+    """Descobre lojas consultando o card 823 sem filtro de Loja (último mês).
+    Usa cache de 12h para evitar consultas demoradas a cada page load."""
+    cached = _read_stores_cache()
+    if cached is not None:
+        return cached
+
+    try:
+        sid = resolve_metabase_session(timeout_seconds=timeout_seconds)
+        today = date.today()
+        ini = (today - timedelta(days=30)).isoformat()
+        fim = today.isoformat()
+        params = [
+            {"type": "date/single", "value": ini, "target": ["variable", ["template-tag", "data_inicial"]]},
+            {"type": "date/single", "value": fim, "target": ["variable", ["template-tag", "data_final"]]},
+        ]
+        rows = metabase_query_card(
+            base_url=DEFAULT_METABASE_URL,
+            card_id=DEFAULT_CARD_ID,
+            session_id=sid,
+            parameters=params,
+            timeout_seconds=timeout_seconds,
+        )
+        dark_stores = sorted({_norm_text(str(r.get("dark_store") or "")) for r in rows if r.get("dark_store")})
+        if not dark_stores:
+            return list(STORE_OPTIONS)
+
+        reverse: dict[str, str] = {}
+        for store_id, keywords in STORE_KEYWORDS_BY_ID.items():
+            for kw in keywords:
+                for ds in dark_stores:
+                    if kw in ds and ds not in reverse:
+                        reverse[ds] = store_id
+
+        options: list[dict[str, str]] = []
+        seen_ids: set[str] = set()
+        for ds in dark_stores:
+            store_id = reverse.get(ds)
+            if store_id and store_id not in seen_ids:
+                seen_ids.add(store_id)
+                options.append({"value": store_id, "label": STORE_LABEL_BY_ID.get(store_id, store_id)})
+            elif not store_id:
+                raw = str(next((r.get("dark_store") for r in rows if _norm_text(str(r.get("dark_store", ""))) == ds), ds))
+                generated_id = re.sub(r"[^a-zA-Z0-9]", "", raw.title())[:30]
+                if generated_id and generated_id not in seen_ids:
+                    seen_ids.add(generated_id)
+                    options.append({"value": generated_id, "label": raw})
+
+        result = options if options else list(STORE_OPTIONS)
+        _write_stores_cache(result)
+        return result
+    except Exception:
+        return list(STORE_OPTIONS)
 
 
 def resolve_store_value(loja: str = "", cod_loja: str = "") -> str:
@@ -292,7 +419,7 @@ def _post_json(url: str, payload: dict[str, Any], timeout_seconds: int) -> Any:
         method="POST",
     )
     try:
-        with urllib_request.urlopen(req, timeout=timeout_seconds) as resp:
+        with urllib_request.urlopen(req, timeout=timeout_seconds, context=_SSL_CTX) as resp:
             raw = resp.read().decode("utf-8")
     except urllib_error.HTTPError as exc:
         raise RuntimeError(f"metabase_login_falhou {_decode_http_error(exc)}") from exc
@@ -321,11 +448,17 @@ def resolve_metabase_session(session_id: str = "", timeout_seconds: int = DEFAUL
     if env_session:
         return env_session
 
+    # Tenta via Apps Script (usa sessão cacheada, não precisa da senha)
+    try:
+        return get_metabase_session_from_script(timeout_seconds=min(timeout_seconds, 30))
+    except Exception:
+        pass
+
     if username and password:
         return metabase_login(DEFAULT_METABASE_URL, username, password, timeout_seconds)
 
     raise RuntimeError(
-        "Credenciais do Metabase ausentes no backend. Defina MB_USER e MB_PASS no container ou salve .credentials/metabase.env."
+        "Não foi possível autenticar no Metabase. Verifique MB_USER/MB_PASS ou apps_script_oauth.json."
     )
 
 
@@ -378,7 +511,7 @@ def metabase_query_card(
         method="POST",
     )
     try:
-        with urllib_request.urlopen(req, timeout=timeout_seconds) as resp:
+        with urllib_request.urlopen(req, timeout=timeout_seconds, context=_SSL_CTX) as resp:
             raw = resp.read().decode("utf-8")
     except urllib_error.HTTPError as exc:
         raise RuntimeError(f"Erro ao consultar card {card_id}: {_decode_http_error(exc)}") from exc
@@ -448,7 +581,7 @@ def fetch_card_823_rows_result(
         raise ValueError("Data inicial não pode ser maior que a data final.")
 
     resolved_store = resolve_store_value(loja=loja, cod_loja=cod_loja)
-    result = _fetch_rows_via_apps_script(
+    result = _fetch_rows_directly(
         data_inicial=valid_initial,
         data_final=valid_final,
         stores=[resolved_store],
@@ -606,7 +739,7 @@ def build_vendas_alvo_from_metabase(
 
     save_metabase_sales_context(data_inicial=valid_initial, data_final=valid_final, stores=selected_stores)
 
-    result = _fetch_rows_via_apps_script(
+    result = _fetch_rows_directly(
         data_inicial=valid_initial,
         data_final=valid_final,
         stores=selected_stores,

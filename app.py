@@ -16,12 +16,17 @@ from backend.logging_config import configure_logging  # noqa: E402
 configure_logging()
 
 _is_prod = os.environ.get("ENV", "").lower() == "production"
+class _NoCacheStaticFiles(StaticFiles):
+    def is_not_modified(self, response_headers, request_headers):  # type: ignore[override]
+        return False
+
+
 app = FastAPI(
     title="Enderecamento Local",
     docs_url=None if _is_prod else "/docs",
     redoc_url=None if _is_prod else "/redoc",
 )
-app.mount("/shopper-static", StaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
+app.mount("/shopper-static", _NoCacheStaticFiles(directory=SHOPPER_FRONT_ROOT), name="shopper-static")
 
 _http_logger = logging.getLogger("enderecamento.http")
 
@@ -30,6 +35,10 @@ class _RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
         response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/shopper-static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
         _http_logger.info(
             '"method": "%s", "path": "%s", "status": %d, "duration_ms": %s',

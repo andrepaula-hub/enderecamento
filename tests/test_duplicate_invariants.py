@@ -1,4 +1,5 @@
 from core import gsheets_backend
+from core import initial_data
 from core.initial_data import _build_dashboard_data, _build_unallocated_section, _enrich_base_map_with_plano_rows
 
 
@@ -71,6 +72,32 @@ def test_unallocated_products_get_stable_instance_ids():
     assert len(ids) == 2
     assert all(id_.startswith("unallocated::SKU1::") for id_ in ids)
     assert len(set(ids)) == 2, "instance_ids devem ser únicos"
+
+
+def test_initial_data_serializes_unallocated_by_instance_id(monkeypatch):
+    payload_rows = [
+        {"instance_id": "unallocated::SKU1::0", "product_code": "SKU1", "product_name": "Produto 1"},
+        {"instance_id": "unallocated::SKU1::1", "product_code": "SKU1", "product_name": "Produto 1"},
+    ]
+
+    monkeypatch.setattr(initial_data, "load_sheet_safe", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(initial_data, "build_dic_cat_map", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(initial_data, "load_limits", lambda *_args, **_kwargs: (0, 0, 0))
+    monkeypatch.setattr(initial_data, "build_base_produtos_map", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(initial_data, "_enrich_base_map_with_plano_rows", lambda base_map, _plano: base_map)
+    monkeypatch.setattr(initial_data, "_enrich_base_map_with_master_etl", lambda _source, base_map, *_args: base_map)
+    monkeypatch.setattr(initial_data, "get_card175_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(initial_data, "_build_dashboard_data", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(initial_data, "_compute_metrics", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(initial_data, "_build_content_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(initial_data, "_build_unallocated_section", lambda *_args, **_kwargs: ("", payload_rows))
+    monkeypatch.setattr(initial_data, "_build_products_for_search", lambda *_args, **_kwargs: ({}, {}))
+
+    result = initial_data.get_initial_data(source="fake")
+    serialized = initial_data.json.loads(result["unallocated_products_json"])
+
+    assert list(serialized.keys()) == ["unallocated::SKU1::0", "unallocated::SKU1::1"]
+    assert len(serialized) == 2
 
 
 def test_save_batch_moves_requires_exact_source_row(monkeypatch):

@@ -320,7 +320,7 @@ function DSELegendPanel({ onClose }) {
     ['⇌','#8B5CF6','Em transição / Origem'],
   ];
   const atalhos = [
-    ['Clique em vazio','Aloca produto selecionado'],
+    ['Clique em vazio','Aloca o produto selecionado ou o próximo da fila filtrada'],
     ['Clique em ocupado','Recolhe produto p/ prancheta'],
     ['Shift + clique vazio','Aloca em todos os vazios do nível'],
     ['Cmd/Ctrl + clique vazio','Aloca em todos os vazios do equipamento'],

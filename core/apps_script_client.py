@@ -128,6 +128,49 @@ def call_apps_script_function(
     return result
 
 
+METABASE_AUTH_SCRIPT_ID = "1BWta7b2Vsqix_cUCyILnziK5R9qEOai1TG798sxMLpQv9GqwhHVyLeFx"
+
+
+def get_metabase_session_from_script(timeout_seconds: int = 30) -> str:
+    """Chama getSessionId no Apps Script de autenticação Metabase e retorna o session ID."""
+    access_token = refresh_apps_script_access_token(timeout_seconds=timeout_seconds)
+    body = {"function": "getSessionId", "devMode": False, "parameters": [{}]}
+    proc = subprocess.run(
+        [
+            "curl", "-sS", "-L", "--post301", "--post302", "--post303",
+            "--connect-timeout", "5",
+            "--max-time", str(max(timeout_seconds, 20)),
+            "-X", "POST",
+            "-H", f"Authorization: Bearer {access_token}",
+            "-H", "Content-Type: application/json",
+            "-d", json.dumps(body),
+            "-w", "\\n%{http_code}",
+            f"https://script.googleapis.com/v1/scripts/{METABASE_AUTH_SCRIPT_ID}:run",
+        ],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "Falha ao chamar getSessionId.")
+    if "\n" not in proc.stdout:
+        raise RuntimeError(f"Resposta inválida do getSessionId: {proc.stdout[:300]}")
+    raw, status_raw = proc.stdout.rsplit("\n", 1)
+    status = int(status_raw.strip() or "0")
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"getSessionId retornou HTTP {status}: {raw[:400]}")
+    response = json.loads(raw or "{}")
+    if "error" in response:
+        msg = (response.get("error") or {}).get("message") or str(response["error"])
+        raise RuntimeError(f"getSessionId Apps Script falhou: {msg}")
+    result = (response.get("response") or {}).get("result")
+    # getSessionId retorna string JSON '{"id":"..."}' ou dict
+    if isinstance(result, str):
+        result = json.loads(result)
+    session_id = str((result or {}).get("id") or "").strip()
+    if not session_id:
+        raise RuntimeError("getSessionId não retornou session id.")
+    return session_id
+
+
 def call_apps_script_webapp_action(
     action: str,
     payload: dict[str, Any] | None = None,

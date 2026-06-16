@@ -34,13 +34,22 @@ router = APIRouter()
 def _run_etl_legacy_job(job_service, job_id: str, target_sheet_id: str, master_sheet_id: str, mix_sheet_id: str) -> None:
     """Executado em background — wrapper legado do ETL."""
     try:
-        job_service.update(job_id, "running")
+        job_service.update(
+            job_id,
+            "running",
+            result={
+                "progress_pct": 18,
+                "progress_label": "Lendo Mix, ETL e planilha alvo…",
+            },
+        )
         result = run_etl_to_base_products(
             master_sheet_id=master_sheet_id,
             mix_sheet_id=mix_sheet_id,
             target_sheet_id=target_sheet_id,
         )
         if result.get("success"):
+            result.setdefault("progress_pct", 82)
+            result.setdefault("progress_label", "Base_Produtos atualizada. Validando plano…")
             try:
                 tc = GSheetsClient(target_sheet_id)
                 sheet_names = tc.list_sheet_names()
@@ -57,12 +66,49 @@ def _run_etl_legacy_job(job_service, job_id: str, target_sheet_id: str, master_s
                         result["plano_auto_generated"] = True
                         result["slots_generated"] = slots.get("slots_generated", 0)
                         result["plano_sheet_url"] = slots.get("plano_sheet_url")
+                        result["progress_pct"] = 94
+                        result["progress_label"] = "Plano_Enderecamento_Final gerado automaticamente."
                     else:
                         result["plano_auto_warning"] = (
                             slots.get("error") or "Não foi possível gerar Plano_Enderecamento_Final automaticamente."
                         )
             except Exception as slot_exc:
                 result["plano_auto_warning"] = str(slot_exc)
+            result["progress_pct"] = 100
+            result["progress_label"] = "ETL concluído."
+        job_service.update(job_id, "done", result=result)
+    except Exception as exc:
+        job_service.update(job_id, "failed", error=str(exc))
+
+
+def _run_metabase_sales_target_job(
+    job_service,
+    job_id: str,
+    master_sheet_id: str,
+    data_inicial: str,
+    data_final: str,
+    stores: list[str],
+) -> None:
+    """Executado em background — wrapper legado de Vendas Alvo."""
+    try:
+        job_service.update(
+            job_id,
+            "running",
+            result={
+                "progress_pct": 55,
+                "progress_label": "Consultando card 823 e montando Vendas Alvo…",
+            },
+        )
+        result = build_vendas_alvo_from_metabase(
+            master_sheet_id=master_sheet_id,
+            data_inicial=data_inicial,
+            data_final=data_final,
+            stores=stores,
+        )
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "Falha ao montar Vendas Alvo.")
+        result["progress_pct"] = 100
+        result["progress_label"] = "Vendas Alvo concluído."
         job_service.update(job_id, "done", result=result)
     except Exception as exc:
         job_service.update(job_id, "failed", error=str(exc))
@@ -112,6 +158,56 @@ def api_build_metabase_sales_target(req: ScriptRequest) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         return JSONResponse({"success": False, "error": str(exc)})
+
+
+@router.post("/api/buildMetabaseSalesTargetJob")
+async def api_build_metabase_sales_target_job(
+    req: ScriptRequest, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    from backend.application.jobs.job_service import JobService  # noqa: PLC0415
+
+    job_service = JobService()
+    master = get_workflow_sheet("master")
+    if not master or not master.get("sheet_id"):
+        return JSONResponse({"success": False, "error": "Conecte a planilha ETL primeiro."})
+    payload = req.args[0] if req.args else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    data_inicial = str(payload.get("data_inicial") or "").strip()
+    data_final = str(payload.get("data_final") or "").strip()
+    stores = [str(item).strip() for item in list(payload.get("stores") or []) if str(item).strip()]
+    if not data_inicial or not data_final:
+        return JSONResponse({"success": False, "error": "Informe data_inicial e data_final."})
+    if not stores:
+        return JSONResponse({"success": False, "error": "Selecione ao menos uma loja."})
+
+    job_id = job_service.enqueue(
+        "sales_target_legacy",
+        payload={
+            "master": master["sheet_id"],
+            "data_inicial": data_inicial,
+            "data_final": data_final,
+            "stores": stores,
+        },
+    )
+    background_tasks.add_task(
+        _run_metabase_sales_target_job,
+        job_service,
+        job_id,
+        master["sheet_id"],
+        data_inicial,
+        data_final,
+        stores,
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "job_id": job_id,
+            "status": "pending",
+            "progress_pct": 15,
+            "progress_label": "Job de Vendas Alvo enfileirado…",
+        }
+    )
 
 
 @router.post("/api/exportMetabaseSalesXlsx")

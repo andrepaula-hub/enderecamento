@@ -30,8 +30,8 @@ function AlertCard({ alert, onSend, onRefresh }) {
         {alert.exemplos.length > 2 && <div style={{ color:'#94A3B8' }}>+ {alert.exemplos.length - 2} mais…</div>}
       </div>
       <div style={{ display:'flex', gap:6 }}>
-        <button onClick={() => onSend(alert)} style={smallBtnStyle('#1C2333','rgba(239,68,68,0.2)','#EF4444')}>Enviar p/ ETL</button>
-        <button onClick={() => onRefresh(alert)} style={smallBtnStyle('#1C2333','transparent','var(--cfg-text-muted)')}>↻ Refresh</button>
+        <button onClick={() => onSend(alert)} style={smallBtnStyle('rgba(13,171,119,0.10)','rgba(13,171,119,0.32)','var(--shopper-green)')}>Enviar p/ ETL</button>
+        <button onClick={() => onRefresh(alert)} style={smallBtnStyle('rgba(59,130,246,0.10)','rgba(59,130,246,0.28)','#2563EB')}>↻ Refresh</button>
       </div>
     </div>
   );
@@ -39,6 +39,30 @@ function AlertCard({ alert, onSend, onRefresh }) {
 
 function smallBtnStyle(bg, border, color) {
   return { background: bg, border: `1px solid ${border}`, color, fontSize:10, fontWeight:600, padding:'3px 8px', borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)' };
+}
+
+function normalizeEtlAlerts(warnings) {
+  return (warnings || []).map(function (warning, index) {
+    return {
+      id: String(warning.type || ('warning-' + index)),
+      titulo: String(warning.title || warning.type || 'Alerta ETL'),
+      count: Number(warning.count || 0),
+      exemplos: (warning.examples || []).map(function (item) {
+        return {
+          codigo: String(item.product_code || item.codigo || ''),
+          nome: String(item.product_name || item.nome || ''),
+        };
+      }),
+      raw: warning,
+    };
+  });
+}
+
+function summarizeEtlWarnings(warnings) {
+  if (!warnings || warnings.length === 0) return 'Nenhum aviso crítico retornado pelo ETL.';
+  return warnings.map(function (warning) {
+    return String(warning.count || 0) + ' ' + String(warning.title || warning.type || 'alerta');
+  }).join(' · ');
 }
 
 // ── Store checkboxes ─────────────────────────────────────────────────────────
@@ -108,9 +132,10 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const [progress, setProgress] = useState(null); // { val: 0-100, label: '' }
   const [status, setStatus] = useState({ msg:'Aguardando configuração.', type:'info' });
   const [running, setRunning] = useState(null); // which action is running
-  const [alerts] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [autoOpen, setAutoOpen] = useState(false);
   const logsEndRef = useRef(null);
+  const runningProgressTimerRef = useRef(null);
 
   const now = () => new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 
@@ -124,11 +149,36 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     }
   }, [logs]);
 
+  useEffect(() => () => {
+    if (runningProgressTimerRef.current) clearInterval(runningProgressTimerRef.current);
+  }, []);
+
+  const stopRunningProgress = () => {
+    if (runningProgressTimerRef.current) {
+      clearInterval(runningProgressTimerRef.current);
+      runningProgressTimerRef.current = null;
+    }
+  };
+
+  const startRunningProgress = (startVal, label, maxVal) => {
+    stopRunningProgress();
+    setProgress({ val:startVal, label });
+    runningProgressTimerRef.current = setInterval(() => {
+      setProgress(prev => {
+        if (!prev) return { val:startVal, label };
+        if (prev.val >= maxVal) return prev;
+        var nextVal = prev.val < 55 ? prev.val + 7 : prev.val + 3;
+        return { val: Math.min(maxVal, nextVal), label: prev.label || label };
+      });
+    }, 900);
+  };
+
   const handleSaveLinks = async () => {
     if (!links.etl || !links.mix) { setStatusMsg('Erro: links obrigatórios faltando.', 'error'); addLog('Erro: preencha todos os links antes de salvar.', 'error'); return; }
     setRunning('save');
     setProgress({ val:25, label:'Conectando planilhas…' });
     addLog('Conectando Endereçamento, ETL e Mix…', 'info');
+    await new Promise(r => setTimeout(r, 0));
     try {
       const target = flow === 1 ? links.ender : links.mapaEq;
       const response = window.DSEApi.connectWorkflowSheets(target, links.etl, links.mix);
@@ -150,17 +200,56 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
 
   const handleETL = async () => {
     setRunning('etl');
-    setProgress({ val:35, label:'Executando ETL…' });
+    setAlerts([]);
+    setProgress({ val:12, label:'Enfileirando ETL…' });
+    addLog('Iniciando ETL…', 'info');
+    await new Promise(r => setTimeout(r, 0));
     try {
       const response = window.DSEApi.runEtl();
-      if (response && response.success) {
-        setProgress({ val:100, label:'ETL concluído.' });
-        addLog(`ETL concluído. ${response.plano_auto_generated ? 'Plano gerado automaticamente.' : ''}`, 'success');
-        setStatusMsg('ETL concluído.', 'success');
-      } else {
+      if (!response || (!response.success && !response.job_id)) {
         throw new Error((response && response.error) || 'Falha ao rodar ETL.');
       }
+      const jobId = response.job_id;
+      if (jobId) {
+        startRunningProgress(24, 'Lendo planilhas e montando Base_Produtos…', 92);
+        const result = await new Promise((resolve, reject) => {
+          const iv = setInterval(async () => {
+            try {
+              const r = await fetch('/api/jobs/' + jobId);
+              const job = await r.json();
+              if (job.status === 'done') { clearInterval(iv); resolve(job.result || {}); }
+              else if (job.status === 'failed') { clearInterval(iv); reject(new Error(job.error || 'ETL falhou.')); }
+              else if (job.status === 'running' && job.result && job.result.progress_pct) {
+                setProgress({
+                  val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+                  label: job.result.progress_label || 'ETL em andamento…',
+                });
+              } else if (job.status === 'pending') {
+                setProgress({ val:18, label:'Job de ETL enfileirado…' });
+              }
+            } catch (e) { clearInterval(iv); reject(e); }
+          }, 2500);
+        });
+        stopRunningProgress();
+        setProgress({ val:100, label:'ETL concluído.' });
+        const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+        const normalizedAlerts = normalizeEtlAlerts(warnings);
+        setAlerts(normalizedAlerts);
+        const baseLink = result.sheet_url || (result.links && result.links.base_produtos) || '';
+        const linkETL = baseLink ? ` <a href="${baseLink}" target="_blank" style="color:var(--shopper-green);text-decoration:underline">Abrir planilha →</a>` : '';
+        addLog(`ETL concluído.${result.plano_auto_generated ? ' Plano gerado automaticamente.' : ''}${linkETL}`, 'success');
+        addLog(summarizeEtlWarnings(warnings), warnings.length > 0 ? 'warn' : 'info');
+        setStatusMsg('ETL concluído.', 'success');
+      } else {
+        const warnings = Array.isArray(response.warnings) ? response.warnings : [];
+        setAlerts(normalizeEtlAlerts(warnings));
+        setProgress({ val:100, label:'ETL concluído.' });
+        addLog(`ETL concluído. ${response.plano_auto_generated ? 'Plano gerado automaticamente.' : ''}`, 'success');
+        addLog(summarizeEtlWarnings(warnings), warnings.length > 0 ? 'warn' : 'info');
+        setStatusMsg('ETL concluído.', 'success');
+      }
     } catch (err) {
+      stopRunningProgress();
       addLog(String(err), 'error');
       setStatusMsg(String(err), 'error');
     } finally {
@@ -172,21 +261,60 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const handleVendasAlvo = async () => {
     if (!lojas.length) { addLog('Selecione ao menos uma loja.', 'error'); return; }
     setRunning('vendas');
-    setProgress({ val:30, label:'Montando Vendas Alvo…' });
+    setProgress({ val:12, label:'Enfileirando Vendas Alvo…' });
+    addLog('Iniciando job de Vendas Alvo…', 'info');
+    await new Promise(r => setTimeout(r, 0));
     try {
-      const response = window.DSEApi.buildSalesTarget({
+      const response = await window.DSEApi.buildSalesTargetAsync({
         data_inicial: dates.ini,
         data_final: dates.fim,
         stores: lojas,
       });
-      if (response && response.success) {
-        setProgress({ val:100, label:'Vendas Alvo concluído.' });
-        addLog(`Vendas Alvo concluído. ${response.rows_written || 0} linhas escritas.`, 'success');
-        setStatusMsg('Vendas Alvo concluído.', 'success');
-      } else {
+      if (!response || (!response.success && !response.job_id)) {
         throw new Error((response && response.error) || 'Falha ao montar Vendas Alvo.');
       }
+      const jobId = response.job_id;
+      if (!jobId) {
+        throw new Error('Job de Vendas Alvo não retornou identificador.');
+      }
+
+      startRunningProgress(28, 'Consultando card 823 e montando Vendas Alvo…', 92);
+      const result = await new Promise((resolve, reject) => {
+        const iv = setInterval(async () => {
+          try {
+            const r = await fetch('/api/jobs/' + jobId);
+            const job = await r.json();
+            if (job.status === 'done') {
+              clearInterval(iv);
+              resolve(job.result || {});
+            } else if (job.status === 'failed') {
+              clearInterval(iv);
+              reject(new Error(job.error || 'Vendas Alvo falhou.'));
+            } else if (job.status === 'running' && job.result && job.result.progress_pct) {
+              setProgress({
+                val: Math.max(35, Math.min(95, Number(job.result.progress_pct) || 35)),
+                label: job.result.progress_label || 'Montando Vendas Alvo…',
+              });
+            } else if (job.status === 'pending') {
+              setProgress({ val:20, label:'Job de Vendas Alvo enfileirado…' });
+            }
+          } catch (e) {
+            clearInterval(iv);
+            reject(e);
+          }
+        }, 1800);
+      });
+      stopRunningProgress();
+      setProgress({ val:100, label:'Vendas Alvo concluído.' });
+      if (result && result.success) {
+        const linkVA = result.sheet_url ? ` <a href="${result.sheet_url}" target="_blank" style="color:var(--shopper-green);text-decoration:underline">Abrir planilha →</a>` : '';
+        addLog(`Vendas Alvo concluído. ${result.rows_written || 0} linhas escritas.${linkVA}`, 'success');
+        setStatusMsg('Vendas Alvo concluído.', 'success');
+      } else {
+        throw new Error((result && result.error) || 'Falha ao montar Vendas Alvo.');
+      }
     } catch (err) {
+      stopRunningProgress();
       addLog(String(err), 'error');
       setStatusMsg(String(err), 'error');
     } finally {
@@ -198,6 +326,8 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const handleEscaninhos = async () => {
     setRunning('escs');
     setProgress({ val:40, label:'Gerando escaninhos…' });
+    addLog('Gerando escaninhos…', 'info');
+    await new Promise(r => setTimeout(r, 0));
     try {
       const response = window.DSEApi.generateSlots();
       if (response && response.success) {
@@ -219,6 +349,8 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const handleImportCard175 = async () => {
     setRunning('c175');
     setProgress({ val:35, label:'Importando Card 175…' });
+    addLog('Importando Card 175…', 'info');
+    await new Promise(r => setTimeout(r, 0));
     try {
       const selected = STORES.find(s => s.id === loja);
       const response = window.DSEApi.importCard175Metabase({
@@ -379,12 +511,12 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         {/* Progress bar */}
         {progress && (
           <div style={{ padding:'8px 16px', borderBottom:'1px solid var(--cfg-border)', flexShrink:0 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:8, marginBottom:4 }}>
               <span style={{ fontSize:10, color:'var(--cfg-text-muted)' }}>{progress.label}</span>
               <span style={{ fontSize:10, fontWeight:700, color:'var(--shopper-green)' }}>{progress.val}%</span>
             </div>
-            <div style={{ height:4, background:'var(--cfg-border)', borderRadius:2 }}>
-              <div style={{ height:'100%', width:`${progress.val}%`, background:'var(--shopper-green)', borderRadius:2, transition:'width 0.3s ease' }}></div>
+            <div style={{ height:4, background:'var(--cfg-border)', borderRadius:2, overflow:'hidden' }}>
+              <div style={{ height:'100%', width:`${progress.val}%`, background:'var(--shopper-green)', borderRadius:2, transition:'width 0.25s ease' }}></div>
             </div>
           </div>
         )}

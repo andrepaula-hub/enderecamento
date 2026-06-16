@@ -10,9 +10,45 @@ const {
 const { STREETS_STRUCTURE, PRODUCTS, PRODUCT_MAP, INITIAL_ALLOCATIONS, INITIAL_UNALLOCATED } = window.DSEData;
 const BOOTSTRAP = window.DSEBootstrap || {};
 const API = window.DSEApi;
+const HELPERS = window.DSEHelpers || {};
 const { useTweaks } = window;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
+
+function resolveBoardEntryProductCode(entryId) {
+  const raw = HELPERS.normalizeText ? HELPERS.normalizeText(entryId) : String(entryId || '').trim();
+  if (!raw) return '';
+  const unallocatedMap = BOOTSTRAP.RAW_UNALLOCATED_MAP || {};
+  if (unallocatedMap[raw] && unallocatedMap[raw].product_code) return String(unallocatedMap[raw].product_code).trim();
+  if (HELPERS.parseBoardEntryCode) return HELPERS.parseBoardEntryCode(raw);
+  return raw;
+}
+
+function createCollectedEntryId(code, existingEntries) {
+  const normalized = String(code || '').trim();
+  const prefix = 'collected::' + normalized + '::';
+  let nextIdx = 1;
+  (existingEntries || []).forEach((entryId) => {
+    if (String(entryId || '').startsWith(prefix)) {
+      const suffix = parseInt(String(entryId).slice(prefix.length), 10);
+      if (Number.isFinite(suffix) && suffix >= nextIdx) nextIdx = suffix + 1;
+    }
+  });
+  return prefix + nextIdx;
+}
+
+function parseEscaninhoId(escaninhoId) {
+  const parts = String(escaninhoId || '').split('-');
+  const pos = parseInt(parts.pop() || '', 10);
+  const level = parseInt(parts.pop() || '', 10);
+  const equipId = parts.join('-');
+  return {
+    escaninhoId: String(escaninhoId || ''),
+    equipId,
+    level: Number.isFinite(level) ? level : 0,
+    pos: Number.isFinite(pos) ? pos : 0,
+  };
+}
 
 // ── Confirm modal ─────────────────────────────────────────────────────────────
 function ConfirmModal({ dialog, onConfirm, onCancel }) {
@@ -359,10 +395,17 @@ function reducer(state, action) {
 
     case 'ALLOCATE': {
       const {escaninhoId,productId,slot}=action;
+      const productCode = resolveBoardEntryProductCode(productId);
+      if (!productCode) return state;
       const prev=state.allocations[escaninhoId]||{p1:null,p2:null};
-      const na=slot===2?{p1:prev.p1,p2:productId}:{p1:productId,p2:prev.p2};
+      const na=slot===2?{p1:prev.p1,p2:productCode}:{p1:productCode,p2:prev.p2};
       const newA={...state.allocations,[escaninhoId]:na};
-      return {...commitAllocs(state,newA), collected:state.collected.filter(id=>id!==productId), unallocated:state.unallocated.filter(id=>id!==productId), selectedProduct:null};
+      return {
+        ...commitAllocs(state,newA),
+        collected:state.collected.filter(id=>id!==productId),
+        unallocated:state.unallocated.filter(id=>id!==productId),
+        selectedProduct:null,
+      };
     }
     case 'COLLECT': {
       const {escaninhoId,product}=action;
@@ -370,7 +413,50 @@ function reducer(state, action) {
       const na={p1:prev.p2||null,p2:null};
       const newA={...state.allocations,[escaninhoId]:na};
       if(!na.p1) delete newA[escaninhoId];
-      return {...commitAllocs(state,newA), collected:state.collected.includes(product.id)?state.collected:[product.id,...state.collected], selectedProduct:null};
+      const collectedEntryId = createCollectedEntryId(product.id, state.collected);
+      return {
+        ...commitAllocs(state,newA),
+        collected:[collectedEntryId, ...state.collected],
+        selectedProduct:null,
+      };
+    }
+    case 'ALLOCATE_MANY': {
+      const items = Array.isArray(action.items) ? action.items : [];
+      if (!items.length) return state;
+      const newA = { ...state.allocations };
+      const collectedToRemove = new Set();
+      const unallocatedToRemove = new Set();
+      items.forEach(({ escaninhoId, productId, slot }) => {
+        const productCode = resolveBoardEntryProductCode(productId);
+        if (!productCode || !escaninhoId) return;
+        const prev = newA[escaninhoId] || { p1:null, p2:null };
+        newA[escaninhoId] = slot === 2 ? { p1:prev.p1, p2:productCode } : { p1:productCode, p2:prev.p2 };
+        collectedToRemove.add(productId);
+        unallocatedToRemove.add(productId);
+      });
+      return {
+        ...commitAllocs(state,newA),
+        collected:state.collected.filter(id=>!collectedToRemove.has(id)),
+        unallocated:state.unallocated.filter(id=>!unallocatedToRemove.has(id)),
+        selectedProduct:null,
+      };
+    }
+    case 'COLLECT_MANY': {
+      const escaninhoIds = Array.isArray(action.escaninhoIds) ? action.escaninhoIds : [];
+      if (!escaninhoIds.length) return state;
+      const newA = { ...state.allocations };
+      const newCollected = [...state.collected];
+      escaninhoIds.forEach((escaninhoId) => {
+        const prev = newA[escaninhoId] || { p1:null, p2:null };
+        if (prev.p1) newCollected.push(createCollectedEntryId(prev.p1, newCollected));
+        if (prev.p2) newCollected.push(createCollectedEntryId(prev.p2, newCollected));
+        delete newA[escaninhoId];
+      });
+      return {
+        ...commitAllocs(state,newA),
+        collected:newCollected,
+        selectedProduct:null,
+      };
     }
     case 'UNDO': {
       if(state.histIdx<=0) return state;
@@ -421,8 +507,8 @@ function reducer(state, action) {
       street.equipment.forEach(eq=>{
         for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){
           const key=`${eq.id}-${n}-${s}`, a=newA[key];
-          if(a?.p1&&!newCollected.includes(a.p1)) newCollected.push(a.p1);
-          if(a?.p2&&!newCollected.includes(a.p2)) newCollected.push(a.p2);
+          if(a?.p1) newCollected.push(createCollectedEntryId(a.p1, newCollected));
+          if(a?.p2) newCollected.push(createCollectedEntryId(a.p2, newCollected));
           delete newA[key];
         }
       });
@@ -673,6 +759,7 @@ function App() {
   const [tweaks,setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [state,dispatch]  = useReducer(reducer, initState);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [visibleQueue, setVisibleQueue] = useState({ tab:'nao_alocados', total:0, filtered:0, productIds:[] });
 
   useEffect(()=>{ document.documentElement.setAttribute('data-dse-theme',tweaks.dark?'dark':'light'); },[tweaks.dark]);
   useEffect(() => {
@@ -705,7 +792,9 @@ function App() {
   },[state.pendingConfirm,state.swapSource,state.highlightProductId,state.configOpen,state.openPanel,state.selectedProduct]);
 
   const handleAllocate  = useCallback((id,pid,slot)=>dispatch({type:'ALLOCATE',escaninhoId:id,productId:pid,slot}),[]);
+  const handleAllocateMany = useCallback((items)=>dispatch({type:'ALLOCATE_MANY',items}),[]);
   const handleCollect   = useCallback((id,p)=>dispatch({type:'COLLECT',escaninhoId:id,product:p}),[]);
+  const handleCollectMany = useCallback((escaninhoIds)=>dispatch({type:'COLLECT_MANY',escaninhoIds}),[]);
   const handleStartSwap = useCallback(eqId=>dispatch({type:'SET_SWAP_SOURCE',equipId:eqId}),[]);
   const handleCompleteSwap = useCallback(eqId=>{
     if(!state.swapSource||state.swapSource===eqId) { dispatch({type:'CLEAR_SWAP_SOURCE'}); return; }
@@ -758,24 +847,26 @@ function App() {
             equipCollapsed={state.equipCollapsed} streetCollapsed={state.streetCollapsed}
             onToggleEquip={id=>dispatch({type:'TOGGLE_EQUIP',id})}
             onToggleStreet={id=>dispatch({type:'TOGGLE_STREET',id})}
-            onAllocate={handleAllocate} onCollect={handleCollect}
+            onAllocate={handleAllocate} onAllocateMany={handleAllocateMany}
+            onCollect={handleCollect} onCollectMany={handleCollectMany}
             selectedProduct={state.selectedProduct} mode2aLeva={state.mode2aLeva}
             colWidth={tweaks.colWidth} searchQuery={state.searchQuery} dispatch={dispatch}
             swapSource={state.swapSource} onStartSwap={handleStartSwap} onCompleteSwap={handleCompleteSwap}
             onRecolherRua={handleRecolherRua} highlightProductId={state.highlightProductId}
-            subcatFilters={state.subcatFilters}
+            subcatFilters={state.subcatFilters} queueProductIds={visibleQueue.tab==='nao_alocados' ? visibleQueue.productIds : []}
           />
 
           {state.pranchetaOpen&&(
             <DSEPrancheta collected={state.collected} unallocated={state.unallocated}
               selectedProduct={state.selectedProduct} onSelectProduct={id=>dispatch({type:'SELECT_PRODUCT',productId:id})}
-              mode2aLeva={state.mode2aLeva} onToggle2aLeva={()=>dispatch({type:'TOGGLE_2A_LEVA'})} width={300}/>
+              mode2aLeva={state.mode2aLeva} onToggle2aLeva={()=>dispatch({type:'TOGGLE_2A_LEVA'})} width={300}
+              onVisibleProductsChange={setVisibleQueue}/>
           )}
 
           {/* Allocation hint */}
-          {state.selectedProduct&&(
+          {(state.selectedProduct || (visibleQueue.tab==='nao_alocados' && visibleQueue.productIds.length>0))&&(
             <div style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:100, background:'rgba(13,171,119,0.96)', borderRadius:20, padding:'7px 18px', fontSize:11, fontWeight:700, color:'#fff', pointerEvents:'none', boxShadow:'0 4px 20px rgba(13,171,119,0.4)' }}>
-              Clique em escaninho vazio para alocar · ESC cancela
+              Clique em escaninho vazio para alocar da fila · Shift nível · Cmd/Ctrl equipamento · Alt 2º slot · ESC cancela
             </div>
           )}
         </>)}

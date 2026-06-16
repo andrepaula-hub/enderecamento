@@ -131,7 +131,7 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
 
   const baseStyle = {
     flex: 1, height: 62, borderRadius: 4, position:'relative', overflow:'hidden', flexShrink:0, minWidth:0,
-    cursor: 'pointer', userSelect:'none',
+    cursor: onClick ? 'pointer' : 'default', userSelect:'none',
     transition: 'box-shadow 0.12s, border-color 0.12s, transform 0.1s',
   };
 

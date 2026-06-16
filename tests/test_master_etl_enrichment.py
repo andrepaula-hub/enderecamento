@@ -230,6 +230,8 @@ def test_run_etl_updates_sales_for_allocated_skus_only():
     assert sku1[idx["curva"]] == "B"
     assert sku1[idx["venda_media_diaria"]] == 4.0
     assert sku1[idx["dias_estoque"]] == 1.25
+    assert result["sheet_url"] == "https://fake/Base_Produtos"
+    assert result["links"]["base_produtos"] == "https://fake/Base_Produtos"
 
     sku2 = rows_by_code["SKU2"]
     assert sku2[idx["categoria_armazenagem"]] == "Itens de prateleira"

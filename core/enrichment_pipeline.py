@@ -1110,6 +1110,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
             axis=1,
         )
 
+    target.ensure_sheet(SHEET_BASE_PRODUTOS)
     base_values = target.read_values(SHEET_BASE_PRODUTOS)
     if base_values and len(base_values) > 0 and any(str(h or "").strip() for h in base_values[0]):
         target_headers = [str(h or "").strip() for h in base_values[0]]
@@ -1180,6 +1181,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
         "master_sheet_title": master.get_title(),
         "mix_sheet_title": mix.get_title(),
         "target_sheet_title": target.get_title(),
+        "sheet_url": target.get_sheet_url(SHEET_BASE_PRODUTOS),
         "links": {
             "base_produtos": target.get_sheet_url(SHEET_BASE_PRODUTOS),
             "master_volumetria": master.get_sheet_url(volumetria_name),

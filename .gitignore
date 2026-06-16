@@ -30,6 +30,7 @@ outputs/*.csv
 # IDEs
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 

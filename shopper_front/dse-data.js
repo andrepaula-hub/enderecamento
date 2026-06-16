@@ -23,8 +23,31 @@
     return xhr.responseText ? JSON.parse(xhr.responseText) : {};
   }
 
+  async function postApiAsync(funcName, args) {
+    var response = await fetch('/api/' + funcName, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args: args || [] }),
+    });
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status + ' ao chamar ' + funcName);
+    }
+    var text = await response.text();
+    return text ? JSON.parse(text) : {};
+  }
+
   function normalizeText(value) {
     return String(value || '').trim();
+  }
+
+  function parseBoardEntryCode(entryId) {
+    var raw = normalizeText(entryId);
+    if (!raw) return '';
+    var collectedMatch = raw.match(/^collected::(.+?)::\d+$/);
+    if (collectedMatch) return normalizeText(collectedMatch[1]);
+    var unallocatedMatch = raw.match(/^unallocated::(.+?)::\d+$/);
+    if (unallocatedMatch) return normalizeText(unallocatedMatch[1]);
+    return raw;
   }
 
   function normalizeGroup(value) {
@@ -82,16 +105,35 @@
     return 'R' + ruaNum + '-E' + equipNum;
   }
 
-  function buildProducts(baseMap, searchProducts) {
-    var codes = Object.keys(baseMap || {});
+  function buildProducts(baseMap, searchProducts, extraProducts) {
+    var codes = [];
+    var seenCodes = {};
     var searchByCode = {};
+    var extraByCode = {};
     (searchProducts || []).forEach(function (item) {
       searchByCode[normalizeText(item.code)] = item;
     });
+    (extraProducts || []).forEach(function (item) {
+      var code = normalizeText(item && (item.product_code || item.id));
+      if (code && !extraByCode[code]) extraByCode[code] = item;
+    });
+    Object.keys(baseMap || {}).forEach(function (code) {
+      var normalized = normalizeText(code);
+      if (!normalized || seenCodes[normalized]) return;
+      seenCodes[normalized] = true;
+      codes.push(normalized);
+    });
+    Object.keys(extraByCode).forEach(function (code) {
+      var normalized = normalizeText(code);
+      if (!normalized || seenCodes[normalized]) return;
+      seenCodes[normalized] = true;
+      codes.push(normalized);
+    });
+
     var products = codes
       .filter(function (code) { return code && code !== 'Vazio'; })
       .map(function (code) {
-        var row = baseMap[code] || {};
+        var row = baseMap[code] || extraByCode[code] || {};
         return {
           id: code,
           nome: normalizeText(row.product_name || (searchByCode[code] || {}).name || code),
@@ -236,11 +278,16 @@
     try { searchProducts = JSON.parse(rawData.all_products_json || '[]'); } catch (error) {}
     try { unallocatedMap = JSON.parse(rawData.unallocated_products_json || '{}'); } catch (error) {}
 
-    var productsBundle = buildProducts(baseMap, searchProducts);
+    var productsBundle = buildProducts(baseMap, searchProducts, Object.values(unallocatedMap || {}));
     var parsedMap = parseMap(rawData.content_html || '');
     var workflowPayload = workflow && workflow.success ? workflow : {};
     var activeSheet = workflowPayload.target || (workflowPayload.sheet || null);
     var metabaseSales = workflowPayload.metabase_sales || {};
+    var unallocatedIds = Object.keys(unallocatedMap || {}).filter(function (entryId) {
+      var item = unallocatedMap[entryId] || {};
+      var code = normalizeText(item.product_code || parseBoardEntryCode(entryId));
+      return !!productsBundle.productMap[code];
+    });
 
     return {
       STORES: buildStoresFromWorkflow(workflowPayload),
@@ -249,7 +296,11 @@
       PRODUCT_MAP: productsBundle.productMap,
       STREETS_STRUCTURE: parsedMap.streets,
       INITIAL_ALLOCATIONS: parsedMap.allocations,
-      INITIAL_UNALLOCATED: Object.keys(unallocatedMap || {}),
+      INITIAL_UNALLOCATED: unallocatedIds.filter(function (entryId) {
+        var item = unallocatedMap[entryId] || {};
+        var code = normalizeText(item.product_code || parseBoardEntryCode(entryId));
+        return !!productsBundle.productMap[code];
+      }),
       RAW_UNALLOCATED_MAP: unallocatedMap,
       RAW_PRODUCT_DATA_MAP: baseMap,
       SLOT_META: parsedMap.slotMeta,
@@ -265,6 +316,7 @@
 
   window.DSEApi = {
     postApi: postApi,
+    postApiAsync: postApiAsync,
     saveVersion: function (name) { return postApi('savePlanoVersion', [name]); },
     listVersions: function () { return postApi('listPlanoVersions', []); },
     restoreVersion: function (versionId) { return postApi('restorePlanoVersion', [versionId]); },
@@ -275,6 +327,7 @@
     runEtl: function () { return postApi('runEtlToBaseProducts', []); },
     generateSlots: function () { return postApi('generateSlotsFromCadastro', [true]); },
     buildSalesTarget: function (payload) { return postApi('buildMetabaseSalesTarget', [payload]); },
+    buildSalesTargetAsync: function (payload) { return postApiAsync('buildMetabaseSalesTargetJob', [payload]); },
     exportSalesXlsx: function (payload) { return postApi('exportMetabaseSalesXlsx', [payload]); },
     importCard175Metabase: function (payload) { return postApi('importCard175Metabase', [payload]); },
     saveBatchMoves: function (moves, options) { return postApi('saveBatchMoves', [moves, options || {}]); },
@@ -296,5 +349,10 @@
     STREETS_STRUCTURE: BOOTSTRAP.STREETS_STRUCTURE,
     INITIAL_ALLOCATIONS: BOOTSTRAP.INITIAL_ALLOCATIONS,
     INITIAL_UNALLOCATED: BOOTSTRAP.INITIAL_UNALLOCATED,
+  };
+
+  window.DSEHelpers = {
+    normalizeText: normalizeText,
+    parseBoardEntryCode: parseBoardEntryCode,
   };
 })();
