@@ -583,6 +583,44 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     return rows.map((item) => item.escaninhoId);
   }, [mapStructure]);
 
+  // Score a slot for a specific product based on tipo_fisico rules from agent_scoring.py
+  const scoreSlotForProduct = useCallback((escaninhoId, productId) => {
+    const { level, equipId } = parseEscId(escaninhoId);
+    const product = PRODUCT_MAP[productId];
+    if (!product) return -level * 2;
+    let eq = null;
+    for (const street of mapStructure) {
+      for (const e of street.equipment) { if (e.id === equipId) { eq = e; break; } }
+      if (eq) break;
+    }
+    const isPrateleira = eq && (eq.tipo || '').includes('prateleira');
+    if (!isPrateleira) return -level * 2;
+    const niveis = eq ? eq.niveis : 5;
+    let score = 0;
+    // pesado: bloqueia topo, prefere níveis 3-4
+    if (product.pesado) {
+      if (level === 1) return -99999;
+      if (level === 4) score += 70;
+      else if (level === 3) score += 50;
+      else if (level === 2) score += 10;
+    }
+    // FLV em prateleira: bloqueia nível 1 e último nível
+    if ((product.grupo || '').toUpperCase() === 'FLV') {
+      if (level === 1 || level === niveis) return -99999;
+      score += 30;
+    }
+    // frágil/alto: prefere topo (nível 1)
+    if (product.fragil || product.alto) {
+      score += (niveis - level) * 12;
+    }
+    // pequeno: prefere níveis mais baixos
+    if (product.pequeno) {
+      score += level * 6;
+    }
+    score -= level * 2;
+    return score;
+  }, [mapStructure]);
+
   const buildAllocationBatch = useCallback((clickedEscaninhoId, opts) => {
     const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
     if (!queue.length) return [];
@@ -599,13 +637,30 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       if (slot === 2) return !!alloc.p1 && !alloc.p2;
       return !alloc.p1;
     });
-    const limit = selectedProduct ? 1 : queue.length;
-    return targets.slice(0, limit).map((escaninhoId, index) => ({
+    // Single product: sort slots by score for this product
+    if (selectedProduct) {
+      const sorted = [...targets].sort((a, b) => scoreSlotForProduct(b, selectedProduct) - scoreSlotForProduct(a, selectedProduct));
+      return sorted.slice(0, 1).map((escaninhoId) => ({ escaninhoId, productId: selectedProduct, slot }));
+    }
+    // Queue: greedy match — each product picks its best available slot
+    if (scope === 'equipment' && queue.length > 1) {
+      const used = new Set();
+      const result = [];
+      for (const productId of queue) {
+        if (result.length >= queue.length) break;
+        const best = [...targets]
+          .filter((s) => !used.has(s))
+          .sort((a, b) => scoreSlotForProduct(b, productId) - scoreSlotForProduct(a, productId))[0];
+        if (best && productId) { used.add(best); result.push({ escaninhoId: best, productId, slot }); }
+      }
+      return result.filter((item) => !!item.productId);
+    }
+    return targets.slice(0, queue.length).map((escaninhoId, index) => ({
       escaninhoId,
-      productId: selectedProduct || queue[index],
+      productId: queue[index],
       slot,
     })).filter((item) => !!item.productId);
-  }, [allocations, orderedEscaninhos, queueProductIds, selectedProduct]);
+  }, [allocations, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
 
   const buildCollectBatch = useCallback((clickedEscaninhoId, scope) => {
     const parsed = parseEscId(clickedEscaninhoId);
