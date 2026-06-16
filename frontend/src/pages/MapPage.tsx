@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'r
 import { useAddressingStore } from '../store/addressing'
 import { useTweaksStore } from '../store/tweaks'
 import { useConfigStore } from '../store/config'
-import { getInitialData, suggestAllocations } from '../api/addressing'
+import { getInitialData } from '../api/addressing'
 import { saveVersion } from '../api/versions'
 import { generateLayoutAtual, generateKdabraSheet, generateKdabraEnderecarSheet, downloadFile } from '../api/exports'
 import SearchBar from '../components/SearchBar'
@@ -459,8 +459,6 @@ export default function MapPage() {
   const [mapState, dispatch] = useReducer(reducer, initState)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [tweakOpen, setTweakOpen] = useState(false)
-  const [suggesting, setSuggesting] = useState(false)
-  const [suggestError, setSuggestError] = useState<string | null>(null)
   const addrStore = useAddressingStore()
   const configStore = useConfigStore()
   const tweaks = useTweaksStore()
@@ -549,30 +547,6 @@ export default function MapPage() {
     if (moves.length > 0) dispatch({ type: 'BULK_ALLOCATE', moves })
   }, [mapState.selectedProduct, mapState.mapStructure, mapState.allocations, addrStore.productMap])
 
-  const handleSuggest = useCallback(async () => {
-    if (suggesting || mapState.unallocated.length === 0) return
-    setSuggesting(true)
-    setSuggestError(null)
-    try {
-      const productMap = addrStore.productMap
-      const products = mapState.unallocated.map(code => productMap[code]).filter(Boolean) as Product[]
-      const res = await suggestAllocations({
-        unallocated_codes: mapState.unallocated,
-        products_data: products,
-        map_structure: mapState.mapStructure,
-        allocations: mapState.allocations as Record<string, { p1: string | null; p2: string | null }>,
-        options: {},
-      })
-      if (!res.success) { setSuggestError(res.error ?? 'Erro ao sugerir alocações.'); return }
-      if (res.moves.length === 0) { setSuggestError('Nenhum produto pôde ser alocado com as regras atuais.'); return }
-      dispatch({ type: 'BULK_ALLOCATE', moves: res.moves })
-    } catch (e) {
-      setSuggestError(String(e))
-    } finally {
-      setSuggesting(false)
-    }
-  }, [suggesting, mapState.unallocated, mapState.mapStructure, mapState.allocations, addrStore.productMap])
-
   const handleSaveVersion = useCallback(async (name: string, setProgress: (n: number) => void) => {
     setProgress(45)
     // diff moves — simplified: just save the version with current name
@@ -626,11 +600,6 @@ export default function MapPage() {
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        {suggestError && (
-          <div onClick={() => setSuggestError(null)} style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: '#7F1D1D', color: '#FCA5A5', fontSize: 12, padding: '8px 14px', borderRadius: 7, cursor: 'pointer', maxWidth: 440, textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
-            {suggestError} <span style={{ opacity: 0.6, marginLeft: 8 }}>✕</span>
-          </div>
-        )}
         {addrStore.loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--app-bg)', zIndex: 10 }}>
             <div style={{ fontSize: 14, color: 'var(--map-text-muted)' }}>Carregando mapa…</div>
