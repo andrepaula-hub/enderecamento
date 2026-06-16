@@ -586,7 +586,11 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   // Score a slot for a specific product based on tipo_fisico rules from agent_scoring.py
   const scoreSlotForProduct = useCallback((escaninhoId, productId) => {
     const { level, equipId } = parseEscId(escaninhoId);
-    const product = PRODUCT_MAP[productId];
+    // queueProductIds uses boardEntryId format: "unallocated::CODE::N" or just the code directly
+    const raw = String(productId || '');
+    const m = raw.match(/^(?:unallocated|collected)::(.+?)::\d+$/);
+    const productCode = m ? m[1] : raw;
+    const product = PRODUCT_MAP[productCode];
     if (!product) return -level * 2;
     let eq = null;
     for (const street of mapStructure) {
