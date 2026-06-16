@@ -199,7 +199,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         });
         if (!match) return false;
       }
-      if (filterMetodos.length && !filterMetodos.includes(p.metodo)) return false;
+      if (filterMetodos.length && !filterMetodos.includes(p.arm)) return false;
       if (filterSubs.length && !filterSubs.includes(p.sub)) return false;
       return true;
     }).map(entry => Object.assign({}, entry.product, {
@@ -232,7 +232,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
 
   const allMetodos = useMemo(() => {
     const s = new Set();
-    activeEntries.forEach(e => { if (e.product?.metodo && e.product.metodo !== 'N/A') s.add(e.product.metodo); });
+    activeEntries.forEach(e => { if (e.product?.arm && e.product.arm !== 'N/A') s.add(e.product.arm); });
     return [...s].sort();
   }, [activeEntries]);
 

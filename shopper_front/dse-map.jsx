@@ -560,6 +560,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         if (eq.id !== equipId) return;
         for (let n = 1; n <= eq.niveis; n += 1) {
           if (scope === 'level' && n !== level) continue;
+          if (scope === 'equipment' && n < level) continue;
           for (let s = 1; s <= eq.escsPerNivel; s += 1) {
             const escaninhoId = `${eq.id}-${n}-${s}`;
             rows.push({ escaninhoId, level:n, pos:s });
