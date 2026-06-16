@@ -1,6 +1,6 @@
 // MapPage — substitui dse-map.jsx + lógica do dse-app.jsx para a view de mapa
 // Estado gerenciado por Zustand. Sem funções de normalização de dados.
-import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useReducer, useRef } from 'react'
 import { useAddressingStore } from '../store/addressing'
 import { useTweaksStore } from '../store/tweaks'
 import { useConfigStore } from '../store/config'
