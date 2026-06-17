@@ -235,8 +235,8 @@ function DSEVersionsPanel({ onClose, onRestore }) {
           const next = prev.filter(x => x.id !== v.id);
           if (prev.length === 1) {
             setPostDeleteNotice({
-              title: 'A última versão foi excluída.',
-              message: 'O mapa que está aberto no navegador não é limpo automaticamente. Se quiser ver o mapa vazio agora, recarregue o site. Se salvar sem recarregar, esse estado atual poderá ser salvo novamente como nova versão.',
+              title: 'A única versão foi excluída.',
+              message: 'Como essa era a única versão salva, o mapa que está aberto no navegador não é limpo automaticamente. Se quiser ver o mapa vazio agora, recarregue o site. Se salvar sem recarregar, esse estado atual poderá ser salvo novamente como nova versão.',
             });
           } else {
             setPostDeleteNotice(null);

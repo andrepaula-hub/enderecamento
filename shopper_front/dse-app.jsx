@@ -593,6 +593,7 @@ function SaveModal({ onClose, onSaved, onSave }) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [saveResult, setSaveResult] = useState(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -605,14 +606,15 @@ function SaveModal({ onClose, onSaved, onSave }) {
     setProgress(0);
     setStatus('Preparando salvamento…');
     setError('');
+    setSaveResult(null);
     try {
       setProgress(20);
       await new Promise(resolve => window.setTimeout(resolve, 0));
-      await onSave(name.trim(), setProgress);
+      const result = await onSave(name.trim(), setProgress, setStatus);
       setProgress(100);
-      setStatus('Versão salva.');
+      setStatus('Versão salva com sucesso.');
+      setSaveResult(result || null);
       setPhase('done');
-      setTimeout(() => { onSaved(name.trim()); onClose(); }, 700);
     } catch (err) {
       setError(String(err));
       setPhase('input');
@@ -652,10 +654,34 @@ function SaveModal({ onClose, onSaved, onSave }) {
           </div>
         )}
         {phase === 'done' && (
-          <div style={{ textAlign:'center', padding:'8px 0' }}>
-            <div style={{ fontSize:36, color:'var(--shopper-green)', marginBottom:10 }}>✓</div>
-            <div style={{ fontSize:14, fontWeight:800, color:'var(--shopper-green)' }}>Versão salva com sucesso!</div>
-            <div style={{ fontSize:11, color:'var(--cfg-text-muted)', marginTop:5 }}>{name}</div>
+          <div style={{ padding:'8px 0' }}>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:36, color:'var(--shopper-green)', marginBottom:10 }}>✓</div>
+              <div style={{ fontSize:14, fontWeight:800, color:'var(--shopper-green)' }}>Versão salva com sucesso!</div>
+              <div style={{ fontSize:11, color:'var(--cfg-text-muted)', marginTop:5 }}>{name}</div>
+            </div>
+            {(saveResult?.sheet_url || saveResult?.plano_sheet_url) && (
+              <div style={{ marginTop:16, background:'rgba(13,171,119,0.08)', border:'1px solid rgba(13,171,119,0.22)', borderRadius:8, padding:'10px 12px' }}>
+                <div style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Links rápidos</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  {saveResult?.sheet_url && (
+                    <a href={saveResult.sheet_url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:700, color:'var(--shopper-green)', textDecoration:'none' }}>
+                      Abrir aba da versão criada
+                    </a>
+                  )}
+                  {saveResult?.plano_sheet_url && (
+                    <a href={saveResult.plano_sheet_url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:700, color:'var(--shopper-green)', textDecoration:'none' }}>
+                      Abrir Plano_Enderecamento_Final
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:18 }}>
+              <button onClick={() => { onSaved(name.trim(), saveResult || null); onClose(); }} style={{ padding:'8px 16px', fontSize:11, fontWeight:700, borderRadius:6, cursor:'pointer', background:'transparent', border:'1px solid var(--cfg-border)', color:'var(--cfg-text-muted)', fontFamily:'var(--font-sans)' }}>
+                Fechar
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -825,21 +851,25 @@ function App() {
     }});
   },[]);
 
-  const handleSaveVersion = useCallback(async (name, setProgress) => {
+  const handleSaveVersion = useCallback(async (name, setProgress, setStatus) => {
     const moves = diffMoves(state.allocations);
     if (moves.length > 0) {
+      if (setStatus) setStatus('Salvando movimentos pendentes…');
       setProgress(45);
       const movesResponse = await API.saveBatchMovesAsync(moves, {});
       if (!movesResponse || !movesResponse.success) {
         throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
       }
     }
+    if (setStatus) setStatus('Criando aba da versão…');
     setProgress(80);
     const versionResponse = await API.saveVersionAsync(name);
     if (!versionResponse || !versionResponse.success) {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
     setProgress(95);
+    if (setStatus) setStatus('Finalizando…');
+    return versionResponse;
   }, [state.allocations]);
 
   return (
@@ -896,7 +926,7 @@ function App() {
       {saveModalOpen && (
         <SaveModal
           onClose={()=>setSaveModalOpen(false)}
-          onSaved={(name)=>{ setSaveModalOpen(false); }}
+          onSaved={()=>{ setSaveModalOpen(false); }}
           onSave={handleSaveVersion}
         />
       )}

@@ -109,7 +109,16 @@ def save_plano_version_gsheet(sheet_id: str, name: str) -> dict[str, Any]:
     client.clear_sheet(sheet_name)
     client.append_rows(sheet_name, values)
     _store_version_metadata(sheet_id, sheet_name, sheet_name, created_at)
-    return {"success": True, "version_id": sheet_name, "label": sheet_name, "timestamp": created_at}
+    return {
+        "success": True,
+        "version_id": sheet_name,
+        "label": sheet_name,
+        "timestamp": created_at,
+        "sheet_name": sheet_name,
+        "sheet_url": client.get_sheet_url(sheet_name),
+        "plano_sheet_name": SHEET_PLANO_FINAL,
+        "plano_sheet_url": client.get_sheet_url(SHEET_PLANO_FINAL),
+    }
 
 
 def list_plano_versions_gsheet(sheet_id: str) -> dict[str, Any]:
