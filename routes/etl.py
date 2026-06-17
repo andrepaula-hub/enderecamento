@@ -385,11 +385,14 @@ def api_refresh_etl_warning(req: ScriptRequest) -> JSONResponse:
     mix = get_workflow_sheet("mix")
     if not mix or not mix.get("sheet_id"):
         return JSONResponse({"success": False, "error": "Conecte a planilha MIX primeiro."})
-    return JSONResponse(
-        refresh_single_etl_warning(
-            master_sheet_id=master["sheet_id"],
-            mix_sheet_id=mix["sheet_id"],
-            target_sheet_id=target["sheet_id"],
-            warning_type=warning_type,
+    try:
+        return JSONResponse(
+            refresh_single_etl_warning(
+                master_sheet_id=master["sheet_id"],
+                mix_sheet_id=mix["sheet_id"],
+                target_sheet_id=target["sheet_id"],
+                warning_type=warning_type,
+            )
         )
-    )
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)})

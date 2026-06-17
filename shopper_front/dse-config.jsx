@@ -66,6 +66,15 @@ function summarizeEtlWarnings(warnings) {
   }).join(' · ');
 }
 
+var WARNING_TYPES_THAT_REQUIRE_ETL_RERUN = {
+  degelo_geladeira_vazio: true,
+  volumetria_vazia: true,
+  caixaria_inconsistente: true,
+  subcategoria_vazia: true,
+  categoria_armz_vazia: true,
+  categoria_site_vazia: true,
+};
+
 // ── Store checkboxes ─────────────────────────────────────────────────────────
 function StoreCheckboxes({ selected, onChange }) {
   const toggle = (id) => onChange(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -216,6 +225,47 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     });
   };
 
+  const syncAlertsFromWarnings = (warnings, focusType) => {
+    const normalizedWarnings = normalizeEtlAlerts(warnings);
+    const warningById = {};
+    normalizedWarnings.forEach(function (item) {
+      warningById[item.id] = item;
+    });
+    setAlerts(normalizedWarnings);
+    if (focusType && !warningById[focusType]) {
+      return { resolved: true, warning: null };
+    }
+    return { resolved: false, warning: warningById[focusType] || null };
+  };
+
+  const rerunEtlForWarningRefresh = async (alert) => {
+    const response = window.DSEApi.runEtl();
+    if (!response || (!response.success && !response.job_id)) {
+      throw new Error((response && response.error) || 'Falha ao rerodar ETL para atualizar o alerta.');
+    }
+    const jobId = response.job_id;
+    if (!jobId) {
+      throw new Error('Job de ETL não retornou identificador durante o refresh do alerta.');
+    }
+    startRunningProgress(24, 'Rerodando ETL para revalidar o alerta…', 92);
+    const result = await pollJobResult(jobId, {
+      intervalMs: 2000,
+      onUpdate: function (job) {
+        if (job.status === 'pending') {
+          setProgress({ val:18, label:'Job de ETL enfileirado…' });
+        } else if (job.status === 'running' && job.result && job.result.progress_pct) {
+          setProgress({
+            val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+            label: job.result.progress_label || 'ETL em andamento…',
+          });
+        }
+      },
+    });
+    stopRunningProgress();
+    const warnings = Array.isArray(result && result.warnings) ? result.warnings : [];
+    return syncAlertsFromWarnings(warnings, alert.id);
+  };
+
   const handleRefreshAlert = async (alert) => {
     const warningType = String(alert && alert.raw && alert.raw.type || '');
     if (!warningType) return;
@@ -223,15 +273,25 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     setProgress({ val:20, label:'Atualizando alerta ETL…' });
     addLog(`Atualizando alerta "${alert.titulo}"…`, 'info');
     try {
-      const result = await window.DSEApi.refreshEtlWarningAsync(warningType);
-      if (!result || !result.success) {
-        throw new Error((result && result.error) || 'Falha ao atualizar alerta ETL.');
+      var refreshSummary;
+      if (WARNING_TYPES_THAT_REQUIRE_ETL_RERUN[warningType]) {
+        addLog(`O alerta "${alert.titulo}" depende da Base_Produtos. Rerodando ETL antes de revalidar…`, 'info');
+        refreshSummary = await rerunEtlForWarningRefresh(alert);
+      } else {
+        const result = await window.DSEApi.refreshEtlWarningAsync(warningType);
+        if (!result || !result.success) {
+          throw new Error((result && result.error) || 'Falha ao atualizar alerta ETL.');
+        }
+        applyRefreshedAlert(result);
+        refreshSummary = {
+          resolved: !!result.resolved || !result.warning || Number(result.warning.count || 0) <= 0,
+          warning: result.warning || null,
+        };
       }
-      applyRefreshedAlert(result);
-      if (result.resolved || !result.warning || Number(result.warning.count || 0) <= 0) {
+      if (refreshSummary.resolved || !refreshSummary.warning || Number(refreshSummary.warning.count || 0) <= 0) {
         addLog(`Alerta "${alert.titulo}" resolvido.`, 'success');
       } else {
-        addLog(`Alerta "${alert.titulo}" atualizado: ${result.warning.count || 0} item(ns) ainda pendente(s).`, 'warn');
+        addLog(`Alerta "${alert.titulo}" atualizado: ${refreshSummary.warning.count || 0} item(ns) ainda pendente(s).`, 'warn');
       }
       setStatusMsg('Alerta ETL atualizado.', 'success');
       setProgress({ val:100, label:'Alerta atualizado.' });
@@ -282,14 +342,8 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
       if (result.target_sheet_url) {
         addLog(`Destino: <a href="${result.target_sheet_url}" target="_blank" style="color:var(--shopper-green);text-decoration:underline">${result.target_sheet || 'Aba ETL'}</a>.`, 'info');
       }
-      const refreshed = await window.DSEApi.refreshEtlWarningAsync(warningType);
-      if (refreshed && refreshed.success) {
-        applyRefreshedAlert(refreshed);
-        if (refreshed.resolved || !refreshed.warning || Number(refreshed.warning.count || 0) <= 0) {
-          addLog(`Alerta "${alert.titulo}" resolvido após o envio.`, 'success');
-        } else {
-          addLog(`Alerta "${alert.titulo}" ainda possui ${refreshed.warning.count || 0} item(ns) pendente(s) após o envio.`, 'warn');
-        }
+      if (WARNING_TYPES_THAT_REQUIRE_ETL_RERUN[warningType]) {
+        addLog(`O envio só coloca o item na aba de correção. O alerta continuará pendente até a correção ser feita e o ETL ser rerodado.`, 'info');
       }
       setStatusMsg('Grupo enviado para o ETL.', 'success');
     } catch (err) {
