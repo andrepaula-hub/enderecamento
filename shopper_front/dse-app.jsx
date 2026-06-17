@@ -591,6 +591,7 @@ function SaveModal({ onClose, onSaved, onSave }) {
   const [phase, setPhase]     = useState('input');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -601,11 +602,14 @@ function SaveModal({ onClose, onSaved, onSave }) {
     if (!name.trim()) return;
     setPhase('saving');
     setProgress(0);
+    setStatus('Preparando salvamento…');
     setError('');
     try {
       setProgress(20);
+      await new Promise(resolve => window.setTimeout(resolve, 0));
       await onSave(name.trim(), setProgress);
       setProgress(100);
+      setStatus('Versão salva.');
       setPhase('done');
       setTimeout(() => { onSaved(name.trim()); onClose(); }, 700);
     } catch (err) {
@@ -643,6 +647,7 @@ function SaveModal({ onClose, onSaved, onSave }) {
             <div style={{ fontSize:32, fontWeight:800, color:'var(--shopper-green)', fontFamily:'var(--font-numeric)', lineHeight:1 }}>
               {progress}<span style={{ fontSize:16 }}>%</span>
             </div>
+            <div style={{ fontSize:11, color:'var(--cfg-text-muted)', marginTop:10 }}>{status || 'Salvando versão…'}</div>
           </div>
         )}
         {phase === 'done' && (
@@ -823,13 +828,13 @@ function App() {
     const moves = diffMoves(state.allocations);
     if (moves.length > 0) {
       setProgress(45);
-      const movesResponse = API.saveBatchMoves(moves, {});
+      const movesResponse = await API.saveBatchMovesAsync(moves, {});
       if (!movesResponse || !movesResponse.success) {
         throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
       }
     }
     setProgress(80);
-    const versionResponse = API.saveVersion(name);
+    const versionResponse = await API.saveVersionAsync(name);
     if (!versionResponse || !versionResponse.success) {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }

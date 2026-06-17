@@ -178,18 +178,19 @@ function DSEMetricsPanel({ allocations, onClose }) {
 function formatVersion(version) {
   const versionId = version.version_id || version.id || '';
   const label = version.label || version.nome || versionId;
-  const clean = label.replace(/^VERSAO_ENDERECAMENTO__/, '');
-  const parts = clean.split('__');
-  const stamp = parts[0] || '';
-  const name = parts.slice(1).join(' ') || clean;
+  const clean = label.replace(/^VERSAO_ENDERECAMENTO__/, '').replace(/__/g, ' ').trim();
+  const stamp = String(version.timestamp || '').trim();
   let data = stamp;
-  if (/^\d{8}_\d{6}$/.test(stamp)) {
-    data = `${stamp.slice(6, 8)}/${stamp.slice(4, 6)}/${stamp.slice(0, 4)} ${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}`;
+  if (stamp && !Number.isNaN(Date.parse(stamp))) {
+    data = new Date(stamp).toLocaleString('pt-BR');
+  } else if (/^\d{8}_\d{6}$/.test(clean.split(' ')[0] || '')) {
+    const parsedStamp = clean.split(' ')[0];
+    data = `${parsedStamp.slice(6, 8)}/${parsedStamp.slice(4, 6)}/${parsedStamp.slice(0, 4)} ${parsedStamp.slice(9, 11)}:${parsedStamp.slice(11, 13)}:${parsedStamp.slice(13, 15)}`;
   }
   return {
     id: versionId,
-    nome: name,
-    data: data,
+    nome: clean,
+    data: data || 'Data indisponível',
   };
 }
 
@@ -203,26 +204,28 @@ function DSEVersionsPanel({ onClose, onRestore }) {
 
   useEffect(() => {
     let cancelled = false;
-    try {
-      const response = window.DSEApi.listVersions();
-      if (cancelled) return;
-      if (response && response.success) {
-        setVersions((response.versions || []).map(formatVersion));
-      } else {
-        setError((response && response.error) || 'Não foi possível carregar as versões.');
+    (async () => {
+      try {
+        const response = await window.DSEApi.listVersionsAsync();
+        if (cancelled) return;
+        if (response && response.success) {
+          setVersions((response.versions || []).map(formatVersion));
+        } else {
+          setError((response && response.error) || 'Não foi possível carregar as versões.');
+        }
+      } catch (err) {
+        if (!cancelled) setError(String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (err) {
-      if (!cancelled) setError(String(err));
-    } finally {
-      if (!cancelled) setLoading(false);
-    }
+    })();
     return () => { cancelled = true; };
   }, []);
 
-  const handleDelete = (v) => {
+  const handleDelete = async (v) => {
     if (deleteText !== v.nome) return;
     try {
-      const response = window.DSEApi.deleteVersion(v.id);
+      const response = await window.DSEApi.deleteVersionAsync(v.id);
       if (response && response.success) {
         setVersions(prev => prev.filter(x => x.id !== v.id));
         setConfirmDelete(null);
@@ -261,9 +264,9 @@ function DSEVersionsPanel({ onClose, onRestore }) {
                   Isso substituirá o estado atual do mapa. Continuar?
                 </div>
                 <div style={{ display:'flex', gap:6 }}>
-                  <button onClick={()=>{
+                  <button onClick={async ()=>{
                     try {
-                      const response = window.DSEApi.restoreVersion(v.id);
+                      const response = await window.DSEApi.restoreVersionAsync(v.id);
                       if (response && response.success) {
                         onRestore && onRestore(v);
                         setConfirmRestore(null);
