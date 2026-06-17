@@ -345,7 +345,7 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         <div style={{ fontSize:10, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)' }}>
           {tab === 'nao_alocados' ? 'Não alocados ' : 'Recolhidos '}
           <strong style={{ color:'var(--pran-text)', fontWeight:800 }}>{filtered.length}</strong>
-          {' '}de {activeList.length}
+          {' '}de {displayedEntries.length}
         </div>
       </div>
 
