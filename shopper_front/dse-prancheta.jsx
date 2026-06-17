@@ -60,11 +60,8 @@ function ProductItem({ product, isSelected, onClick, onHover, onHoverEnd }) {
   const gs = GROUP_STYLE[product.grupo] || GROUP_STYLE.Neutro;
   const cc = CURVA_COLOR[product.curva] || '#94A3B8';
   const flags = [];
-  if (product.quimico) flags.push({ type:'quimico', color:'#EF4444', title:'Químico' });
-  else {
-    if (product.pesado) flags.push({ type:'pesado', color:'#DC2626', title:'Pesado (>5kg)' });
-    if (product.alto)   flags.push({ type:'alto',   color:'#F59E0B', title:'Alto (>30cm)' });
-  }
+  if (product.pesado) flags.push({ type:'pesado', color:'#92400E', title:'Pesado (>5kg)' });
+  if (product.alto)   flags.push({ type:'alto',   color:'#F59E0B', title:'Alto (>30cm)' });
   if (product.pequeno)          flags.push({ type:'pequeno', color:'#0891B2', title:'Pequeno/compacto' });
   if (product.degelo === 'NÃO') flags.push({ type:'degelo',  color:'#38BDF8', title:'Degelo NÃO' });
 
@@ -119,10 +116,9 @@ function PranchetaFlag({ flag }) {
   const { type, color, title } = flag;
   if (type==='pesado') return (
     <span title={title} style={{ color, lineHeight:1, flexShrink:0, display:'inline-flex', alignItems:'center' }}>
-      <svg width="13" height="10" viewBox="0 0 12 10" fill="currentColor">
-        <rect x="2" y="4" width="8" height="2" rx="0.5"/>
-        <rect x="0.5" y="1.5" width="2.5" height="7" rx="1.2"/>
-        <rect x="9" y="1.5" width="2.5" height="7" rx="1.2"/>
+      <svg width="11" height="13" viewBox="0 0 11 13" fill="currentColor">
+        <circle cx="5.5" cy="2.1" r="2.0"/>
+        <path d="M 2.1 4.0 L 0.6 11.5 Q 0.5 12.5 1.6 12.5 L 9.4 12.5 Q 10.5 12.5 10.4 11.5 L 8.9 4.0 Z"/>
       </svg>
     </span>
   );
@@ -151,7 +147,7 @@ function PranchetaFlag({ flag }) {
       </svg>
     </span>
   );
-  const syms = { quimico:'⚠', degelo:'❄' };
+  const syms = { degelo:'❄' };
   return <span title={title} style={{ fontSize:10, color, fontWeight:800, flexShrink:0 }}>{syms[type]||'?'}</span>;
 }
 

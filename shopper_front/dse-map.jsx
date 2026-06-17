@@ -366,8 +366,8 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
 
           </div>
           <div style={{ flex:1 }} />
-          <span style={{ fontSize:9, color:'rgba(255,255,255,0.45)', fontFamily:'var(--font-numeric)' }}>{stats.pct}%</span>
-          <div style={{ width:22, height:2, background:'rgba(255,255,255,0.15)', borderRadius:2 }}>
+          <span style={{ fontSize:10, color:'rgba(255,255,255,0.78)', fontWeight:800, fontFamily:'var(--font-numeric)', minWidth:30, textAlign:'right' }}>{stats.pct}%</span>
+          <div style={{ width:30, height:3, background:'rgba(255,255,255,0.24)', borderRadius:2 }}>
             <div style={{ height:'100%', width:`${stats.pct}%`, background:stats.pct>=75?'#0DAB77':stats.pct>=40?'#F59C00':'#EF4444', borderRadius:2 }} />
           </div>
 
@@ -613,12 +613,9 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     if (!isPrateleira && !isGeladeira) return -level * 2;
     const niveis = eq ? eq.niveis : 5;
     let score = 0;
-    // pesado: bloqueia topo, prefere níveis 3-4
+    // Pesado em prateleira: regra dura apenas contra nivel 1.
     if (product.pesado) {
       if (level === 1) return -99999;
-      if (level === 4) score += 70;
-      else if (level === 3) score += 50;
-      else if (level === 2) score += 10;
     }
     // FLV em prateleira: bloqueia nível 1 e último nível
     if ((product.grupo || '').toUpperCase() === 'FLV') {

@@ -241,7 +241,7 @@ const initMapStructure = JSON.parse(JSON.stringify(STREETS_STRUCTURE));
 const initState = {
   view:'config', configOpen:false, selectedStore:null,
   allocations:{ ...INITIAL_ALLOCATIONS },
-  history:[{ ...INITIAL_ALLOCATIONS }], histIdx:0,
+  history:[{ allocations:{ ...INITIAL_ALLOCATIONS }, unallocated:[...INITIAL_UNALLOCATED], collected:[] }], histIdx:0,
   lastHistoryGroup:null,
   selectedProduct:null, mode2aLeva:false, pranchetaOpen:true, openPanel:null,
   collected:[], unallocated:[...INITIAL_UNALLOCATED], searchQuery:'',
@@ -252,8 +252,24 @@ const initState = {
   subcatFilters:[],
 };
 
-function commitAllocs(state, newAllocs, historyGroup) {
+function historySnapshot(state, allocations, unallocated, collected) {
+  return {
+    allocations:{ ...(allocations || state.allocations) },
+    unallocated:[ ...(unallocated || state.unallocated) ],
+    collected:[ ...(collected || state.collected) ],
+  };
+}
+
+function readHistorySnapshot(item) {
+  if (!item || item.allocations) return item || {};
+  return { allocations:item, unallocated:null, collected:null };
+}
+
+function commitAllocs(state, newAllocs, historyGroup, nextLists) {
   const normalizedGroup = historyGroup || null;
+  const nextUnallocated = nextLists && nextLists.unallocated ? nextLists.unallocated : state.unallocated;
+  const nextCollected = nextLists && nextLists.collected ? nextLists.collected : state.collected;
+  const snapshot = historySnapshot(state, newAllocs, nextUnallocated, nextCollected);
   const canReplaceLast =
     normalizedGroup &&
     state.lastHistoryGroup === normalizedGroup &&
@@ -261,11 +277,11 @@ function commitAllocs(state, newAllocs, historyGroup) {
     state.history.length > 1;
   if (canReplaceLast) {
     const history = [...state.history];
-    history[state.histIdx] = { ...newAllocs };
-    return { ...state, allocations:newAllocs, history, lastHistoryGroup:normalizedGroup };
+    history[state.histIdx] = snapshot;
+    return { ...state, allocations:newAllocs, unallocated:nextUnallocated, collected:nextCollected, history, lastHistoryGroup:normalizedGroup };
   }
-  const h=[...state.history.slice(0,state.histIdx+1),{...newAllocs}];
-  return {...state, allocations:newAllocs, history:h, histIdx:h.length-1, lastHistoryGroup:normalizedGroup};
+  const h=[...state.history.slice(0,state.histIdx+1), snapshot];
+  return {...state, allocations:newAllocs, unallocated:nextUnallocated, collected:nextCollected, history:h, histIdx:h.length-1, lastHistoryGroup:normalizedGroup};
 }
 
 function findEquip(mapStructure, equipId) {
@@ -413,10 +429,10 @@ function reducer(state, action) {
       const prev=state.allocations[escaninhoId]||{p1:null,p2:null};
       const na=slot===2?{p1:prev.p1,p2:productCode}:{p1:productCode,p2:prev.p2};
       const newA={...state.allocations,[escaninhoId]:na};
+      const nextCollected = state.collected.filter(id=>id!==productId);
+      const nextUnallocated = state.unallocated.filter(id=>id!==productId);
       return {
-        ...commitAllocs(state,newA,historyGroup),
-        collected:state.collected.filter(id=>id!==productId),
-        unallocated:state.unallocated.filter(id=>id!==productId),
+        ...commitAllocs(state,newA,historyGroup,{ collected:nextCollected, unallocated:nextUnallocated }),
         selectedProduct:null,
       };
     }
@@ -427,9 +443,9 @@ function reducer(state, action) {
       const newA={...state.allocations,[escaninhoId]:na};
       if(!na.p1) delete newA[escaninhoId];
       const collectedEntryId = createCollectedEntryId(product.id, state.collected);
+      const nextCollected = [collectedEntryId, ...state.collected];
       return {
-        ...commitAllocs(state,newA),
-        collected:[collectedEntryId, ...state.collected],
+        ...commitAllocs(state,newA,null,{ collected:nextCollected, unallocated:state.unallocated }),
         selectedProduct:null,
       };
     }
@@ -447,10 +463,10 @@ function reducer(state, action) {
         collectedToRemove.add(productId);
         unallocatedToRemove.add(productId);
       });
+      const nextCollected = state.collected.filter(id=>!collectedToRemove.has(id));
+      const nextUnallocated = state.unallocated.filter(id=>!unallocatedToRemove.has(id));
       return {
-        ...commitAllocs(state,newA),
-        collected:state.collected.filter(id=>!collectedToRemove.has(id)),
-        unallocated:state.unallocated.filter(id=>!unallocatedToRemove.has(id)),
+        ...commitAllocs(state,newA,null,{ collected:nextCollected, unallocated:nextUnallocated }),
         selectedProduct:null,
       };
     }
@@ -466,20 +482,35 @@ function reducer(state, action) {
         delete newA[escaninhoId];
       });
       return {
-        ...commitAllocs(state,newA),
-        collected:newCollected,
+        ...commitAllocs(state,newA,null,{ collected:newCollected, unallocated:state.unallocated }),
         selectedProduct:null,
       };
     }
     case 'UNDO': {
       if(state.histIdx<=0) return state;
       const ni=state.histIdx-1;
-      return {...state, histIdx:ni, allocations:{...state.history[ni]}, lastHistoryGroup:null};
+      const snapshot = readHistorySnapshot(state.history[ni]);
+      return {
+        ...state,
+        histIdx:ni,
+        allocations:{...(snapshot.allocations || {})},
+        unallocated:snapshot.unallocated ? [...snapshot.unallocated] : state.unallocated,
+        collected:snapshot.collected ? [...snapshot.collected] : state.collected,
+        lastHistoryGroup:null,
+      };
     }
     case 'REDO': {
       if(state.histIdx>=state.history.length-1) return state;
       const ni=state.histIdx+1;
-      return {...state, histIdx:ni, allocations:{...state.history[ni]}, lastHistoryGroup:null};
+      const snapshot = readHistorySnapshot(state.history[ni]);
+      return {
+        ...state,
+        histIdx:ni,
+        allocations:{...(snapshot.allocations || {})},
+        unallocated:snapshot.unallocated ? [...snapshot.unallocated] : state.unallocated,
+        collected:snapshot.collected ? [...snapshot.collected] : state.collected,
+        lastHistoryGroup:null,
+      };
     }
 
     // ── Swap CONTENTS between two equipment (IDs and types unchanged) ───────
@@ -508,7 +539,7 @@ function reducer(state, action) {
       for(let n=1;n<=eqB.niveis;n++) for(let s=1;s<=eqB.escsPerNivel;s++){
         const v=aSnap[`${n}-${s}`]; if(v) newA[`${equipB}-${n}-${s}`]=v;
       }
-      return {...commitAllocs(state,newA), swapSource:null};
+      return {...commitAllocs(state,newA,null,{ collected:state.collected, unallocated:state.unallocated }), swapSource:null};
     }
 
     // ── Collect all products from a street ───────────────────────────────────
@@ -525,7 +556,7 @@ function reducer(state, action) {
           delete newA[key];
         }
       });
-      return {...commitAllocs(state,newA), collected:newCollected,
+      return {...commitAllocs(state,newA,null,{ collected:newCollected, unallocated:state.unallocated }),
         streetCollapsed:{...state.streetCollapsed, [action.streetId]:false}};
     }
 

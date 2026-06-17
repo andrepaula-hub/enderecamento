@@ -369,7 +369,6 @@ function DSELegendPanel({ onClose }) {
   ];
   const grupos = Object.entries(window.DSE_GROUP_STYLE).map(([g,s])=>([g,s.text,s.bg]));
   const flags = [
-    ['⚠','#EF4444','Produto Químico — crítico'],
     ['⬤','#92400E','Pesado (>5 kg)'],
     ['↑','#F59E0B','Alto (>30 cm)'],
     ['↓','#0891B2','Item pequeno / compacto'],
