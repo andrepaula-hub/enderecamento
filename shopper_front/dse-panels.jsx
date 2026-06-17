@@ -199,6 +199,8 @@ function DSEVersionsPanel({ onClose, onRestore }) {
   const [confirmRestore, setConfirmRestore] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleteText, setDeleteText] = useState('');
+  const [deletePendingId, setDeletePendingId] = useState('');
+  const [postDeleteNotice, setPostDeleteNotice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -223,11 +225,24 @@ function DSEVersionsPanel({ onClose, onRestore }) {
   }, []);
 
   const handleDelete = async (v) => {
-    if (deleteText !== v.nome) return;
+    if (deleteText.trim().toUpperCase() !== 'CONFIRMAR') return;
     try {
+      setDeletePendingId(v.id);
+      setError('');
       const response = await window.DSEApi.deleteVersionAsync(v.id);
       if (response && response.success) {
-        setVersions(prev => prev.filter(x => x.id !== v.id));
+        setVersions(prev => {
+          const next = prev.filter(x => x.id !== v.id);
+          if (prev.length === 1) {
+            setPostDeleteNotice({
+              title: 'A última versão foi excluída.',
+              message: 'O mapa que está aberto no navegador não é limpo automaticamente. Se quiser ver o mapa vazio agora, recarregue o site. Se salvar sem recarregar, esse estado atual poderá ser salvo novamente como nova versão.',
+            });
+          } else {
+            setPostDeleteNotice(null);
+          }
+          return next;
+        });
         setConfirmDelete(null);
         setDeleteText('');
       } else {
@@ -235,6 +250,8 @@ function DSEVersionsPanel({ onClose, onRestore }) {
       }
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDeletePendingId('');
     }
   };
 
@@ -242,6 +259,20 @@ function DSEVersionsPanel({ onClose, onRestore }) {
     <Overlay title="Versões salvas" onClose={onClose} width={380}>
       {loading && <div style={{ fontSize:11, color:'var(--panel-muted)' }}>Carregando versões…</div>}
       {error && <div style={{ fontSize:11, color:'#EF4444', marginBottom:12 }}>{error}</div>}
+      {postDeleteNotice && (
+        <div style={{ marginBottom:12, background:'rgba(245,158,11,0.10)', border:'1px solid rgba(245,158,11,0.28)', borderRadius:8, padding:'10px 12px' }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'#B45309', marginBottom:4 }}>{postDeleteNotice.title}</div>
+          <div style={{ fontSize:10, color:'#92400E', lineHeight:1.5, marginBottom:8 }}>{postDeleteNotice.message}</div>
+          <div style={{ display:'flex', gap:6 }}>
+            <button onClick={()=>window.DSEApi.refreshBootstrap()} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'#F59E0B', border:'none', color:'#111827' }}>
+              Recarregar site
+            </button>
+            <button onClick={()=>setPostDeleteNotice(null)} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'transparent', border:'1px solid rgba(146,64,14,0.22)', color:'#92400E' }}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
         {versions.map(v => (
           <div key={v.id} style={{ background:'var(--panel-surface)', border:'1px solid var(--panel-border)', borderRadius:8, padding:'10px 12px' }}>
@@ -253,7 +284,7 @@ function DSEVersionsPanel({ onClose, onRestore }) {
               <button onClick={()=>setConfirmRestore(v)} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'rgba(13,171,119,0.10)', border:'1px solid rgba(13,171,119,0.3)', color:'var(--shopper-green)' }}>
                 Restaurar
               </button>
-              <button onClick={()=>{setConfirmDelete(v);setDeleteText('');}} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#EF4444' }}>
+              <button onClick={()=>{setConfirmDelete(v);setDeleteText('');setPostDeleteNotice(null);}} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#EF4444' }}>
                 Excluir
               </button>
             </div>
@@ -285,12 +316,19 @@ function DSEVersionsPanel({ onClose, onRestore }) {
             {confirmDelete?.id===v.id && (
               <div style={{ marginTop:8, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:6, padding:'8px 10px' }}>
                 <div style={{ fontSize:10, color:'#EF4444', marginBottom:6 }}>
-                  Digite o nome da versão para confirmar exclusão:
+                  Digite <strong>CONFIRMAR</strong> para excluir a versão. Colar está desabilitado.
                 </div>
-                <input value={deleteText} onChange={e=>setDeleteText(e.target.value)} placeholder={v.nome}
+                <input value={deleteText} onChange={e=>setDeleteText(e.target.value.toUpperCase())} placeholder="CONFIRMAR"
+                  onPaste={e=>e.preventDefault()}
+                  onKeyDown={e=>{
+                    const key = String(e.key || '').toLowerCase();
+                    if ((e.metaKey || e.ctrlKey) && key === 'v') e.preventDefault();
+                  }}
                   style={{ width:'100%', padding:'4px 8px', fontSize:10, background:'var(--panel-bg)', border:'1px solid var(--panel-border)', borderRadius:4, color:'var(--panel-text)', outline:'none', marginBottom:6 }} />
                 <div style={{ display:'flex', gap:6 }}>
-                  <button onClick={()=>handleDelete(v)} disabled={deleteText!==v.nome} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'#EF4444', border:'none', color:'#fff', opacity:deleteText===v.nome?1:0.4 }}>Excluir</button>
+                  <button onClick={()=>handleDelete(v)} disabled={deleteText.trim().toUpperCase()!=='CONFIRMAR' || deletePendingId===v.id} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'#EF4444', border:'none', color:'#fff', opacity:deleteText.trim().toUpperCase()==='CONFIRMAR' && deletePendingId!==v.id ? 1 : 0.4 }}>
+                    {deletePendingId===v.id ? 'Excluindo…' : 'Excluir'}
+                  </button>
                   <button onClick={()=>setConfirmDelete(null)} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'transparent', border:'1px solid var(--panel-border)', color:'var(--panel-muted)' }}>Cancelar</button>
                 </div>
               </div>
