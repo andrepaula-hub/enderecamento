@@ -61,10 +61,10 @@ function FillBar({ filled, total }) {
   const color = pct>=75?'#0DAB77':pct>=40?'#F59C00':'#EF4444';
   return (
     <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-      <div style={{ width:30, height:3, background:'rgba(0,0,0,0.10)', borderRadius:2 }}>
+      <span style={{ fontSize:10, fontWeight:800, color, minWidth:30, textAlign:'right', fontFamily:'var(--font-numeric)' }}>{pct}%</span>
+      <div style={{ width:30, height:3, background:'rgba(0,0,0,0.12)', borderRadius:2 }}>
         <div style={{ height:'100%', width:`${pct}%`, background:color, borderRadius:2, transition:'width 0.2s' }} />
       </div>
-      <span style={{ fontSize:9, fontWeight:700, color, minWidth:24, fontFamily:'var(--font-numeric)' }}>{pct}%</span>
     </div>
   );
 }
@@ -570,14 +570,19 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const parsedClick = parseEscId(clickedEscaninhoId);
     const rows = [];
     mapStructure.forEach((street) => {
+      const hasClickedEquip = street.equipment.some((eq) => eq.id === equipId);
       street.equipment.forEach((eq) => {
-        if (eq.id !== equipId) return;
+        if (scope === 'street') {
+          if (!hasClickedEquip) return;
+        } else if (eq.id !== equipId) {
+          return;
+        }
         for (let n = 1; n <= eq.niveis; n += 1) {
           if (scope === 'level' && n !== level) continue;
-          if (scope === 'equipment' && n < level) continue;
+          if ((scope === 'equipment' || scope === 'street') && n < level) continue;
           for (let s = 1; s <= eq.escsPerNivel; s += 1) {
             const escaninhoId = `${eq.id}-${n}-${s}`;
-            rows.push({ escaninhoId, level:n, pos:s });
+            rows.push({ escaninhoId, level:n, pos:s, equipId:eq.id });
           }
         }
       });
@@ -588,6 +593,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       const aClickedLevel = a.level === parsedClick.level ? 0 : 1;
       const bClickedLevel = b.level === parsedClick.level ? 0 : 1;
       if (aClickedLevel !== bClickedLevel) return aClickedLevel - bClickedLevel;
+      if (a.equipId !== b.equipId && scope === 'street') return String(a.equipId).localeCompare(String(b.equipId), 'pt-BR');
       if (a.level !== b.level) return a.level - b.level;
       const aClickedPos = a.pos >= parsedClick.pos ? 0 : 1;
       const bClickedPos = b.pos >= parsedClick.pos ? 0 : 1;
@@ -707,11 +713,11 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     return scoped;
   }, [allocations, mapStructure]);
 
-  const handleSmartFill = useCallback(async (clickedEscaninhoId) => {
+  const handleSmartFill = useCallback(async (clickedEscaninhoId, scope) => {
     const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
     if (selectedProduct || queue.length <= 1) return null;
     const parsed = parseEscId(clickedEscaninhoId);
-    const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment');
+    const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, scope || 'equipment');
     const targets = candidateIds.filter((escaninhoId) => {
       const alloc = allocations[escaninhoId] || {};
       return !alloc.p1;
@@ -810,18 +816,21 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   const handleEscClick = useCallback(async (escsId,p1,p2,e)=>{
     setTooltip(null);
-    const scope = (e && (e.metaKey || e.ctrlKey)) ? 'equipment' : (e && e.shiftKey) ? 'level' : 'single';
+    const hasCmd = !!(e && (e.metaKey || e.ctrlKey));
+    const hasShift = !!(e && e.shiftKey);
+    const scope = hasCmd && hasShift ? 'street' : hasCmd ? 'equipment' : hasShift ? 'level' : 'single';
     const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
     if (hasAllocationSource) {
-      if (scope === 'equipment' && !wantsSecondSlot && !selectedProduct && (queueProductIds || []).length > 1) {
+      if ((scope === 'equipment' || scope === 'level' || scope === 'street') && !wantsSecondSlot && !selectedProduct && (queueProductIds || []).length > 1) {
         try {
-          setSmartFillProgress({ label:'Calculando alocação em lote…', done:0, total:1, indeterminate:true });
-          const smartBatch = await handleSmartFill(escsId);
+          const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : 'equipamento';
+          setSmartFillProgress({ label:`Calculando alocação da ${scopeLabel}…`, done:0, total:1, indeterminate:true });
+          const smartBatch = await handleSmartFill(escsId, scope);
           if (smartBatch && smartBatch.length) {
             if (typeof onAllocateManyProgressive === 'function') {
-              setSmartFillProgress({ label:'Aplicando alocação em lote…', done:0, total:smartBatch.length, indeterminate:false });
+              setSmartFillProgress({ label:`Aplicando alocação da ${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
               await onAllocateManyProgressive(smartBatch, (done, total) => {
-                setSmartFillProgress({ label:'Aplicando alocação em lote…', done, total, indeterminate:false });
+                setSmartFillProgress({ label:`Aplicando alocação da ${scopeLabel}…`, done, total, indeterminate:false });
               });
             } else {
               onAllocateMany(smartBatch);
@@ -831,6 +840,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
             return;
           }
           setSmartFillProgress(null);
+          return;
         } catch (error) {
           setSmartFillProgress(null);
           console.error('Smart fill backend error:', error);
@@ -893,7 +903,14 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
       {smartFillProgress && (
         <div style={{ position:'fixed', top:60, left:'50%', transform:'translateX(-50%)', zIndex:110, minWidth:320, maxWidth:430, background:'rgba(16,26,21,0.96)', border:'1px solid rgba(61,212,166,0.28)', borderRadius:12, padding:'10px 12px', color:'#fff', boxShadow:'0 10px 28px rgba(0,0,0,0.28)', pointerEvents:'none' }}>
-          <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>{smartFillProgress.label}</div>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:6 }}>
+            <div style={{ fontSize:11, fontWeight:700 }}>{smartFillProgress.label}</div>
+            {!smartFillProgress.indeterminate && (
+              <div style={{ fontSize:11, fontWeight:900, color:'#3DD4A6', fontFamily:'var(--font-numeric)' }}>
+                {Math.round((smartFillProgress.done / Math.max(smartFillProgress.total, 1)) * 100)}%
+              </div>
+            )}
+          </div>
           {!smartFillProgress.indeterminate && (
             <div style={{ fontSize:10, color:'rgba(255,255,255,0.72)', marginBottom:6 }}>
               {smartFillProgress.done} de {smartFillProgress.total}

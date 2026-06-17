@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from core.gsheets_backend import (
     delete_plano_version_gsheet,
     list_plano_versions_gsheet,
+    plano_fingerprint_gsheet,
     restore_plano_version_gsheet,
     save_plano_version_gsheet,
 )
@@ -51,6 +52,14 @@ def api_restore_plano_version(req: ScriptRequest) -> JSONResponse:
     if DATA_XLSX_PATH and DATA_XLSX_PATH.exists():
         return JSONResponse(restore_plano_version_xlsx(DATA_XLSX_PATH, version_id))
     return JSONResponse({"success": False, "error": "Nenhuma planilha ativa. Conecte uma planilha primeiro."})
+
+
+@router.post("/api/getPlanoFingerprint")
+def api_get_plano_fingerprint(_: ScriptRequest | None = None) -> JSONResponse:
+    active = _require_active_sheet()
+    if active:
+        return JSONResponse(plano_fingerprint_gsheet(active["sheet_id"]))
+    return JSONResponse({"success": False, "error": "Fingerprint disponível apenas para Google Sheets ativo."})
 
 
 @router.post("/api/deletePlanoVersion")

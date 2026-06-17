@@ -811,7 +811,7 @@ function Toolbar({ state, dispatch, onHighlight, onSave }) {
     <div style={{ height:48, background:'var(--shopper-navy)', display:'flex', alignItems:'center', paddingLeft:14, paddingRight:10, flexShrink:0, zIndex:20, gap:0 }}>
       <div style={{ display:'flex', alignItems:'center', gap:7, marginRight:5 }}>
         <img src="/shopper-static/uploads/shopper-icon.avif" alt="Shopper" width="28" height="28" style={{ borderRadius:5, objectFit:'contain', flexShrink:0 }} />
-        <span style={{ fontSize:12, fontWeight:800, color:'#fff', letterSpacing:'0.02em' }}>Endereçamento</span>
+        <span style={{ fontSize:12, fontWeight:800, color:'#fff', letterSpacing:'0.02em' }}>Alakazam - Endereçamento</span>
       </div>
       <Sep/>
       <div style={{ display:'flex', alignItems:'center', gap:5, marginLeft:5 }}>

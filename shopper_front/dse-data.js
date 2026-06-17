@@ -332,6 +332,7 @@
     listVersionsAsync: function () { return postApiAsync('listPlanoVersions', []); },
     restoreVersion: function (versionId) { return postApi('restorePlanoVersion', [versionId]); },
     restoreVersionAsync: function (versionId) { return postApiAsync('restorePlanoVersion', [versionId]); },
+    getPlanoFingerprintAsync: function () { return postApiAsync('getPlanoFingerprint', []); },
     deleteVersion: function (versionId) { return postApi('deletePlanoVersion', [versionId]); },
     deleteVersionAsync: function (versionId) { return postApiAsync('deletePlanoVersion', [versionId]); },
     getMapLoadStatus: function () { return postApi('getMapLoadStatus', []); },

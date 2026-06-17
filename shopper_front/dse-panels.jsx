@@ -204,6 +204,8 @@ function DSEVersionsPanel({ onClose, onRestore }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleteText, setDeleteText] = useState('');
   const [deletePendingId, setDeletePendingId] = useState('');
+  const [restorePendingId, setRestorePendingId] = useState('');
+  const [restoreStatus, setRestoreStatus] = useState('');
   const [postDeleteNotice, setPostDeleteNotice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -259,6 +261,47 @@ function DSEVersionsPanel({ onClose, onRestore }) {
     }
   };
 
+  const waitForPlanoFingerprint = async (expectedFingerprint) => {
+    if (!expectedFingerprint || typeof window.DSEApi.getPlanoFingerprintAsync !== 'function') return true;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const current = await window.DSEApi.getPlanoFingerprintAsync();
+      if (current && current.success && current.fingerprint === expectedFingerprint) return true;
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+    }
+    return false;
+  };
+
+  const handleRestore = async (v) => {
+    try {
+      setRestorePendingId(v.id);
+      setRestoreStatus('Restaurando versão na planilha…');
+      setError('');
+      const response = await window.DSEApi.restoreVersionAsync(v.id);
+      if (response && response.success) {
+        setRestoreStatus('Confirmando atualização da Plano_Enderecamento_Final…');
+        const confirmed = await waitForPlanoFingerprint(response.fingerprint);
+        if (!confirmed) {
+          setError('A versão foi restaurada, mas a leitura da planilha ainda não confirmou o novo estado. Tente recarregar em alguns segundos.');
+          setRestorePendingId('');
+          setRestoreStatus('');
+          return;
+        }
+        setRestoreStatus('Versão confirmada. Recarregando mapa…');
+        window.setTimeout(() => {
+          onRestore && onRestore(v);
+        }, 200);
+      } else {
+        setError((response && response.error) || 'Não foi possível restaurar a versão.');
+        setRestorePendingId('');
+        setRestoreStatus('');
+      }
+    } catch (err) {
+      setError(String(err));
+      setRestorePendingId('');
+      setRestoreStatus('');
+    }
+  };
+
   return (
     <Overlay title="Versões salvas" onClose={onClose} width={380}>
       {loading && <div style={{ fontSize:11, color:'var(--panel-muted)' }}>Carregando versões…</div>}
@@ -285,7 +328,7 @@ function DSEVersionsPanel({ onClose, onRestore }) {
             </div>
             <div style={{ fontSize:10, color:'var(--panel-muted)', marginBottom:8 }}>{v.data}</div>
             <div style={{ display:'flex', gap:6 }}>
-              <button onClick={()=>setConfirmRestore(v)} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'rgba(13,171,119,0.10)', border:'1px solid rgba(13,171,119,0.3)', color:'var(--shopper-green)' }}>
+              <button onClick={()=>{setConfirmRestore(v);setRestoreStatus('');}} disabled={!!restorePendingId} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:restorePendingId?'default':'pointer', fontFamily:'var(--font-sans)', background:'rgba(13,171,119,0.10)', border:'1px solid rgba(13,171,119,0.3)', color:'var(--shopper-green)', opacity:restorePendingId?0.55:1 }}>
                 Restaurar
               </button>
               <button onClick={()=>{setConfirmDelete(v);setDeleteText('');setPostDeleteNotice(null);}} style={{ padding:'4px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#EF4444' }}>
@@ -298,21 +341,14 @@ function DSEVersionsPanel({ onClose, onRestore }) {
                 <div style={{ fontSize:10, color:'#F59E0B', marginBottom:6 }}>
                   Isso substituirá o estado atual do mapa. Continuar?
                 </div>
+                {restorePendingId===v.id && (
+                  <div style={{ fontSize:10, color:'#92400E', marginBottom:6 }}>{restoreStatus || 'Restaurando…'}</div>
+                )}
                 <div style={{ display:'flex', gap:6 }}>
-                  <button onClick={async ()=>{
-                    try {
-                      const response = await window.DSEApi.restoreVersionAsync(v.id);
-                      if (response && response.success) {
-                        onRestore && onRestore(v);
-                        setConfirmRestore(null);
-                      } else {
-                        setError((response && response.error) || 'Não foi possível restaurar a versão.');
-                      }
-                    } catch (err) {
-                      setError(String(err));
-                    }
-                  }} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'#F59E0B', border:'none', color:'#000' }}>Confirmar restauração</button>
-                  <button onClick={()=>setConfirmRestore(null)} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', fontFamily:'var(--font-sans)', background:'transparent', border:'1px solid var(--panel-border)', color:'var(--panel-muted)' }}>Cancelar</button>
+                  <button onClick={()=>handleRestore(v)} disabled={!!restorePendingId} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:restorePendingId?'default':'pointer', fontFamily:'var(--font-sans)', background:'#F59E0B', border:'none', color:'#000', opacity:restorePendingId?0.65:1 }}>
+                    {restorePendingId===v.id ? 'Restaurando…' : 'Confirmar restauração'}
+                  </button>
+                  <button onClick={()=>setConfirmRestore(null)} disabled={!!restorePendingId} style={{ padding:'3px 10px', fontSize:10, fontWeight:700, borderRadius:4, cursor:restorePendingId?'default':'pointer', fontFamily:'var(--font-sans)', background:'transparent', border:'1px solid var(--panel-border)', color:'var(--panel-muted)', opacity:restorePendingId?0.55:1 }}>Cancelar</button>
                 </div>
               </div>
             )}

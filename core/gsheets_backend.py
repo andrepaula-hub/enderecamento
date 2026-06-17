@@ -11,6 +11,7 @@ from .gsheets_client import GSheetsClient
 from .gsheets_versions import (  # noqa: E402  (facade re-export)
     delete_plano_version_gsheet,
     list_plano_versions_gsheet,
+    plano_fingerprint_gsheet,
     restore_plano_version_gsheet,
     save_plano_version_gsheet,
 )

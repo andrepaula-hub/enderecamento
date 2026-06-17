@@ -8,7 +8,7 @@ const GROUP_STYLE = {
   FLV:        { bg:'rgba(13,171,119,0.13)',  badge:'rgba(13,171,119,0.22)',  text:'#0DAB77', label:'FLV' },
   Alimento:   { bg:'rgba(152,108,60,0.09)',  badge:'rgba(152,108,60,0.20)',  text:'#8B6332', label:'ALM' },
   Bebidas:    { bg:'rgba(59,130,246,0.11)',   badge:'rgba(59,130,246,0.22)',  text:'#2563EB', label:'BEB' },
-  Perfumaria: { bg:'rgba(20,184,166,0.12)',  badge:'rgba(20,184,166,0.24)',  text:'#0F766E', label:'PRF' },
+  Perfumaria: { bg:'rgba(124,58,237,0.11)',  badge:'rgba(124,58,237,0.22)',  text:'#7C3AED', label:'PRF' },
   Químico:    { bg:'rgba(239,68,68,0.13)',   badge:'rgba(239,68,68,0.22)',   text:'#DC2626', label:'QMC' },
   Neutro:     { bg:'rgba(148,163,184,0.09)', badge:'rgba(148,163,184,0.18)', text:'#64748B', label:'NEU' },
 };

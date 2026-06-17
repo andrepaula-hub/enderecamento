@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,22 @@ SHEET_PLANO_FINAL = "Plano_Enderecamento_Final"
 SHEET_VERSION_PREFIX = "VERSAO_ENDERECAMENTO__"
 SHEET_VERSION_SUFFIX = "_ENDERECAMENTO"
 VERSION_METADATA_PATH = CREDENTIALS_DIR / "gsheets_version_metadata.json"
+
+
+def _values_fingerprint(values: list[list[Any]]) -> str:
+    normalized = json.dumps(values or [], ensure_ascii=False, sort_keys=False, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def plano_fingerprint_gsheet(sheet_id: str) -> dict[str, Any]:
+    client = GSheetsClient(sheet_id)
+    values = client.read_values(SHEET_PLANO_FINAL)
+    return {
+        "success": True,
+        "sheet_name": SHEET_PLANO_FINAL,
+        "rows": max(0, len(values) - 1) if values else 0,
+        "fingerprint": _values_fingerprint(values),
+    }
 
 
 def _sanitize_version_name(name: str) -> str:
@@ -151,7 +168,14 @@ def restore_plano_version_gsheet(sheet_id: str, version_id: str) -> dict[str, An
         return {"success": False, "error": "Versão vazia."}
     client.clear_sheet(SHEET_PLANO_FINAL)
     client.append_rows(SHEET_PLANO_FINAL, values)
-    return {"success": True, "rows": len(values), "cols": len(values[0]) if values else 0}
+    return {
+        "success": True,
+        "rows": len(values),
+        "cols": len(values[0]) if values else 0,
+        "fingerprint": _values_fingerprint(values),
+        "sheet_name": SHEET_PLANO_FINAL,
+        "sheet_url": client.get_sheet_url(SHEET_PLANO_FINAL),
+    }
 
 
 def delete_plano_version_gsheet(sheet_id: str, version_id: str) -> dict[str, Any]:
