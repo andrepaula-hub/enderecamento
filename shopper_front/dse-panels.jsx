@@ -195,6 +195,10 @@ function formatVersion(version) {
 }
 
 function DSEVersionsPanel({ onClose, onRestore }) {
+  const activeSheet = window.DSEBootstrap && window.DSEBootstrap.ACTIVE_SHEET || null;
+  const planoUrl = activeSheet && activeSheet.sheet_id
+    ? `https://docs.google.com/spreadsheets/d/${activeSheet.sheet_id}/edit`
+    : (activeSheet && activeSheet.url) || '';
   const [versions, setVersions] = useState([]);
   const [confirmRestore, setConfirmRestore] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -318,6 +322,9 @@ function DSEVersionsPanel({ onClose, onRestore }) {
                 <div style={{ fontSize:10, color:'#EF4444', marginBottom:6 }}>
                   Digite <strong>CONFIRMAR</strong> para excluir a versão. Colar está desabilitado.
                 </div>
+                <div style={{ fontSize:10, color:'var(--panel-muted)', lineHeight:1.5, marginBottom:6 }}>
+                  Excluir uma versão remove apenas o snapshot salvo. Isso não limpa o mapa atual carregado da aba <strong>Plano_Enderecamento_Final</strong>.
+                </div>
                 <input value={deleteText} onChange={e=>setDeleteText(e.target.value.toUpperCase())} placeholder="CONFIRMAR"
                   onPaste={e=>e.preventDefault()}
                   onKeyDown={e=>{
@@ -336,7 +343,17 @@ function DSEVersionsPanel({ onClose, onRestore }) {
           </div>
         ))}
         {!loading && versions.length === 0 && !error && (
-          <div style={{ fontSize:11, color:'var(--panel-muted)' }}>Nenhuma versão salva ainda.</div>
+          <div style={{ background:'var(--panel-surface)', border:'1px solid var(--panel-border)', borderRadius:8, padding:'12px 14px' }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--panel-text)', marginBottom:4 }}>Nenhuma versão salva ainda.</div>
+            <div style={{ fontSize:10, color:'var(--panel-muted)', lineHeight:1.55 }}>
+              Isso não significa que o mapa atual está vazio. O site carrega o estado diretamente da aba <strong>Plano_Enderecamento_Final</strong>, e as versões são apenas snapshots separados para restaurar depois.
+            </div>
+            {planoUrl && (
+              <a href={planoUrl} target="_blank" rel="noreferrer" style={{ display:'inline-block', marginTop:8, fontSize:10, fontWeight:700, color:'var(--shopper-green)', textDecoration:'none' }}>
+                Abrir Plano_Enderecamento_Final
+              </a>
+            )}
+          </div>
         )}
       </div>
     </Overlay>
