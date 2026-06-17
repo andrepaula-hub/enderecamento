@@ -181,3 +181,21 @@ def test_suggest_allocations_extends_existing_multibin_block_when_contiguous_spa
     assert result["moves"] == [
         {"escaninhoId": "R1-E1-1-4", "productCode": "FLV1", "slot": 1},
     ]
+
+
+def test_suggest_allocations_does_not_extend_flv_block_already_on_geladeira_wall():
+    result = suggest_allocations(
+        unallocated_codes=["FLV1"],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=1)],
+        map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
+        allocations={
+            **_empty_allocations_grid(levels=4, escs_per_nivel=5),
+            "R1-E1-1-1": {"p1": "FLV1", "p2": None},
+            "R1-E1-1-2": {"p1": "FLV1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["unallocated"] == ["FLV1"]

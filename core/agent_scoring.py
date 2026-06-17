@@ -327,6 +327,8 @@ def _candidate_runs(
             return []
         if positions != list(range(positions[0], positions[0] + len(positions))):
             return []
+        if _group(product) == "flv" and _category_group(product) == "refrigerado" and any(pos in {1, 5} for pos in positions):
+            return []
         target_equip = next(iter(equip_ids))
         target_level = next(iter(levels))
         matching = [
