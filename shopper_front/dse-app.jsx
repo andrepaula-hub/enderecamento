@@ -636,6 +636,7 @@ function SaveModal({ onClose, onSaved, onSave }) {
 
   const versionSheetUrl = useMemo(() => {
     if (saveResult?.sheet_url) return saveResult.sheet_url;
+    if (saveResult?.version_file_url) return saveResult.version_file_url;
     if (saveResult?.sheet_name && activeSheet?.sheet_id) {
       const encodedName = encodeURIComponent(saveResult.sheet_name);
       return `https://docs.google.com/spreadsheets/d/${activeSheet.sheet_id}/edit#gid=0&range=${encodedName}!A1`;
@@ -645,6 +646,7 @@ function SaveModal({ onClose, onSaved, onSave }) {
 
   const planoSheetUrl = useMemo(() => {
     if (saveResult?.plano_sheet_url) return saveResult.plano_sheet_url;
+    if (saveResult?.plano_file_url) return saveResult.plano_file_url;
     if (activeSheet?.sheet_id) {
       return `https://docs.google.com/spreadsheets/d/${activeSheet.sheet_id}/edit`;
     }

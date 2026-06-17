@@ -156,6 +156,12 @@ def auto_address_preview(
     slots = _build_available_slots(plan_rows, base_rows, allow_second_slot=allow_second_slot, scope=scope)
     placements = _build_existing_placements(plan_rows, base_rows)
     placement_index = _build_placement_index(placements)
+    product_placement_index: dict[str, list[dict[str, Any]]] = {}
+    for placement in placements:
+        code = str(placement.get("product_code") or "")
+        if not code:
+            continue
+        product_placement_index.setdefault(code, []).append(placement)
     curve_zone_map = _normalize_curve_zones(curve_zones)
 
     decision_required: list[dict[str, Any]] = []
@@ -182,7 +188,10 @@ def auto_address_preview(
 
     for product in _sort_products_for_allocation(products):
         required = int(product.get("_missing_required") or 1)
-        candidates = _pick_slots_for_product(product, required, slots, rules, chemical_equips, reserved_locations, placement_index, curve_zone_map)
+        candidates = _pick_slots_for_product(
+            product, required, slots, rules, chemical_equips,
+            reserved_locations, placement_index, product_placement_index, curve_zone_map,
+        )
         if len(candidates) != required:
             unallocated.append(_product_summary(product))
             continue
@@ -210,7 +219,9 @@ def auto_address_preview(
             slot_ref = slots_by_location.get(candidate.location_id)
             if slot_ref:
                 _commit_product_to_slot(slot_ref, product)
-                _add_placement_to_index(placement_index, _placement_for_slot(product, slot_ref))
+                placement = _placement_for_slot(product, slot_ref)
+                _add_placement_to_index(placement_index, placement)
+                product_placement_index.setdefault(str(placement.get("product_code") or ""), []).append(placement)
 
     summary = {
         "products_to_allocate": sum(int(product.get("_missing_required") or 1) for product in products),

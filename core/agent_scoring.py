@@ -257,8 +257,6 @@ def _sort_products_for_allocation(products: list[dict[str, Any]]) -> list[dict[s
     curve_order = {"A": 0, "B": 1, "C": 2}
 
     def key(row: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
-        peso = parse_number(row.get("peso_kg_unitario")) or 0
-        is_heavy = 0 if (peso > 2 or parse_bool_flag(row.get("is_pesado"))) else 1
         is_egg = 0 if _is_egg(row) else 1
         is_flv = 0 if _group(row) == "flv" else 1
         is_fragile_or_tall = 0 if (parse_bool_flag(row.get("is_fragil")) or parse_bool_flag(row.get("is_alto"))) else 1
@@ -267,7 +265,6 @@ def _sort_products_for_allocation(products: list[dict[str, Any]]) -> list[dict[s
         return (
             group_rank,
             is_egg,
-            is_heavy,
             is_flv,
             is_fragile_or_tall,
             f"{curve_order.get(curve, 9)}::{normalize_string(row.get('product_name'))}",
@@ -284,6 +281,7 @@ def _pick_slots_for_product(
     chemical_equips: set[str],
     reserved_locations: set[str],
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+    product_placement_index: dict[str, list[dict[str, Any]]],
     curve_zone_map: dict[str, set[int]],
 ) -> list[Slot]:
     required = max(1, int(required or 1))
@@ -302,17 +300,51 @@ def _pick_slots_for_product(
     if not candidates:
         return []
 
-    if required == 1:
+    existing_product_placements = product_placement_index.get(_product_code(product), [])
+    if required == 1 and not existing_product_placements:
         return [max(candidates, key=lambda slot: _score_slot(product, slot, placement_index, curve_zone_map))]
 
-    grouped_runs = _candidate_runs(product, candidates, required, rules)
+    grouped_runs = _candidate_runs(product, candidates, required, rules, existing_product_placements)
     if not grouped_runs:
         return []
     return max(grouped_runs, key=lambda run: _score_run(product, run, placement_index, curve_zone_map))
 
 
-def _candidate_runs(product: dict[str, Any], candidates: list[Slot], required: int, rules: AgentRules) -> list[list[Slot]]:
+def _candidate_runs(
+    product: dict[str, Any],
+    candidates: list[Slot],
+    required: int,
+    rules: AgentRules,
+    existing_product_placements: list[dict[str, Any]] | None = None,
+) -> list[list[Slot]]:
     empty_candidates = [slot for slot in candidates if slot.occupant_count == 0]
+    existing_product_placements = list(existing_product_placements or [])
+    if existing_product_placements:
+        equip_ids = {normalize_string(item.get("equip_id")) for item in existing_product_placements if normalize_string(item.get("equip_id"))}
+        levels = {item.get("level") for item in existing_product_placements if item.get("level") is not None}
+        positions = sorted(int(item.get("position")) for item in existing_product_placements if item.get("position") is not None)
+        if len(equip_ids) != 1 or len(levels) != 1 or len(positions) != len(existing_product_placements):
+            return []
+        if positions != list(range(positions[0], positions[0] + len(positions))):
+            return []
+        target_equip = next(iter(equip_ids))
+        target_level = next(iter(levels))
+        matching = [
+            slot for slot in empty_candidates
+            if normalize_string(slot.equip_id) == target_equip and slot.level == target_level
+        ]
+        ordered = sorted(matching, key=lambda slot: slot.position if slot.position is not None else 999)
+        runs: list[list[Slot]] = []
+        for idx in range(0, max(0, len(ordered) - required + 1)):
+            candidate = ordered[idx : idx + required]
+            new_positions = [slot.position for slot in candidate]
+            if any(pos is None for pos in new_positions):
+                continue
+            combined = sorted(positions + [int(pos) for pos in new_positions if pos is not None])
+            if combined == list(range(combined[0], combined[0] + len(combined))):
+                runs.append(candidate)
+        return runs
+
     runs: list[list[Slot]] = []
     by_level: dict[tuple[str, int | None], list[Slot]] = {}
     for slot in empty_candidates:
@@ -365,14 +397,6 @@ def _score_slot(product: dict[str, Any], slot: Slot, placement_index: dict[tuple
         score += 20
     if _is_prateleira(slot):
         peso = parse_number(product.get("peso_kg_unitario")) or 0
-        is_heavy = peso > 2 or parse_bool_flag(product.get("is_pesado"))
-        if is_heavy:
-            if slot.level == 4:
-                score += 70
-            elif slot.level == 3:
-                score += 50
-            elif slot.level == 2:
-                score += 10
         if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
             score += 30
         if parse_bool_flag(product.get("is_fragil")) or parse_bool_flag(product.get("is_alto")):

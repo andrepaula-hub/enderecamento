@@ -85,6 +85,12 @@ def suggest_allocations(
                 existing_placements.append(_placement_for_slot(product, slot_ref))
 
     placement_index = _build_placement_index(existing_placements)
+    product_placement_index: dict[str, list[dict[str, Any]]] = {}
+    for placement in existing_placements:
+        code = str(placement.get("product_code") or "")
+        if not code:
+            continue
+        product_placement_index.setdefault(code, []).append(placement)
     slots_by_location = {s.location_id: s for s in slots}
     reserved_locations: set[str] = set()
 
@@ -96,7 +102,7 @@ def suggest_allocations(
         required = max(1, int(product.get("escaninhos_necessarios") or 1))
         candidates = _pick_slots_for_product(
             product, required, slots, rules, chemical_equips,
-            reserved_locations, placement_index, curve_zones,
+            reserved_locations, placement_index, product_placement_index, curve_zones,
         )
         if len(candidates) != required:
             unallocated_out.append(code)
@@ -117,7 +123,9 @@ def suggest_allocations(
             slot_ref = slots_by_location.get(candidate.location_id)
             if slot_ref:
                 _commit_product_to_slot(slot_ref, product)
-                _add_placement_to_index(placement_index, _placement_for_slot(product, slot_ref))
+                placement = _placement_for_slot(product, slot_ref)
+                _add_placement_to_index(placement_index, placement)
+                product_placement_index.setdefault(code, []).append(placement)
 
     return {
         "success": True,

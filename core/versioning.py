@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from openpyxl import load_workbook
@@ -46,6 +47,10 @@ def save_plano_version_xlsx(path: Path, name: str) -> dict[str, Any]:
         "label": filename,
         "sheet_name": filename,
         "plano_sheet_name": "Plano_Enderecamento_Final",
+        "version_file_path": str(dest.resolve()),
+        "version_file_url": f"/api/file?path={quote(str(dest.resolve()))}",
+        "plano_file_path": str(path.resolve()),
+        "plano_file_url": f"/api/file?path={quote(str(path.resolve()))}",
     }
 
 

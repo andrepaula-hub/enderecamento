@@ -57,12 +57,12 @@ def _product(code, **overrides):
     return base
 
 
-def test_suggest_allocations_prioritizes_restricted_products_first():
+def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level_block():
     result = suggest_allocations(
         unallocated_codes=["LEVE", "PESADO"],
         products_data=[
             _product("LEVE", nome="Produto leve"),
-            _product("PESADO", nome="Produto pesado", pesado=True, peso=3.5),
+            _product("PESADO", nome="Produto pesado", pesado=True, peso=3.5, sub="Outra"),
         ],
         map_structure=_map_structure(levels=4),
         allocations=_empty_allocations(levels=4),
@@ -71,8 +71,8 @@ def test_suggest_allocations_prioritizes_restricted_products_first():
 
     assert result["success"] is True
     assert result["moves"] == [
-        {"escaninhoId": "R1-E1-4-1", "productCode": "PESADO", "slot": 1},
         {"escaninhoId": "R1-E1-1-1", "productCode": "LEVE", "slot": 1},
+        {"escaninhoId": "R1-E1-2-1", "productCode": "PESADO", "slot": 1},
     ]
 
 
@@ -143,3 +143,41 @@ def test_suggest_allocations_treats_repeated_queue_codes_as_missing_instances():
     assert result["success"] is True
     assert len(result["moves"]) == 7
     assert result["summary"]["total_requested"] == 7
+
+
+def test_suggest_allocations_extends_existing_multibin_block_or_leaves_unallocated():
+    result = suggest_allocations(
+        unallocated_codes=["FLV1", "FLV1"],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=2)],
+        map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
+        allocations={
+            **_empty_allocations_grid(levels=4, escs_per_nivel=5),
+            "R1-E1-1-2": {"p1": "FLV1", "p2": None},
+            "R1-E1-1-3": {"p1": "FLV1", "p2": None},
+            "R1-E1-1-4": {"p1": "OUTRO", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["unallocated"] == ["FLV1"]
+
+
+def test_suggest_allocations_extends_existing_multibin_block_when_contiguous_space_exists():
+    result = suggest_allocations(
+        unallocated_codes=["FLV1"],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=1)],
+        map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
+        allocations={
+            **_empty_allocations_grid(levels=4, escs_per_nivel=5),
+            "R1-E1-1-2": {"p1": "FLV1", "p2": None},
+            "R1-E1-1-3": {"p1": "FLV1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-1-4", "productCode": "FLV1", "slot": 1},
+    ]
