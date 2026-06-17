@@ -31,6 +31,9 @@ class _FakeClient:
     def delete_sheet(self, name):
         self._sheet_names = [item for item in self._sheet_names if item != name]
 
+    def get_sheet_url(self, name):
+        return f"https://docs.google.com/spreadsheets/d/fake/edit#sheet={name}"
+
 
 def test_build_version_sheet_name_uses_readable_suffix_counter():
     client = _FakeClient(

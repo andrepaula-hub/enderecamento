@@ -242,6 +242,7 @@ const initState = {
   view:'config', configOpen:false, selectedStore:null,
   allocations:{ ...INITIAL_ALLOCATIONS },
   history:[{ ...INITIAL_ALLOCATIONS }], histIdx:0,
+  lastHistoryGroup:null,
   selectedProduct:null, mode2aLeva:false, pranchetaOpen:true, openPanel:null,
   collected:[], unallocated:[...INITIAL_UNALLOCATED], searchQuery:'',
   mapStructure:initMapStructure, equipCollapsed:{}, streetCollapsed:{},
@@ -251,9 +252,20 @@ const initState = {
   subcatFilters:[],
 };
 
-function commitAllocs(state, newAllocs) {
+function commitAllocs(state, newAllocs, historyGroup) {
+  const normalizedGroup = historyGroup || null;
+  const canReplaceLast =
+    normalizedGroup &&
+    state.lastHistoryGroup === normalizedGroup &&
+    state.histIdx === state.history.length - 1 &&
+    state.history.length > 1;
+  if (canReplaceLast) {
+    const history = [...state.history];
+    history[state.histIdx] = { ...newAllocs };
+    return { ...state, allocations:newAllocs, history, lastHistoryGroup:normalizedGroup };
+  }
   const h=[...state.history.slice(0,state.histIdx+1),{...newAllocs}];
-  return {...state, allocations:newAllocs, history:h, histIdx:h.length-1};
+  return {...state, allocations:newAllocs, history:h, histIdx:h.length-1, lastHistoryGroup:normalizedGroup};
 }
 
 function findEquip(mapStructure, equipId) {
@@ -395,14 +407,14 @@ function reducer(state, action) {
     }
 
     case 'ALLOCATE': {
-      const {escaninhoId,productId,slot}=action;
+      const {escaninhoId,productId,slot,historyGroup}=action;
       const productCode = resolveBoardEntryProductCode(productId);
       if (!productCode) return state;
       const prev=state.allocations[escaninhoId]||{p1:null,p2:null};
       const na=slot===2?{p1:prev.p1,p2:productCode}:{p1:productCode,p2:prev.p2};
       const newA={...state.allocations,[escaninhoId]:na};
       return {
-        ...commitAllocs(state,newA),
+        ...commitAllocs(state,newA,historyGroup),
         collected:state.collected.filter(id=>id!==productId),
         unallocated:state.unallocated.filter(id=>id!==productId),
         selectedProduct:null,
@@ -462,12 +474,12 @@ function reducer(state, action) {
     case 'UNDO': {
       if(state.histIdx<=0) return state;
       const ni=state.histIdx-1;
-      return {...state, histIdx:ni, allocations:{...state.history[ni]}};
+      return {...state, histIdx:ni, allocations:{...state.history[ni]}, lastHistoryGroup:null};
     }
     case 'REDO': {
       if(state.histIdx>=state.history.length-1) return state;
       const ni=state.histIdx+1;
-      return {...state, histIdx:ni, allocations:{...state.history[ni]}};
+      return {...state, histIdx:ni, allocations:{...state.history[ni]}, lastHistoryGroup:null};
     }
 
     // ── Swap CONTENTS between two equipment (IDs and types unchanged) ───────
@@ -588,6 +600,7 @@ function reducer(state, action) {
 
 // ── Save Modal ──────────────────────────────────────────────────────────────────
 function SaveModal({ onClose, onSaved, onSave }) {
+  const activeSheet = BOOTSTRAP.ACTIVE_SHEET || null;
   const [name, setName]       = useState('');
   const [phase, setPhase]     = useState('input');
   const [progress, setProgress] = useState(0);
@@ -621,10 +634,27 @@ function SaveModal({ onClose, onSaved, onSave }) {
     }
   };
 
+  const versionSheetUrl = useMemo(() => {
+    if (saveResult?.sheet_url) return saveResult.sheet_url;
+    if (saveResult?.sheet_name && activeSheet?.sheet_id) {
+      const encodedName = encodeURIComponent(saveResult.sheet_name);
+      return `https://docs.google.com/spreadsheets/d/${activeSheet.sheet_id}/edit#gid=0&range=${encodedName}!A1`;
+    }
+    return '';
+  }, [saveResult, activeSheet]);
+
+  const planoSheetUrl = useMemo(() => {
+    if (saveResult?.plano_sheet_url) return saveResult.plano_sheet_url;
+    if (activeSheet?.sheet_id) {
+      return `https://docs.google.com/spreadsheets/d/${activeSheet.sheet_id}/edit`;
+    }
+    return '';
+  }, [saveResult, activeSheet]);
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div onClick={phase==='input'?onClose:undefined} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', backdropFilter:'blur(2px)' }} />
-      <div style={{ position:'relative', background:'var(--cfg-surface)', border:'1px solid var(--cfg-border)', borderRadius:12, padding:'28px', width:420, boxShadow:'0 24px 60px rgba(0,0,0,0.4)' }}>
+      <div style={{ position:'relative', background:'var(--cfg-surface)', border:'1px solid var(--cfg-border)', borderRadius:12, padding:'28px', width:460, boxShadow:'0 24px 60px rgba(0,0,0,0.4)' }}>
         {phase === 'input' && (<>
           <div style={{ fontSize:15, fontWeight:800, color:'var(--cfg-text)', marginBottom:6 }}>Salvar endereçamento</div>
           <div style={{ fontSize:12, color:'var(--cfg-text-muted)', marginBottom:18, lineHeight:1.5 }}>Escolha um nome para identificar esta versão.</div>
@@ -658,19 +688,20 @@ function SaveModal({ onClose, onSaved, onSave }) {
             <div style={{ textAlign:'center' }}>
               <div style={{ fontSize:36, color:'var(--shopper-green)', marginBottom:10 }}>✓</div>
               <div style={{ fontSize:14, fontWeight:800, color:'var(--shopper-green)' }}>Versão salva com sucesso!</div>
-              <div style={{ fontSize:11, color:'var(--cfg-text-muted)', marginTop:5 }}>{name}</div>
+              <div style={{ fontSize:10, color:'var(--cfg-text-muted)', marginTop:10, textTransform:'uppercase', letterSpacing:'0.08em', fontWeight:700 }}>Nome da versão</div>
+              <div style={{ fontSize:18, color:'var(--cfg-text)', marginTop:4, fontWeight:800, lineHeight:1.35, wordBreak:'break-word' }}>{name}</div>
             </div>
-            {(saveResult?.sheet_url || saveResult?.plano_sheet_url) && (
-              <div style={{ marginTop:16, background:'rgba(13,171,119,0.08)', border:'1px solid rgba(13,171,119,0.22)', borderRadius:8, padding:'10px 12px' }}>
+            {(versionSheetUrl || planoSheetUrl) && (
+              <div style={{ marginTop:18, background:'rgba(13,171,119,0.08)', border:'1px solid rgba(13,171,119,0.22)', borderRadius:8, padding:'12px 14px' }}>
                 <div style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Links rápidos</div>
                 <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                  {saveResult?.sheet_url && (
-                    <a href={saveResult.sheet_url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:700, color:'var(--shopper-green)', textDecoration:'none' }}>
+                  {versionSheetUrl && (
+                    <a href={versionSheetUrl} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:800, color:'var(--shopper-green)', textDecoration:'none' }}>
                       Abrir aba da versão criada
                     </a>
                   )}
-                  {saveResult?.plano_sheet_url && (
-                    <a href={saveResult.plano_sheet_url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:700, color:'var(--shopper-green)', textDecoration:'none' }}>
+                  {planoSheetUrl && (
+                    <a href={planoSheetUrl} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:800, color:'var(--shopper-green)', textDecoration:'none' }}>
                       Abrir Plano_Enderecamento_Final
                     </a>
                   )}
@@ -828,9 +859,10 @@ function App() {
   const handleAllocateManyProgressive = useCallback(async (items, onProgress)=>{
     const batch = Array.isArray(items) ? items : [];
     const total = batch.length;
+    const historyGroup = total > 1 ? `batch:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;
     for (let index = 0; index < total; index += 1) {
       const item = batch[index];
-      dispatch({ type:'ALLOCATE', escaninhoId:item.escaninhoId, productId:item.productId, slot:item.slot });
+      dispatch({ type:'ALLOCATE', escaninhoId:item.escaninhoId, productId:item.productId, slot:item.slot, historyGroup });
       if (onProgress) onProgress(index + 1, total);
       if (index < total - 1) await new Promise((resolve) => window.setTimeout(resolve, 28));
     }

@@ -40,7 +40,13 @@ def save_plano_version_xlsx(path: Path, name: str) -> dict[str, Any]:
     dest = VERSION_DIR / filename
     shutil.copy2(path, dest)
 
-    return {"success": True, "version_id": filename, "label": filename}
+    return {
+        "success": True,
+        "version_id": filename,
+        "label": filename,
+        "sheet_name": filename,
+        "plano_sheet_name": "Plano_Enderecamento_Final",
+    }
 
 
 def list_plano_versions_xlsx(_: Path) -> dict[str, Any]:
