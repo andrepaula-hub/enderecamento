@@ -6,6 +6,7 @@ const BOOTSTRAP = window.DSEBootstrap || {};
 const HELPERS = window.DSEHelpers || {};
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
+const normalizeSearchText = HELPERS.normalizeSearchText || ((value) => String(value || '').toLowerCase());
 
 const GRUPOS = ['FLV','Alimento','Bebidas','Perfumaria','Químico','Neutro'];
 const CURVAS  = ['A','B','C','D','E'];
@@ -185,14 +186,14 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   }, [activeEntries]);
 
   const filteredSubs = useMemo(() =>
-    subSearch ? allSubs.filter(s=>s.toLowerCase().includes(subSearch.toLowerCase())) : allSubs,
+    subSearch ? allSubs.filter(s=>normalizeSearchText(s).includes(normalizeSearchText(subSearch))) : allSubs,
     [allSubs, subSearch]);
 
   const filtered = useMemo(() => {
     return activeEntries.filter(entry => {
       const p = entry.product;
       if (!p) return false;
-      if (search && !p.nome.toLowerCase().includes(search.toLowerCase()) && !p.id.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !normalizeSearchText(p.nome).includes(normalizeSearchText(search)) && !normalizeSearchText(p.id).includes(normalizeSearchText(search))) return false;
       if (filterGrupos.length && !filterGrupos.includes(p.grupo)) return false;
       if (filterCurvas.length && !filterCurvas.includes(p.curva)) return false;
       if (filterTipos.length) {

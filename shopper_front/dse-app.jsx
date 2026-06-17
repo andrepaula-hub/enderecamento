@@ -14,6 +14,7 @@ const HELPERS = window.DSEHelpers || {};
 const { useTweaks } = window;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
+const normalizeSearchText = HELPERS.normalizeSearchText || ((value) => String(value || '').toLowerCase());
 
 function resolveBoardEntryProductCode(entryId) {
   const raw = HELPERS.normalizeText ? HELPERS.normalizeText(entryId) : String(entryId || '').trim();
@@ -88,9 +89,9 @@ function SearchBar({ allocations, onHighlight }) {
 
   const results = useMemo(()=>{
     if (!query||query.length<2) return [];
-    const q = query.toLowerCase();
+    const q = normalizeSearchText(query);
     return PRODUCTS
-      .filter(p=>p.nome.toLowerCase().includes(q)||p.id.toLowerCase().includes(q))
+      .filter(p=>normalizeSearchText(p.nome).includes(q)||normalizeSearchText(p.id).includes(q))
       .slice(0,9)
       .map(p=>{
         const locs=[];
@@ -173,8 +174,8 @@ function CategoryFilter({ subcatFilters, onChange }) {
 
   const filtered = useMemo(() => {
     if (!search) return ALL_SUBCATS;
-    const q = search.toLowerCase();
-    return ALL_SUBCATS.filter((sub) => sub.toLowerCase().includes(q));
+    const q = normalizeSearchText(search);
+    return ALL_SUBCATS.filter((sub) => normalizeSearchText(sub).includes(q));
   }, [search]);
 
   useEffect(() => {

@@ -40,6 +40,13 @@
     return String(value || '').trim();
   }
 
+  function normalizeSearchText(value) {
+    return normalizeText(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+
   function parseBoardEntryCode(entryId) {
     var raw = normalizeText(entryId);
     if (!raw) return '';
@@ -362,6 +369,7 @@
 
   window.DSEHelpers = {
     normalizeText: normalizeText,
+    normalizeSearchText: normalizeSearchText,
     parseBoardEntryCode: parseBoardEntryCode,
   };
 })();

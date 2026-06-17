@@ -118,3 +118,28 @@ def test_suggest_allocations_blocks_flv_on_geladeira_walls():
         "R1-E1-3-1", "R1-E1-3-5",
         "R1-E1-4-1", "R1-E1-4-5",
     }
+
+
+def test_suggest_allocations_treats_repeated_queue_codes_as_missing_instances():
+    result = suggest_allocations(
+        unallocated_codes=["PAO1"] * 7,
+        products_data=[_product("PAO1", nome="Pao Frances", escsNec=7)],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 4, "escsPerNivel": 7, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+            for level in range(1, 5)
+            for pos in range(1, 8)
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 7
+    assert result["summary"]["total_requested"] == 7

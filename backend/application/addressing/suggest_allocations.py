@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from core.agent_scoring import (
@@ -49,7 +50,6 @@ def suggest_allocations(
     rules = AgentRules(allow_top_level=allow_top_level, allow_second_slot=allow_second_slot)
 
     # Map React Product → scoring dict
-    unallocated_set = set(unallocated_codes)
     products_by_code: dict[str, dict[str, Any]] = {}
     for p in products_data:
         code = str(p.get("id") or p.get("product_code") or "").strip()
@@ -57,7 +57,15 @@ def suggest_allocations(
             continue
         products_by_code[code] = _react_product_to_scoring(p)
 
-    products_to_allocate = [products_by_code[c] for c in unallocated_codes if c in products_by_code]
+    requested_counts = Counter(code for code in unallocated_codes if code in products_by_code)
+    products_to_allocate = []
+    for code in unallocated_codes:
+        if code not in requested_counts:
+            continue
+        product = dict(products_by_code[code])
+        product["escaninhos_necessarios"] = requested_counts[code]
+        products_to_allocate.append(product)
+        del requested_counts[code]
 
     # Build slots from map_structure + current allocations
     slots = _slots_from_map(map_structure, allocations, allow_second_slot)
@@ -116,7 +124,7 @@ def suggest_allocations(
         "moves": proposed,
         "unallocated": unallocated_out,
         "summary": {
-            "total_requested": len(products_to_allocate),
+            "total_requested": sum(int(product.get("escaninhos_necessarios") or 1) for product in products_to_allocate),
             "proposed": len(proposed),
             "unallocated": len(unallocated_out),
         },

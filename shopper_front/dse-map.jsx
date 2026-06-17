@@ -5,6 +5,7 @@ const { PRODUCT_MAP } = window.DSEData;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 const DSEHelpers = window.DSEHelpers || {};
+const normalizeSearchText = DSEHelpers.normalizeSearchText || ((value) => String(value || '').toLowerCase());
 
 function parseBoardEntryCode(entryId) {
   if (typeof DSEHelpers.parseBoardEntryCode === 'function') {
@@ -269,7 +270,8 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                   const subcatActive = subcatFilters.length>0;
                   if(!isGroup){
                     const slot=run.slots[0];
-                    const matchSearch=searchQuery&&(slot.p1?.nome?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p1?.id?.toLowerCase().includes(searchQuery.toLowerCase())||slot.p2?.nome?.toLowerCase().includes(searchQuery.toLowerCase()));
+                    const normalizedQuery = normalizeSearchText(searchQuery);
+                    const matchSearch=searchQuery&&(normalizeSearchText(slot.p1?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p1?.id).includes(normalizedQuery)||normalizeSearchText(slot.p2?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p2?.id).includes(normalizedQuery));
                         const isHighlighted=highlightProductId&&(slot.p1?.id===highlightProductId||slot.p2?.id===highlightProductId);
                         const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
                         return (
