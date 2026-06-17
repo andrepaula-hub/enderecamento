@@ -97,7 +97,18 @@ function ProductItem({ product, isSelected, onClick, onHover, onHoverEnd }) {
       <div style={{ display:'flex', gap:3, flexShrink:0 }}>
         {flags.slice(0,3).map((f,i)=>(<PranchetaFlag key={i} flag={f} />))}
       </div>
-      <span style={{ fontSize:9, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)', flexShrink:0 }}>×{product.escsNec}</span>
+      <span style={{
+        fontSize:11,
+        color:'#0DAB77',
+        fontFamily:'var(--font-numeric)',
+        fontWeight:800,
+        flexShrink:0,
+        background:'rgba(13,171,119,0.12)',
+        border:'1px solid rgba(13,171,119,0.28)',
+        borderRadius:999,
+        padding:'2px 7px',
+        lineHeight:1.2,
+      }}>×{product.displayEscsCount || product.escsNec}</span>
     </div>
   );
 }
@@ -177,20 +188,40 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
 
   const activeList = tab === 'recolhidos' ? collected : unallocated;
   const activeEntries = useMemo(() => activeList.map(resolveBoardEntry), [activeList]);
+  const displayedEntries = useMemo(() => {
+    if (tab !== 'nao_alocados') return activeEntries;
+    const grouped = new Map();
+    activeEntries.forEach((entry) => {
+      if (!entry || !entry.productCode || !entry.product) return;
+      const existing = grouped.get(entry.productCode);
+      if (existing) {
+        existing.entryIds.push(entry.entryId);
+      } else {
+        grouped.set(entry.productCode, {
+          entryId: entry.entryId,
+          productCode: entry.productCode,
+          product: entry.product,
+          raw: entry.raw,
+          entryIds: [entry.entryId],
+        });
+      }
+    });
+    return Array.from(grouped.values());
+  }, [activeEntries, tab]);
 
   // Collect all subcategories from current list
   const allSubs = useMemo(() => {
     const s = new Set();
-    activeEntries.forEach(entry => { if (entry.product) s.add(entry.product.sub); });
+    displayedEntries.forEach(entry => { if (entry.product) s.add(entry.product.sub); });
     return [...s].sort();
-  }, [activeEntries]);
+  }, [displayedEntries]);
 
   const filteredSubs = useMemo(() =>
     subSearch ? allSubs.filter(s=>normalizeSearchText(s).includes(normalizeSearchText(subSearch))) : allSubs,
     [allSubs, subSearch]);
 
   const filtered = useMemo(() => {
-    return activeEntries.filter(entry => {
+    return displayedEntries.filter(entry => {
       const p = entry.product;
       if (!p) return false;
       if (search && !normalizeSearchText(p.nome).includes(normalizeSearchText(search)) && !normalizeSearchText(p.id).includes(normalizeSearchText(search))) return false;
@@ -212,9 +243,12 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
       return true;
     }).map(entry => Object.assign({}, entry.product, {
       boardEntryId: entry.entryId,
+      boardEntryIds: entry.entryIds || [entry.entryId],
       boardProductCode: entry.productCode,
+      displayEscsCount: tab === 'nao_alocados' ? Number(entry.product.escsNec || (entry.entryIds || []).length || 1) : Number(entry.product.escsNec || 1),
+      missingInstanceCount: (entry.entryIds || [entry.entryId]).length,
     }));
-  }, [activeEntries, search, filterGrupos, filterCurvas, filterTipos, filterDegelo, filterMetodos, filterSubs]);
+  }, [displayedEntries, search, filterGrupos, filterCurvas, filterTipos, filterDegelo, filterMetodos, filterSubs, tab]);
 
   const selectedBoardProduct = useMemo(() => {
     if (!selectedProduct) return null;
@@ -225,12 +259,12 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
     if (onVisibleProductsChange) {
       onVisibleProductsChange({
         tab: tab,
-        total: activeList.length,
+        total: displayedEntries.length,
         filtered: filtered.length,
-        productIds: filtered.map(product => product.boardEntryId || product.id),
+        productIds: filtered.flatMap(product => product.boardEntryIds || [product.boardEntryId || product.id]),
       });
     }
-  }, [onVisibleProductsChange, tab, activeList.length, filtered]);
+  }, [onVisibleProductsChange, tab, displayedEntries.length, filtered]);
 
   const toggleGrupo  = g => setFG(prev=>prev.includes(g)?prev.filter(x=>x!==g):[...prev,g]);
   const toggleCurva  = c => setFC(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c]);
