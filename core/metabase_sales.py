@@ -26,7 +26,7 @@ from .utils import normalize_string, parse_number
 DEFAULT_METABASE_URL = "https://metabase.kdabra.com.br"
 METABASE_PROXY_SCRIPT_ID = "1Ypp21M1kGmv0dL5bYCl6q9JfbVg7sOhs9qttK89u9iBFzq2fmEBEUffl"
 DEFAULT_CARD_ID = 823
-DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_TIMEOUT_SECONDS = 180
 METABASE_EARLIEST_DATE = "2020-01-01"
 SHEET_VENDAS_ALVO = "Vendas Alvo"
 VENDAS_ALVO_HEADERS = ["cod_produto", "desc_produto", "qtd_total"]

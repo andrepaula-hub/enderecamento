@@ -20,6 +20,8 @@ function LogItem({ entry }) {
 // ── ETL Alert card ───────────────────────────────────────────────────────────
 function AlertCard({ alert, onSend, onRefresh, sending, refreshing }) {
   const disableActions = !!sending || !!refreshing;
+  const shownExamples = alert.exemplos.slice(0, 2);
+  const remainingExamples = Math.max(0, Number(alert.count || 0) - shownExamples.length);
   return (
     <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:6, padding:'8px 10px', marginBottom:6 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
@@ -27,8 +29,8 @@ function AlertCard({ alert, onSend, onRefresh, sending, refreshing }) {
         <span style={{ fontSize:10, color:'#EF4444', background:'rgba(239,68,68,0.15)', padding:'1px 6px', borderRadius:10 }}>{alert.count} itens</span>
       </div>
       <div style={{ fontSize:10, color:'var(--cfg-text-muted)', marginBottom:6 }}>
-        {alert.exemplos.slice(0,2).map((e,i) => <div key={i}>{e.codigo} — {e.nome}</div>)}
-        {alert.exemplos.length > 2 && <div style={{ color:'#94A3B8' }}>+ {alert.exemplos.length - 2} mais…</div>}
+        {shownExamples.map((e,i) => <div key={i}>{e.codigo} — {e.nome}</div>)}
+        {remainingExamples > 0 && <div style={{ color:'#94A3B8' }}>+ {remainingExamples} mais…</div>}
       </div>
       <div style={{ display:'flex', gap:6 }}>
         <button disabled={disableActions} onClick={() => onSend(alert)} style={smallBtnStyle('rgba(13,171,119,0.10)','rgba(13,171,119,0.32)','var(--shopper-green)', disableActions)}>{sending ? 'Enviando…' : 'Enviar p/ ETL'}</button>
@@ -184,6 +186,16 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     }, 900);
   };
 
+  const setProgressMonotonic = (nextVal, nextLabel) => {
+    setProgress(prev => {
+      if (!prev) return { val: nextVal, label: nextLabel };
+      return {
+        val: Math.max(Number(prev.val) || 0, Number(nextVal) || 0),
+        label: nextLabel || prev.label,
+      };
+    });
+  };
+
   const pollJobResult = async (jobId, handlers) => {
     return await new Promise((resolve, reject) => {
       const iv = setInterval(async () => {
@@ -252,12 +264,12 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
       intervalMs: 2000,
       onUpdate: function (job) {
         if (job.status === 'pending') {
-          setProgress({ val:18, label:'Job de ETL enfileirado…' });
+          setProgressMonotonic(18, 'Job de ETL enfileirado…');
         } else if (job.status === 'running' && job.result && job.result.progress_pct) {
-          setProgress({
-            val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
-            label: job.result.progress_label || 'ETL em andamento…',
-          });
+          setProgressMonotonic(
+            Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+            job.result.progress_label || 'ETL em andamento…'
+          );
         }
       },
     });
@@ -324,12 +336,12 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         intervalMs: 1600,
         onUpdate: function (job) {
           if (job.status === 'pending') {
-            setProgress({ val:18, label:'Job de envio do alerta enfileirado…' });
+            setProgressMonotonic(18, 'Job de envio do alerta enfileirado…');
           } else if (job.status === 'running' && job.result && job.result.progress_pct) {
-            setProgress({
-              val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
-              label: job.result.progress_label || 'Enviando grupo para a planilha ETL…',
-            });
+            setProgressMonotonic(
+              Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+              job.result.progress_label || 'Enviando grupo para a planilha ETL…'
+            );
           }
         },
       });
@@ -403,12 +415,12 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
               if (job.status === 'done') { clearInterval(iv); resolve(job.result || {}); }
               else if (job.status === 'failed') { clearInterval(iv); reject(new Error(job.error || 'ETL falhou.')); }
               else if (job.status === 'running' && job.result && job.result.progress_pct) {
-                setProgress({
-                  val: Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
-                  label: job.result.progress_label || 'ETL em andamento…',
-                });
+                setProgressMonotonic(
+                  Math.max(28, Math.min(95, Number(job.result.progress_pct) || 28)),
+                  job.result.progress_label || 'ETL em andamento…'
+                );
               } else if (job.status === 'pending') {
-                setProgress({ val:18, label:'Job de ETL enfileirado…' });
+                setProgressMonotonic(18, 'Job de ETL enfileirado…');
               }
             } catch (e) { clearInterval(iv); reject(e); }
           }, 2500);
@@ -474,12 +486,12 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
               clearInterval(iv);
               reject(new Error(job.error || 'Vendas Alvo falhou.'));
             } else if (job.status === 'running' && job.result && job.result.progress_pct) {
-              setProgress({
-                val: Math.max(35, Math.min(95, Number(job.result.progress_pct) || 35)),
-                label: job.result.progress_label || 'Montando Vendas Alvo…',
-              });
+              setProgressMonotonic(
+                Math.max(35, Math.min(95, Number(job.result.progress_pct) || 35)),
+                job.result.progress_label || 'Montando Vendas Alvo…'
+              );
             } else if (job.status === 'pending') {
-              setProgress({ val:20, label:'Job de Vendas Alvo enfileirado…' });
+              setProgressMonotonic(20, 'Job de Vendas Alvo enfileirado…');
             }
           } catch (e) {
             clearInterval(iv);
