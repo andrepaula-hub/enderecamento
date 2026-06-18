@@ -133,7 +133,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
       {mode==='confirmRemove' && (
         <div style={{ padding:'8px 10px' }}>
           <div style={{ fontSize:11, fontWeight:700, color:'#9E1028', marginBottom:4 }}>Remover {eq.id}?</div>
-          <div style={{ fontSize:10, color:'var(--map-text-muted)', marginBottom:8, lineHeight:1.5 }}>Remove o equipamento e todos os produtos alocados. Não pode ser desfeito.</div>
+          <div style={{ fontSize:10, color:'var(--map-text-muted)', marginBottom:8, lineHeight:1.5 }}>Remove o equipamento e move os produtos alocados para Recolhidos. Não pode ser desfeito.</div>
           <div style={{ display:'flex', gap:5 }}>
             <button onClick={()=>{dispatch({type:'REMOVE_EQUIP',equipId:eq.id});onClose();}} style={{ flex:1, padding:'5px', fontSize:10, fontWeight:700, background:'#9E1028', border:'none', borderRadius:4, color:'#fff', cursor:'pointer', fontFamily:'var(--font-sans)' }}>Confirmar</button>
             <button onClick={()=>setMode(null)} style={{ padding:'5px 10px', fontSize:10, background:'transparent', border:'1px solid var(--dropdown-border)', borderRadius:4, color:'var(--dropdown-text)', cursor:'pointer', fontFamily:'var(--font-sans)' }}>Cancelar</button>
@@ -145,6 +145,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
         {item('Renomear equipamento',()=>{setRenameVal(eq.id);setMode('rename');},{icon:'✎'})}
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Trocar conteúdo com…',()=>{onStartSwap(eq.id);onClose();},{icon:'⇄'})}
+        {item('Recolher produtos',()=>{dispatch({type:'COLLECT_EQUIP',equipId:eq.id});onClose();},{icon:'↙'})}
 
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Remover equipamento',()=>setMode('confirmRemove'),{icon:'✕',danger:true})}
@@ -659,7 +660,9 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
       : scope === 'level'
         ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'level')
-        : [clickedEscaninhoId];
+        : scope === 'street'
+          ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'street')
+          : [clickedEscaninhoId];
     const targets = candidateIds.filter((escaninhoId) => {
       const alloc = allocations[escaninhoId] || {};
       if (slot === 2) return !!alloc.p1 && !alloc.p2;
@@ -780,7 +783,9 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
       : scope === 'level'
         ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'level')
-        : [clickedEscaninhoId];
+        : scope === 'street'
+          ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'street')
+          : [clickedEscaninhoId];
     return candidateIds.filter((escaninhoId) => {
       const alloc = allocations[escaninhoId] || {};
       return !!alloc.p1;
@@ -820,6 +825,15 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const hasShift = !!(e && e.shiftKey);
     const scope = hasCmd && hasShift ? 'street' : hasCmd ? 'equipment' : hasShift ? 'level' : 'single';
     const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
+    if (p1 && !wantsSecondSlot) {
+      const collectBatch = buildCollectBatch(escsId, scope);
+      if (collectBatch.length > 1) {
+        onCollectMany(collectBatch);
+        return;
+      }
+      onCollect(escsId,p1);
+      return;
+    }
     if (hasAllocationSource) {
       if ((scope === 'equipment' || scope === 'level' || scope === 'street') && !wantsSecondSlot && !selectedProduct && (queueProductIds || []).length > 1) {
         try {
@@ -857,7 +871,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         return;
       }
     }
-    if (p1) {
+    if (p1 && !wantsSecondSlot) {
       const collectBatch = buildCollectBatch(escsId, scope);
       if (collectBatch.length > 1) {
         onCollectMany(collectBatch);

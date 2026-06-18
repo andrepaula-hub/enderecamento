@@ -22,18 +22,16 @@ function AlertCard({ alert, onSend, onRefresh, sending, refreshing }) {
   const disableActions = !!sending || !!refreshing;
   const shownExamples = alert.exemplos.slice(0, 2);
   const totalCount = Number(alert.count || 0);
-  const totalExamples = alert.exemplos.length;
-  const hiddenExamples = Math.max(0, totalExamples - shownExamples.length);
+  const countLabel = totalCount === 1 ? 'ocorrência' : 'ocorrências';
   return (
     <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:6, padding:'8px 10px', marginBottom:6 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
         <span style={{ fontSize:11, fontWeight:700, color:'#EF4444' }}>{alert.titulo}</span>
-        <span style={{ fontSize:10, color:'#EF4444', background:'rgba(239,68,68,0.15)', padding:'1px 6px', borderRadius:10 }}>{alert.count} itens</span>
+        <span style={{ fontSize:10, color:'#EF4444', background:'rgba(239,68,68,0.15)', padding:'1px 6px', borderRadius:10 }}>{totalCount} {countLabel}</span>
       </div>
       <div style={{ fontSize:10, color:'var(--cfg-text-muted)', marginBottom:6 }}>
         {shownExamples.map((e,i) => <div key={i}>{e.codigo} — {e.nome}</div>)}
-        {hiddenExamples > 0 && <div style={{ color:'#94A3B8' }}>+ {hiddenExamples} exemplo(s) oculto(s)…</div>}
-        {totalCount > totalExamples && <div style={{ color:'#94A3B8' }}>Mostrando {totalExamples} de {totalCount} item(ns) do alerta.</div>}
+        <div style={{ color:'#94A3B8' }}>+ {totalCount} {countLabel}</div>
       </div>
       <div style={{ display:'flex', gap:6 }}>
         <button disabled={disableActions} onClick={() => onSend(alert)} style={smallBtnStyle('rgba(13,171,119,0.10)','rgba(13,171,119,0.32)','var(--shopper-green)', disableActions)}>{sending ? 'Enviando…' : 'Enviar p/ ETL'}</button>

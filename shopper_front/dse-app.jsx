@@ -368,6 +368,28 @@ function diffMoves(currentAllocations) {
   return moves;
 }
 
+function collectAllocationKeys(state, shouldCollectKey) {
+  const allocations = { ...state.allocations };
+  const collected = [ ...state.collected ];
+  let changed = false;
+  Object.keys(allocations).forEach((key) => {
+    if (!shouldCollectKey(key)) return;
+    const alloc = allocations[key] || {};
+    if (alloc.p1) collected.push(createCollectedEntryId(alloc.p1, collected));
+    if (alloc.p2) collected.push(createCollectedEntryId(alloc.p2, collected));
+    delete allocations[key];
+    changed = true;
+  });
+  return { allocations, collected, changed };
+}
+
+function pendingStateFingerprint(state) {
+  return JSON.stringify({
+    allocations: state.allocations,
+    mapStructure: state.mapStructure,
+  });
+}
+
 function reducer(state, action) {
   switch(action.type) {
     case 'OPEN_MAP':        return {...state, view:'map', configOpen:false};
@@ -486,6 +508,14 @@ function reducer(state, action) {
         selectedProduct:null,
       };
     }
+    case 'COLLECT_EQUIP': {
+      const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
+      if (!result.changed) return state;
+      return {
+        ...commitAllocs(state,result.allocations,null,{ collected:result.collected, unallocated:state.unallocated }),
+        selectedProduct:null,
+      };
+    }
     case 'UNDO': {
       if(state.histIdx<=0) return state;
       const ni=state.histIdx-1;
@@ -567,9 +597,9 @@ function reducer(state, action) {
     }
     case 'REMOVE_EQUIP': {
       const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.filter(eq=>eq.id!==action.equipId)}));
-      const na={...state.allocations};
-      Object.keys(na).filter(k=>k.startsWith(action.equipId+'-')).forEach(k=>delete na[k]);
-      return {...state,mapStructure:ms,allocations:na};
+      const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
+      const snapshot = historySnapshot(state, result.allocations, state.unallocated, result.collected);
+      return {...state,mapStructure:ms,allocations:result.allocations,collected:result.collected,selectedProduct:null,history:[snapshot],histIdx:0,lastHistoryGroup:null};
     }
     case 'ADD_EQUIP': {
       const ms=state.mapStructure.map(st=>{
@@ -590,9 +620,10 @@ function reducer(state, action) {
     case 'REMOVE_STREET': {
       const removed=state.mapStructure.find(st=>st.id===action.streetId);
       const ms=state.mapStructure.filter(st=>st.id!==action.streetId);
-      const na={...state.allocations};
-      (removed?.equipment||[]).forEach(eq=>Object.keys(na).filter(k=>k.startsWith(eq.id+'-')).forEach(k=>delete na[k]));
-      return {...state,mapStructure:ms,allocations:na};
+      const removedEquipIds = new Set((removed?.equipment||[]).map(eq=>eq.id));
+      const result = collectAllocationKeys(state, key=>removedEquipIds.has(String(key).split('-').slice(0,2).join('-')));
+      const snapshot = historySnapshot(state, result.allocations, state.unallocated, result.collected);
+      return {...state,mapStructure:ms,allocations:result.allocations,collected:result.collected,selectedProduct:null,history:[snapshot],histIdx:0,lastHistoryGroup:null};
     }
 
     case 'RENAME_EQUIP': {
@@ -856,6 +887,8 @@ function App() {
   const [state,dispatch]  = useReducer(reducer, initState);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [visibleQueue, setVisibleQueue] = useState({ tab:'nao_alocados', total:0, filtered:0, productIds:[] });
+  const pendingFingerprint = useMemo(() => pendingStateFingerprint(state), [state.allocations, state.mapStructure]);
+  const savedFingerprintRef = useRef(pendingFingerprint);
 
   useEffect(()=>{ document.documentElement.setAttribute('data-dse-theme',tweaks.dark?'dark':'light'); },[tweaks.dark]);
   useEffect(() => {
@@ -886,6 +919,16 @@ function App() {
     window.addEventListener('keydown',h);
     return ()=>window.removeEventListener('keydown',h);
   },[state.pendingConfirm,state.swapSource,state.highlightProductId,state.configOpen,state.openPanel,state.selectedProduct]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (state.view !== 'map' || pendingFingerprint === savedFingerprintRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [pendingFingerprint, state.view]);
 
   const handleAllocate  = useCallback((id,pid,slot)=>dispatch({type:'ALLOCATE',escaninhoId:id,productId:pid,slot}),[]);
   const handleAllocateMany = useCallback((items)=>dispatch({type:'ALLOCATE_MANY',items}),[]);
@@ -932,10 +975,11 @@ function App() {
     if (!versionResponse || !versionResponse.success) {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
+    savedFingerprintRef.current = pendingFingerprint;
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
     return versionResponse;
-  }, [state.allocations]);
+  }, [state.allocations, pendingFingerprint]);
 
   return (
     <div data-dse-theme={tweaks.dark?'dark':'light'} style={{ height:'100vh', display:'flex', flexDirection:'column', background:'var(--app-bg)', fontFamily:'var(--font-sans)' }}>
