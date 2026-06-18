@@ -1,5 +1,5 @@
 // DSE Prancheta v2 — direita, tooltip, subcategoria, tipo físico
-const { useState, useMemo, useRef, useEffect } = React;
+const { useState, useMemo, useRef, useEffect, useCallback } = React;
 const { DSEProductTooltip } = window;
 const { PRODUCTS, PRODUCT_MAP } = window.DSEData;
 const BOOTSTRAP = window.DSEBootstrap || {};
@@ -246,6 +246,17 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
     }));
   }, [displayedEntries, search, filterGrupos, filterCurvas, filterTipos, filterDegelo, filterMetodos, filterSubs, tab]);
 
+  const countPendingEscaninhos = useCallback((entries) => {
+    return (entries || []).reduce((total, entry) => {
+      if (Number.isFinite(entry?.missingInstanceCount)) return total + entry.missingInstanceCount;
+      const ids = entry?.boardEntryIds || entry?.entryIds || [entry?.boardEntryId || entry?.entryId];
+      return total + ids.filter(Boolean).length;
+    }, 0);
+  }, []);
+
+  const filteredEscsCount = useMemo(() => countPendingEscaninhos(filtered), [countPendingEscaninhos, filtered]);
+  const totalEscsCount = useMemo(() => countPendingEscaninhos(displayedEntries), [countPendingEscaninhos, displayedEntries]);
+
   const selectedBoardProduct = useMemo(() => {
     if (!selectedProduct) return null;
     return resolveBoardEntry(selectedProduct).product || PRODUCT_MAP[selectedProduct] || null;
@@ -255,12 +266,12 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
     if (onVisibleProductsChange) {
       onVisibleProductsChange({
         tab: tab,
-        total: displayedEntries.length,
-        filtered: filtered.length,
+        total: totalEscsCount,
+        filtered: filteredEscsCount,
         productIds: filtered.flatMap(product => product.boardEntryIds || [product.boardEntryId || product.id]),
       });
     }
-  }, [onVisibleProductsChange, tab, displayedEntries.length, filtered]);
+  }, [onVisibleProductsChange, tab, totalEscsCount, filteredEscsCount, filtered]);
 
   const toggleGrupo  = g => setFG(prev=>prev.includes(g)?prev.filter(x=>x!==g):[...prev,g]);
   const toggleCurva  = c => setFC(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c]);
@@ -340,8 +351,8 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
       <div style={{ padding:'5px 10px 7px', borderBottom:showFilters?'1px solid var(--pran-border)':'none', flexShrink:0 }}>
         <div style={{ fontSize:10, color:'var(--pran-muted)', fontFamily:'var(--font-numeric)' }}>
           {tab === 'nao_alocados' ? 'Não alocados ' : 'Recolhidos '}
-          <strong style={{ color:'var(--pran-text)', fontWeight:800 }}>{filtered.length}</strong>
-          {' '}de {displayedEntries.length}
+          <strong style={{ color:'var(--pran-text)', fontWeight:800 }}>{filteredEscsCount}</strong>
+          {' '}de {totalEscsCount}
         </div>
       </div>
 

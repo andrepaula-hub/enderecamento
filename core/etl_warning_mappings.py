@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from .gsheets_client import GSheetsClient
@@ -449,6 +449,7 @@ def _upsert_group_rows(
     warning_type: str,
     problematic_rows: list[dict[str, Any]],
     default_volume_cm3: float | None = None,
+    progress: Callable[[int, str], None] | None = None,
 ) -> tuple[str, int, int, int, int, str]:
     warning_norm = _norm(warning_type)
     queued_count = 0
@@ -606,17 +607,28 @@ def _upsert_group_rows(
         else:
             unchanged_count += 1
 
+    if progress:
+        progress(58, f"Escrevendo {len(row_updates) + len(rows_to_append)} item(ns) na aba {target_sheet}…")
     _apply_updates(master_client, target_sheet, headers, row_updates, rows_to_append, header_changed)
     if highlighted_rows:
         try:
+            if progress:
+                progress(76, "Destacando linhas enviadas na planilha ETL…")
             master_client.highlight_rows(target_sheet, highlighted_rows, end_column_index=len(headers))
         except Exception as exc:
             highlight_error = str(exc)
+    if progress:
+        progress(86, "Registrando log do envio…")
     _append_log_rows(master_client, logs)
     return target_sheet, queued_count, inserted_count, unchanged_count, len(set(highlighted_rows)), highlight_error
 
 
-def send_warning_group_to_etl(master_sheet_id: str, target_sheet_id: str, warning_type: str) -> dict[str, Any]:
+def send_warning_group_to_etl(
+    master_sheet_id: str,
+    target_sheet_id: str,
+    warning_type: str,
+    progress: Callable[[int, str], None] | None = None,
+) -> dict[str, Any]:
     supported = {
         "volumetria_vazia",
         "subcategoria_vazia",
@@ -637,13 +649,18 @@ def send_warning_group_to_etl(master_sheet_id: str, target_sheet_id: str, warnin
 
     master_client = GSheetsClient(master_sheet_id)
     target_client = GSheetsClient(target_sheet_id)
+    if progress:
+        progress(30, "Lendo Base_Produtos para montar o grupo do alerta…")
     base_rows = _read_base_rows(target_client)
     problematic_rows = _extract_problematic_rows(base_rows, warning_norm)
+    if progress:
+        progress(44, f"{len(problematic_rows)} item(ns) identificado(s). Preparando aba destino…")
 
     target_sheet, queued_count, inserted_count, unchanged_count, highlighted_count, highlight_error = _upsert_group_rows(
         master_client,
         warning_norm,
         problematic_rows,
+        progress=progress,
     )
 
     response = {

@@ -16,6 +16,7 @@ from core.enrichment_pipeline import (
     _norm,
     _norm_code,
     _pick_col,
+    _prune_plan_values_to_valid_codes,
     _safe_df,
     _strip_accents,
     _tipo_equipamento_base,
@@ -286,3 +287,27 @@ class TestExtractAllocatedCodes:
         ]
         result = _extract_allocated_codes_from_plano_values(values)
         assert result == {"SKU001", "SKU002"}
+
+
+# ── _prune_plan_values_to_valid_codes ─────────────────────────────────────────
+
+class TestPrunePlanValues:
+    def test_limpa_skus_fora_do_mix_sem_apagar_linhas(self):
+        values = [
+            ["location_id", "product_code", "product_name", "slot1_code", "slot1_name", "slot2_code", "slot2_name", "slot_count", "slot_duplo"],
+            ["R1-E1-1-1", "SKU_OLD", "Produto antigo", "SKU_OLD", "Produto antigo", "SKU_OK", "Produto ok", 2, "SIM"],
+            ["R1-E1-1-2", "SKU_OK", "Produto ok", "SKU_OK", "Produto ok", "", "", 1, "NAO"],
+        ]
+
+        pruned, removed = _prune_plan_values_to_valid_codes(values, {"SKU_OK"})
+
+        assert removed == 2
+        assert len(pruned) == len(values)
+        assert pruned[1][1] == "Vazio"
+        assert pruned[1][2] == ""
+        assert pruned[1][3] == ""
+        assert pruned[1][4] == ""
+        assert pruned[1][5] == "SKU_OK"
+        assert pruned[1][7] == 1
+        assert pruned[1][8] == "NAO"
+        assert pruned[2][1] == "SKU_OK"

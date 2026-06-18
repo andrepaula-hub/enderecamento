@@ -219,6 +219,110 @@ def _extract_allocated_codes_from_plano_values(values: list[list[Any]]) -> set[s
     return allocated_codes
 
 
+def _prune_plan_values_to_valid_codes(values: list[list[Any]], valid_codes: set[str]) -> tuple[list[list[Any]], int]:
+    """Remove alocações de SKUs que não existem mais no mix, preservando as linhas do mapa."""
+    if not values:
+        return values, 0
+    headers = [str(h or "").strip() for h in values[0]]
+    if not headers:
+        return values, 0
+
+    idx_product = _find_header_index(headers, ["product_code", "produto_alocado_code"])
+    idx_slot1 = _find_header_index(headers, ["slot1_code"])
+    idx_slot2 = _find_header_index(headers, ["slot2_code"])
+    slot1_cols = [idx for idx, header in enumerate(headers) if _norm(header).startswith("slot1_")]
+    slot2_cols = [idx for idx, header in enumerate(headers) if _norm(header).startswith("slot2_")]
+    primary_clear_candidates = {
+        "product_name",
+        "produto_alocado_nome",
+        "info_hover",
+        "grupo",
+        "cor_grupo",
+        "curva",
+        "subcategoria",
+        "quantidade",
+        "vol_l_unitario",
+        "vol_L_unitario",
+    }
+    primary_clear_cols = [
+        idx for idx, header in enumerate(headers)
+        if header in primary_clear_candidates or _norm(header) in {_norm(item) for item in primary_clear_candidates}
+    ]
+    idx_slot_count = _find_header_index(headers, ["slot_count"])
+    idx_slot_duplo = _find_header_index(headers, ["slot_duplo"])
+
+    def clear_columns(row: list[Any], columns: list[int]) -> None:
+        for col in columns:
+            if 0 <= col < len(row):
+                row[col] = ""
+
+    pruned = [values[0]]
+    removed = 0
+    for raw in values[1:]:
+        row = list(raw) + [""] * (len(headers) - len(raw))
+        row_removed = 0
+
+        if idx_product != -1 and idx_product < len(row):
+            code = _norm_code(row[idx_product])
+            if code and code != "VAZIO" and code not in valid_codes:
+                row[idx_product] = "Vazio"
+                clear_columns(row, primary_clear_cols)
+                row_removed += 1
+
+        if idx_slot1 != -1 and idx_slot1 < len(row):
+            code = _norm_code(row[idx_slot1])
+            if code and code != "VAZIO" and code not in valid_codes:
+                clear_columns(row, slot1_cols)
+                row_removed += 1
+
+        if idx_slot2 != -1 and idx_slot2 < len(row):
+            code = _norm_code(row[idx_slot2])
+            if code and code != "VAZIO" and code not in valid_codes:
+                clear_columns(row, slot2_cols)
+                row_removed += 1
+
+        if row_removed:
+            removed += row_removed
+            active_slots = 0
+            for idx in [idx_slot1, idx_slot2]:
+                if idx != -1 and idx < len(row):
+                    code = _norm_code(row[idx])
+                    if code and code != "VAZIO":
+                        active_slots += 1
+            if idx_slot_count != -1 and idx_slot_count < len(row):
+                row[idx_slot_count] = active_slots
+            if idx_slot_duplo != -1 and idx_slot_duplo < len(row):
+                row[idx_slot_duplo] = "SIM" if active_slots >= 2 else "NAO"
+
+        pruned.append(row)
+    return pruned, removed
+
+
+def _prune_plan_and_versions_to_valid_codes(target_client: GSheetsClient, valid_codes: set[str]) -> dict[str, Any]:
+    sheet_names = target_client.list_sheet_names()
+    plan_sheet_names = [
+        name for name in sheet_names
+        if name == SHEET_PLANO_FINAL
+        or name.startswith("VERSAO_ENDERECAMENTO__")
+        or bool(re.match(r"^.+_ENDERECAMENTO\[\d+\]$", name))
+    ]
+    cleaned_sheets = 0
+    removed_allocations = 0
+    for sheet_name in plan_sheet_names:
+        values = target_client.read_values(sheet_name)
+        pruned_values, removed = _prune_plan_values_to_valid_codes(values, valid_codes)
+        if removed <= 0:
+            continue
+        target_client.clear_sheet(sheet_name)
+        target_client.append_rows(sheet_name, pruned_values)
+        cleaned_sheets += 1
+        removed_allocations += removed
+    return {
+        "cleaned_plan_sheets": cleaned_sheets,
+        "removed_plan_allocations": removed_allocations,
+    }
+
+
 def _read_manual_overrides(target_client: GSheetsClient) -> dict[str, dict[str, Any]]:
     """Read Edicoes_Manuais sheet and return {norm_code: {field: value}} for non-empty fields.
 
@@ -1169,6 +1273,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
 
     target.clear_sheet(SHEET_BASE_PRODUTOS)
     target.append_rows(SHEET_BASE_PRODUTOS, rows)
+    plan_cleanup = _prune_plan_and_versions_to_valid_codes(target, output_codes)
 
     return {
         "success": True,
@@ -1176,6 +1281,8 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
         "rows_frozen_allocated": frozen_rows_count,
         "allocated_codes_total": len(allocated_codes),
         "zero_qty_codes_removed": len(zero_qty_codes),
+        "removed_plan_allocations": plan_cleanup["removed_plan_allocations"],
+        "cleaned_plan_sheets": plan_cleanup["cleaned_plan_sheets"],
         "warnings": warnings,
         "limite_peso_kg": limite_peso_kg,
         "master_sheet_title": master.get_title(),

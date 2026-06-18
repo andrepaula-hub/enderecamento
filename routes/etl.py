@@ -131,7 +131,17 @@ def _run_send_etl_warning_group_job(
                 "progress_label": "Lendo Base_Produtos e identificando itens do alerta…",
             },
         )
-        result = send_warning_group_to_etl(master_sheet_id, target_sheet_id, warning_type)
+        def report(progress_pct: int, progress_label: str) -> None:
+            job_service.update(
+                job_id,
+                "running",
+                result={
+                    "progress_pct": progress_pct,
+                    "progress_label": progress_label,
+                },
+            )
+
+        result = send_warning_group_to_etl(master_sheet_id, target_sheet_id, warning_type, progress=report)
         if not result.get("success"):
             raise RuntimeError(result.get("error") or "Falha ao enviar grupo do alerta para o ETL.")
         result["progress_pct"] = 100
