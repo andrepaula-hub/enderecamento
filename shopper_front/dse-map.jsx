@@ -329,7 +329,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 });
 
 // ── Street column ──────────────────────────────────────────────────────────────
-const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[] }) {
+const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[], pendingEquipmentTypeChanges={} }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
@@ -995,6 +995,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
           swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
           highlightProductId={highlightProductId} onRecolherRua={onRecolherRua} subcatFilters={subcatFilters}
+          pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
         />
       ))}
 
