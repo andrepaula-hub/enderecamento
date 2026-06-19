@@ -181,6 +181,15 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
     return {filled:f,total:t};
   },[eq,allocations]);
 
+  const productCounts = useMemo(()=>{
+    const counts = {};
+    for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){
+      const productId = allocations[`${eq.id}-${n}-${s}`]?.p1;
+      if(productId) counts[productId] = (counts[productId] || 0) + 1;
+    }
+    return counts;
+  },[eq,allocations]);
+
   const dominantCurva = useMemo(()=>getDominantCurva(eq,allocations),[eq,allocations]);
 
   const isSwapSource   = swapSource === eq.id;
@@ -277,7 +286,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
               <div key={nivel} style={{ display:'flex', alignItems:'center', gap, flexWrap:'nowrap' }}>
                 <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0 }}>{nivel}</span>
                 {runs.map((run,ri)=>{
-                  const isGroup = run.slots.length>1 && run.p1id;
+                  const isGroup = !!run.p1id && (run.slots.length>1 || (productCounts[run.p1id] || 0)>1);
                   const groupColor = isGroup ? ((GROUP_STYLE[run.slots[0].p1?.grupo] || GROUP_STYLE.Neutro).text || '#64748B') : null;
                   const subcatActive = subcatFilters.length>0;
                   if(!isGroup){
@@ -351,7 +360,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
         if (pairFilter==='even' && num%2!==0) return false;
         if (pairFilter==='odd'  && num%2===0) return false;
       }
-      if (typeFilter!=='all' && eq.tipo!==typeFilter) return false;
+      if (typeFilter!=='all' && eq.tipo!==typeFilter && eq.tipoAnterior!==typeFilter) return false;
       return true;
     });
   },[street.equipment,pairFilter,typeFilter]);

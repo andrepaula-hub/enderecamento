@@ -238,12 +238,41 @@ function CategoryFilter({ subcatFilters, onChange }) {
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 const initMapStructure = JSON.parse(JSON.stringify(STREETS_STRUCTURE));
+const DEFAULT_EQUIP_SHAPES = {
+  prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
+  prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
+  geladeira:{niveis:5,escsPerNivel:5,cap:20},
+  geladeira_alta:{niveis:5,escsPerNivel:3,cap:20,card175Only:true},
+  geladeira_gerador:{niveis:5,escsPerNivel:5,cap:20},
+  freezer:{niveis:5,escsPerNivel:5,cap:16.384},
+  quimico:{niveis:5,escsPerNivel:7,cap:30.24},
+};
 function getInitialEquipType(equipId) {
   for (const street of initMapStructure) {
     const equip = (street.equipment || []).find(item=>item.id===equipId);
     if (equip) return equip.tipo;
   }
   return null;
+}
+function getEquipShapeForType(mapStructure, tipo, excludeEquipId) {
+  const targetType = String(tipo || '').trim();
+  if (!targetType) return {};
+  const sources = [mapStructure || [], initMapStructure || []];
+  for (const streets of sources) {
+    for (const street of streets) {
+      for (const equip of (street.equipment || [])) {
+        if (equip.id !== excludeEquipId && equip.tipo === targetType && equip.niveis && equip.escsPerNivel) {
+          return {
+            niveis:equip.niveis,
+            escsPerNivel:equip.escsPerNivel,
+            cap:equip.cap,
+            card175Only:!!equip.card175Only,
+          };
+        }
+      }
+    }
+  }
+  return DEFAULT_EQUIP_SHAPES[targetType] || {};
 }
 const initState = {
   view:'config', configOpen:false, selectedStore:null,
@@ -600,11 +629,19 @@ function reducer(state, action) {
 
     // ── Map structure mutations ──────────────────────────────────────────────
     case 'CHANGE_EQUIP_TYPE': {
-      const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.map(eq=>eq.id===action.equipId?{...eq,tipo:action.tipo}:eq)}));
+      const shape = getEquipShapeForType(state.mapStructure, action.tipo, action.equipId);
       const pending = { ...(state.pendingEquipmentTypeChanges || {}) };
       const originalType = getInitialEquipType(action.equipId);
       if (!action.tipo || action.tipo === originalType) delete pending[action.equipId];
       else pending[action.equipId] = action.tipo;
+      const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.map(eq=>{
+        if(eq.id!==action.equipId) return eq;
+        const changed = !!action.tipo && action.tipo !== originalType;
+        const nextEq = {...eq,...shape,tipo:action.tipo};
+        if(changed) nextEq.tipoAnterior = originalType || eq.tipo;
+        else delete nextEq.tipoAnterior;
+        return nextEq;
+      })}));
       const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
       return {
         ...state,
