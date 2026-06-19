@@ -16,6 +16,13 @@ function parseBoardEntryCode(entryId) {
   return match ? match[1] : raw;
 }
 
+function requiredBinsForProductCode(productCode) {
+  const product = PRODUCT_MAP[productCode];
+  const raw = product && (product.escsNec || product.escaninhos_necessarios);
+  const parsed = parseInt(String(raw == null ? '' : raw), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 // ── Equipment type config — Shopper brand palette ────────────────────────────
 // Colors pulled from Shopper sub-brands: Programada #225CB3, Única #F59C00, Now #9E1028, Pet #F2749E
 const EQUIP_CFG = {
@@ -566,6 +573,31 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   const closeTimerRef = useRef(null);
   const rafRef = useRef(null);
   const hasAllocationSource = !!selectedProduct || (queueProductIds || []).length > 0;
+  const allocatedCountByCode = useMemo(() => {
+    const counts = {};
+    Object.values(allocations || {}).forEach((alloc) => {
+      if (!alloc) return;
+      ['p1', 'p2'].forEach((field) => {
+        const code = alloc[field];
+        if (!code) return;
+        counts[code] = (counts[code] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [allocations]);
+  const capQueueByRequiredBins = useCallback((queue) => {
+    const used = {};
+    return (queue || []).filter((entryId) => {
+      const code = parseBoardEntryCode(entryId);
+      if (!code) return false;
+      const required = requiredBinsForProductCode(code);
+      const alreadyAllocated = allocatedCountByCode[code] || 0;
+      const remaining = Math.max(0, required - alreadyAllocated);
+      if ((used[code] || 0) >= remaining) return false;
+      used[code] = (used[code] || 0) + 1;
+      return true;
+    });
+  }, [allocatedCountByCode]);
 
   const orderedEscaninhos = useCallback((equipId, level, clickedEscaninhoId, scope) => {
     const parsedClick = parseEscId(clickedEscaninhoId);
@@ -651,7 +683,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   }, [mapStructure]);
 
   const buildAllocationBatch = useCallback((clickedEscaninhoId, opts) => {
-    const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
+    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
     if (!queue.length) return [];
     const parsed = parseEscId(clickedEscaninhoId);
     const scope = opts.scope || 'single';
@@ -691,7 +723,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       productId: queue[index],
       slot,
     })).filter((item) => !!item.productId);
-  }, [allocations, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
+  }, [allocations, capQueueByRequiredBins, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
 
   const buildScopedBackendAllocations = useCallback((allowedTargetIds) => {
     const allowed = new Set(allowedTargetIds || []);
@@ -717,7 +749,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   }, [allocations, mapStructure]);
 
   const handleSmartFill = useCallback(async (clickedEscaninhoId, scope) => {
-    const queue = selectedProduct ? [selectedProduct] : (queueProductIds || []);
+    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
     if (selectedProduct || queue.length <= 1) return null;
     const parsed = parseEscId(clickedEscaninhoId);
     const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, scope || 'equipment');
@@ -775,7 +807,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         };
       })
       .filter((item) => item.productId && targetSet.has(item.escaninhoId));
-  }, [allocations, buildScopedBackendAllocations, mapStructure, orderedEscaninhos, queueProductIds, selectedProduct]);
+  }, [allocations, buildScopedBackendAllocations, capQueueByRequiredBins, mapStructure, orderedEscaninhos, queueProductIds, selectedProduct]);
 
   const buildCollectBatch = useCallback((clickedEscaninhoId, scope) => {
     const parsed = parseEscId(clickedEscaninhoId);

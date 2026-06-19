@@ -58,12 +58,25 @@ def suggest_allocations(
         products_by_code[code] = _react_product_to_scoring(p)
 
     requested_counts = Counter(code for code in unallocated_codes if code in products_by_code)
+    allocated_counts = Counter(
+        str(code)
+        for alloc in allocations.values()
+        if isinstance(alloc, dict)
+        for code in (alloc.get("p1"), alloc.get("p2"))
+        if code
+    )
     products_to_allocate = []
     for code in unallocated_codes:
         if code not in requested_counts:
             continue
         product = dict(products_by_code[code])
-        product["escaninhos_necessarios"] = requested_counts[code]
+        required_from_product = max(1, int(product.get("escaninhos_necessarios") or 1))
+        remaining_required = max(0, required_from_product - allocated_counts.get(code, 0))
+        requested = min(requested_counts[code], remaining_required)
+        if requested <= 0:
+            del requested_counts[code]
+            continue
+        product["escaninhos_necessarios"] = requested
         products_to_allocate.append(product)
         del requested_counts[code]
 

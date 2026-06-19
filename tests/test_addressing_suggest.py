@@ -145,10 +145,43 @@ def test_suggest_allocations_treats_repeated_queue_codes_as_missing_instances():
     assert result["summary"]["total_requested"] == 7
 
 
+def test_suggest_allocations_caps_repeated_queue_codes_to_required_bins():
+    result = suggest_allocations(
+        unallocated_codes=["AGUA1"] * 20,
+        products_data=[_product("AGUA1", nome="Agua Mineral", escsNec=5, arm="geladeira")],
+        map_structure=_geladeira_map_structure(levels=5, escs_per_nivel=5),
+        allocations=_empty_allocations_grid(levels=5, escs_per_nivel=5),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 5
+    assert result["summary"]["total_requested"] == 5
+
+
+def test_suggest_allocations_caps_repeated_queue_codes_by_remaining_bins():
+    allocations = {
+        **_empty_allocations_grid(levels=5, escs_per_nivel=5),
+        "R1-E1-2-1": {"p1": "AGUA1", "p2": None},
+        "R1-E1-2-2": {"p1": "AGUA1", "p2": None},
+    }
+    result = suggest_allocations(
+        unallocated_codes=["AGUA1"] * 20,
+        products_data=[_product("AGUA1", nome="Agua Mineral", escsNec=5, arm="geladeira")],
+        map_structure=_geladeira_map_structure(levels=5, escs_per_nivel=5),
+        allocations=allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 3
+    assert result["summary"]["total_requested"] == 3
+
+
 def test_suggest_allocations_extends_existing_multibin_block_or_leaves_unallocated():
     result = suggest_allocations(
         unallocated_codes=["FLV1", "FLV1"],
-        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=2)],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=4)],
         map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
         allocations={
             **_empty_allocations_grid(levels=4, escs_per_nivel=5),
@@ -167,7 +200,7 @@ def test_suggest_allocations_extends_existing_multibin_block_or_leaves_unallocat
 def test_suggest_allocations_extends_existing_multibin_block_when_contiguous_space_exists():
     result = suggest_allocations(
         unallocated_codes=["FLV1"],
-        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=1)],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=3)],
         map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
         allocations={
             **_empty_allocations_grid(levels=4, escs_per_nivel=5),
@@ -186,7 +219,7 @@ def test_suggest_allocations_extends_existing_multibin_block_when_contiguous_spa
 def test_suggest_allocations_does_not_extend_flv_block_already_on_geladeira_wall():
     result = suggest_allocations(
         unallocated_codes=["FLV1"],
-        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=1)],
+        products_data=[_product("FLV1", nome="Salada Higienizada", grupo="FLV", arm="refrigerado", escsNec=3)],
         map_structure=_geladeira_map_structure(levels=4, escs_per_nivel=5),
         allocations={
             **_empty_allocations_grid(levels=4, escs_per_nivel=5),
