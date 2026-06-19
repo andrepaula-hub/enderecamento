@@ -162,12 +162,13 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={} }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
   const [hovHeader, setHovHeader] = useState(false);
   const cfg = EQUIP_CFG[eq.tipo]||EQUIP_CFG.prateleira;
+  const isTypePending = !!pendingEquipmentTypeChanges[eq.id];
   const isCard175 = !!eq.card175Only;
   const isDark = document.documentElement.getAttribute('data-dse-theme')==='dark';
   const hdrBg = isCard175
@@ -213,6 +214,9 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 
         <span style={{ fontSize:13, fontWeight:800, color:cfg.color, fontFamily:'var(--font-numeric)', letterSpacing:'0.05em', flexShrink:0 }}>{eq.id}</span>
         <span style={{ fontSize:10, fontWeight:700, color:cfg.color, background:`${cfg.borderColor}18`, padding:'1px 5px', borderRadius:10, flexShrink:0, lineHeight:1.8 }}>{cfg.label}</span>
+        {isTypePending && (
+          <span title="Tipo alterado localmente. Será gravado ao salvar a versão." style={{ fontSize:8, fontWeight:800, color:'#B87200', background:'rgba(245,156,0,0.18)', border:'1px solid rgba(245,156,0,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.05em' }}>PENDENTE</span>
+        )}
         {isCard175 && (
           <span title="Equipamento presente apenas no Card 175" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C175</span>
         )}
@@ -546,7 +550,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
               swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
               highlightProductId={highlightProductId} subcatFilters={subcatFilters}
-              escW={escWFixed}
+              escW={escWFixed} pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
             />
           ))}
         </div>
@@ -566,7 +570,7 @@ function StreetMI({ label, icon, onClick, danger }) {
 }
 
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
-function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[] }) {
+function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[], pendingEquipmentTypeChanges={} }) {
   const [tooltip, setTooltip] = useState(null);
   const [smartFillProgress, setSmartFillProgress] = useState(null);
   const containerRef = useRef(null);
@@ -657,13 +661,13 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       if (level === 1) return -99999;
     }
     // FLV em prateleira: bloqueia nível 1 e último nível
-    if ((product.grupo || '').toUpperCase() === 'FLV') {
+    if (isPrateleira && (product.grupo || '').toUpperCase() === 'FLV') {
       if (level === 1 || level === niveis) return -99999;
       score += 30;
     }
     if (isGeladeira && (product.grupo || '').toUpperCase() === 'FLV') {
       const { pos } = parseEscId(escaninhoId);
-      if (pos === 1 || pos === 5) return -99999;
+      if (pos === 1 || pos === eq.escsPerNivel) return -99999;
       score += 30;
     }
     const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');

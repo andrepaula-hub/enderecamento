@@ -238,6 +238,13 @@ function CategoryFilter({ subcatFilters, onChange }) {
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 const initMapStructure = JSON.parse(JSON.stringify(STREETS_STRUCTURE));
+function getInitialEquipType(equipId) {
+  for (const street of initMapStructure) {
+    const equip = (street.equipment || []).find(item=>item.id===equipId);
+    if (equip) return equip.tipo;
+  }
+  return null;
+}
 const initState = {
   view:'config', configOpen:false, selectedStore:null,
   allocations:{ ...INITIAL_ALLOCATIONS },
@@ -246,6 +253,7 @@ const initState = {
   selectedProduct:null, mode2aLeva:false, pranchetaOpen:true, openPanel:null,
   collected:[], unallocated:[...INITIAL_UNALLOCATED], searchQuery:'',
   mapStructure:initMapStructure, equipCollapsed:{}, streetCollapsed:{},
+  pendingEquipmentTypeChanges:{},
   pendingConfirm:null,
   swapSource:null,
   highlightProductId:null,
@@ -593,7 +601,14 @@ function reducer(state, action) {
     // ── Map structure mutations ──────────────────────────────────────────────
     case 'CHANGE_EQUIP_TYPE': {
       const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.map(eq=>eq.id===action.equipId?{...eq,tipo:action.tipo}:eq)}));
-      return {...state,mapStructure:ms};
+      const pending = { ...(state.pendingEquipmentTypeChanges || {}) };
+      const originalType = getInitialEquipType(action.equipId);
+      if (!action.tipo || action.tipo === originalType) delete pending[action.equipId];
+      else pending[action.equipId] = action.tipo;
+      return {...state,mapStructure:ms,pendingEquipmentTypeChanges:pending};
+    }
+    case 'CLEAR_PENDING_EQUIP_TYPE_CHANGES': {
+      return {...state,pendingEquipmentTypeChanges:{}};
     }
     case 'REMOVE_EQUIP': {
       const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.filter(eq=>eq.id!==action.equipId)}));
@@ -961,13 +976,26 @@ function App() {
 
   const handleSaveVersion = useCallback(async (name, setProgress, setStatus) => {
     const moves = diffMoves(state.allocations);
+    const equipmentTypeChanges = Object.entries(state.pendingEquipmentTypeChanges || {});
     if (moves.length > 0) {
       if (setStatus) setStatus('Salvando movimentos pendentes…');
-      setProgress(45);
+      setProgress(equipmentTypeChanges.length ? 35 : 45);
       const movesResponse = await API.saveBatchMovesAsync(moves, {});
       if (!movesResponse || !movesResponse.success) {
         throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
       }
+    }
+    if (equipmentTypeChanges.length > 0) {
+      for (let index = 0; index < equipmentTypeChanges.length; index += 1) {
+        const [equipId, newType] = equipmentTypeChanges[index];
+        if (setStatus) setStatus(`Atualizando tipo de ${equipId} na planilha…`);
+        setProgress(40 + Math.round(((index + 1) / equipmentTypeChanges.length) * 30));
+        const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, false);
+        if (!typeResponse || !typeResponse.success) {
+          throw new Error((typeResponse && typeResponse.error) || `Não foi possível alterar o tipo de ${equipId}.`);
+        }
+      }
+      dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
     }
     if (setStatus) setStatus('Criando aba da versão…');
     setProgress(80);
@@ -979,7 +1007,7 @@ function App() {
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
     return versionResponse;
-  }, [state.allocations, pendingFingerprint]);
+  }, [state.allocations, state.pendingEquipmentTypeChanges, pendingFingerprint]);
 
   return (
     <div data-dse-theme={tweaks.dark?'dark':'light'} style={{ height:'100vh', display:'flex', flexDirection:'column', background:'var(--app-bg)', fontFamily:'var(--font-sans)' }}>
@@ -1010,6 +1038,7 @@ function App() {
             swapSource={state.swapSource} onStartSwap={handleStartSwap} onCompleteSwap={handleCompleteSwap}
             onRecolherRua={handleRecolherRua} highlightProductId={state.highlightProductId}
             subcatFilters={state.subcatFilters} queueProductIds={visibleQueue.tab==='nao_alocados' ? visibleQueue.productIds : []}
+            pendingEquipmentTypeChanges={state.pendingEquipmentTypeChanges}
           />
 
           {state.pranchetaOpen&&(

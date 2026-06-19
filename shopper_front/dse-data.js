@@ -348,6 +348,7 @@
     importCard175Metabase: function (payload) { return postApi('importCard175Metabase', [payload]); },
     saveBatchMoves: function (moves, options) { return postApi('saveBatchMoves', [moves, options || {}]); },
     saveBatchMovesAsync: function (moves, options) { return postApiAsync('saveBatchMoves', [moves, options || {}]); },
+    changeEquipmentTypeAsync: function (equipId, newType, recolherProdutos) { return postApiAsync('changeEquipmentType', [equipId, newType, !!recolherProdutos]); },
     generateLayoutAtual: function () { return postApi('generateLayoutAtual', []); },
     generateKdabraSheet: function () { return postApi('generateKdabraSheet', []); },
     generateKdabraEnderecarSheet: function () { return postApi('generateKdabraEnderecarSheet', []); },

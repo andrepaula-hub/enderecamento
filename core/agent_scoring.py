@@ -47,6 +47,7 @@ class Slot:
     is_top_level: bool
     is_bottom_level: bool
     max_level: int | None = None
+    max_position: int | None = None
     occupant_count: int = 0
     occupant_codes: list[str] | None = None
     occupant_subcategories: set[str] | None = None
@@ -232,7 +233,12 @@ def _hard_rule_violations(
         if (peso > 2 or parse_bool_flag(product.get("is_pesado"))) and slot.is_top_level:
             reasons.append("Produto pesado no nivel de topo.")
     if _is_geladeira(slot):
-        if group == "flv" and slot.position in {1, 5}:
+        wall_positions = {1}
+        if slot.max_position and slot.max_position > 1:
+            wall_positions.add(slot.max_position)
+        elif slot.position == 5:
+            wall_positions.add(5)
+        if group == "flv" and slot.position in wall_positions:
             reasons.append("FLV em parede de geladeira.")
 
     if slot.occupant_count >= 2:
@@ -323,11 +329,19 @@ def _candidate_runs(
         equip_ids = {normalize_string(item.get("equip_id")) for item in existing_product_placements if normalize_string(item.get("equip_id"))}
         levels = {item.get("level") for item in existing_product_placements if item.get("level") is not None}
         positions = sorted(int(item.get("position")) for item in existing_product_placements if item.get("position") is not None)
+        max_positions = {int(item.get("max_position")) for item in existing_product_placements if item.get("max_position") is not None}
         if len(equip_ids) != 1 or len(levels) != 1 or len(positions) != len(existing_product_placements):
             return []
         if positions != list(range(positions[0], positions[0] + len(positions))):
             return []
-        if _group(product) == "flv" and _category_group(product) == "refrigerado" and any(pos in {1, 5} for pos in positions):
+        wall_positions = {1}
+        if len(max_positions) == 1:
+            max_position = next(iter(max_positions))
+            if max_position > 1:
+                wall_positions.add(max_position)
+        else:
+            wall_positions.add(5)
+        if _group(product) == "flv" and _category_group(product) == "refrigerado" and any(pos in wall_positions for pos in positions):
             return []
         target_equip = next(iter(equip_ids))
         target_level = next(iter(levels))
@@ -406,8 +420,14 @@ def _score_slot(product: dict[str, Any], slot: Slot, placement_index: dict[tuple
                 score += max(0, max_level - slot.level) * 12
         if parse_bool_flag(product.get("is_pequeno")) and slot.level is not None:
             score += slot.level * 6
-    if _is_geladeira(slot) and group == "flv" and slot.position is not None and slot.position not in {1, 5}:
-        score += 30
+    if _is_geladeira(slot) and group == "flv" and slot.position is not None:
+        wall_positions = {1}
+        if slot.max_position and slot.max_position > 1:
+            wall_positions.add(slot.max_position)
+        elif slot.position == 5:
+            wall_positions.add(5)
+        if slot.position not in wall_positions:
+            score += 30
     if slot.occupant_count == 0:
         score += 30
     else:
@@ -508,6 +528,7 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
         "equip_id": slot.equip_id,
         "level": slot.level,
         "position": slot.position,
+        "max_position": slot.max_position,
         "street_num": slot.street_num,
     }
 

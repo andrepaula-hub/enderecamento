@@ -215,6 +215,7 @@ def _slots_from_map(
                         is_top_level=(nivel == 1),
                         is_bottom_level=(nivel == niveis),
                         max_level=niveis,
+                        max_position=escs_per_nivel,
                         occupant_count=occupant_count,
                     ))
     return slots
@@ -241,6 +242,7 @@ def _slot_from_location_id(
         for equip in street.get("equipment", []):
             if str(equip.get("id") or "") == equip_id:
                 niveis = int(equip.get("niveis") or 5)
+                escs_per_nivel = int(equip.get("escsPerNivel") or 5)
                 cap = float(equip.get("cap") or 0)
                 tipo = str(equip.get("tipo") or "prateleira")
                 e_parts = equip_id.split("-")
@@ -268,6 +270,7 @@ def _slot_from_location_id(
                     is_top_level=(nivel == 1),
                     is_bottom_level=(nivel == niveis),
                     max_level=niveis,
+                    max_position=escs_per_nivel,
                     occupant_count=occupant_count,
                 )
     return None

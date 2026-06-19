@@ -120,6 +120,19 @@ def test_suggest_allocations_blocks_flv_on_geladeira_walls():
     }
 
 
+def test_suggest_allocations_blocks_flv_on_dynamic_geladeira_walls():
+    result = suggest_allocations(
+        unallocated_codes=["FLV1"],
+        products_data=[_product("FLV1", nome="Uva", grupo="FLV", arm="refrigerado")],
+        map_structure=_geladeira_map_structure(levels=2, escs_per_nivel=3),
+        allocations=_empty_allocations_grid(levels=2, escs_per_nivel=3),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] in {"R1-E1-1-2", "R1-E1-2-2"}
+
+
 def test_suggest_allocations_treats_repeated_queue_codes_as_missing_instances():
     result = suggest_allocations(
         unallocated_codes=["PAO1"] * 7,
