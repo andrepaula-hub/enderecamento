@@ -738,7 +738,8 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     })).filter((item) => !!item.productId);
   }, [allocations, capQueueByRequiredBins, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
 
-  const buildScopedBackendAllocations = useCallback((allowedTargetIds) => {
+  const buildScopedBackendAllocations = useCallback((allowedTargetIds, opts={}) => {
+    const allowSecondSlot = !!opts.allowSecondSlot;
     const allowed = new Set(allowedTargetIds || []);
     const scoped = {};
     mapStructure.forEach((street) => {
@@ -750,7 +751,10 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
             const p1 = current.p1 || null;
             const p2 = current.p2 || null;
             if (allowed.has(escaninhoId) || p1 || p2) {
-              scoped[escaninhoId] = { p1, p2 };
+              scoped[escaninhoId] = {
+                p1,
+                p2: allowSecondSlot && !allowed.has(escaninhoId) && p1 && !p2 ? '__BLOCKED__' : p2,
+              };
             } else {
               scoped[escaninhoId] = { p1: '__BLOCKED__', p2: null };
             }
@@ -761,13 +765,15 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     return scoped;
   }, [allocations, mapStructure]);
 
-  const handleSmartFill = useCallback(async (clickedEscaninhoId, scope) => {
+  const handleSmartFill = useCallback(async (clickedEscaninhoId, scope, opts={}) => {
+    const allowSecondSlot = !!opts.allowSecondSlot;
     const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
     if (selectedProduct || queue.length <= 1) return null;
     const parsed = parseEscId(clickedEscaninhoId);
     const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, scope || 'equipment');
     const targets = candidateIds.filter((escaninhoId) => {
       const alloc = allocations[escaninhoId] || {};
+      if (allowSecondSlot) return !!alloc.p1 && !alloc.p2;
       return !alloc.p1;
     });
     if (!targets.length) return [];
@@ -792,10 +798,10 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         unallocated_codes: unallocatedCodes,
         products_data: Object.values(PRODUCT_MAP),
         map_structure: mapStructure,
-        allocations: buildScopedBackendAllocations(targets),
+        allocations: buildScopedBackendAllocations(targets, { allowSecondSlot }),
         options: {
           allow_top_level: true,
-          allow_second_slot: false,
+          allow_second_slot: allowSecondSlot,
         },
       }),
     });
@@ -880,16 +886,17 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       return;
     }
     if (hasAllocationSource) {
-      if ((scope === 'equipment' || scope === 'level' || scope === 'street') && !wantsSecondSlot && !selectedProduct && (queueProductIds || []).length > 1) {
+      if ((scope === 'equipment' || scope === 'level' || scope === 'street') && !selectedProduct && (queueProductIds || []).length > 1) {
         try {
           const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : 'equipamento';
-          setSmartFillProgress({ label:`Calculando alocação da ${scopeLabel}…`, done:0, total:1, indeterminate:true });
-          const smartBatch = await handleSmartFill(escsId, scope);
+          const levaLabel = wantsSecondSlot ? '2ª leva da ' : '';
+          setSmartFillProgress({ label:`Calculando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:1, indeterminate:true });
+          const smartBatch = await handleSmartFill(escsId, scope, { allowSecondSlot:wantsSecondSlot });
           if (smartBatch && smartBatch.length) {
             if (typeof onAllocateManyProgressive === 'function') {
-              setSmartFillProgress({ label:`Aplicando alocação da ${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
+              setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
               await onAllocateManyProgressive(smartBatch, (done, total) => {
-                setSmartFillProgress({ label:`Aplicando alocação da ${scopeLabel}…`, done, total, indeterminate:false });
+                setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done, total, indeterminate:false });
               });
             } else {
               onAllocateMany(smartBatch);

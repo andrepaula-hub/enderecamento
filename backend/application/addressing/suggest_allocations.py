@@ -131,7 +131,8 @@ def suggest_allocations(
             continue
 
         for unit_idx, candidate in enumerate(candidates, start=1):
-            proposed.append({"escaninhoId": candidate.location_id, "productCode": code, "slot": 1})
+            target_slot = 2 if candidate.occupant_count == 1 else 1
+            proposed.append({"escaninhoId": candidate.location_id, "productCode": code, "slot": target_slot})
             reserved_locations.add(candidate.location_id)
             slot_ref = slots_by_location.get(candidate.location_id)
             if slot_ref:

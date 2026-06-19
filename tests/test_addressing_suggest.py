@@ -267,3 +267,16 @@ def test_suggest_allocations_does_not_extend_flv_block_already_on_geladeira_wall
     assert result["success"] is True
     assert result["moves"] == []
     assert result["unallocated"] == ["FLV1"]
+
+
+def test_suggest_allocations_returns_slot_2_when_second_slot_is_allowed():
+    result = suggest_allocations(
+        unallocated_codes=["NEW"],
+        products_data=[_product("NEW", sub="Outra")],
+        map_structure=_map_structure(levels=1),
+        allocations={"R1-E1-1-1": {"p1": "BASE", "p2": None}},
+        options={"allow_top_level": True, "allow_second_slot": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [{"escaninhoId": "R1-E1-1-1", "productCode": "NEW", "slot": 2}]
