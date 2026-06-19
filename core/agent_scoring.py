@@ -377,11 +377,74 @@ def _candidate_runs(
                     continue
             runs.append(candidate)
 
-    if runs or rules.require_multi_bin_same_level:
+    if runs:
         return runs
+    stacked_runs = _candidate_stacked_runs(empty_candidates, required)
+    if stacked_runs or rules.require_multi_bin_same_level:
+        return stacked_runs
 
     ordered_all = sorted(empty_candidates, key=lambda slot: (-_score_slot(product, slot, {}, {}), slot.equip_id, slot.level or 999, slot.position or 999))
     return [ordered_all[:required]] if len(ordered_all) >= required else []
+
+
+def _candidate_stacked_runs(empty_candidates: list[Slot], required: int) -> list[list[Slot]]:
+    """Fallback: compact block split across adjacent levels, aligned by position."""
+    if required <= 1:
+        return []
+    by_equip_level: dict[tuple[str, int], list[Slot]] = {}
+    for slot in empty_candidates:
+        if slot.level is None or slot.position is None:
+            continue
+        by_equip_level.setdefault((slot.equip_id, int(slot.level)), []).append(slot)
+
+    runs: list[list[Slot]] = []
+    equip_ids = {equip_id for equip_id, _ in by_equip_level}
+    for equip_id in equip_ids:
+        levels = sorted(level for current_equip, level in by_equip_level if current_equip == equip_id)
+        for level in levels:
+            primary = sorted(by_equip_level.get((equip_id, level), []), key=lambda slot: int(slot.position or 999))
+            contiguous_primary = _contiguous_slot_runs(primary)
+            for primary_run in contiguous_primary:
+                if len(primary_run) >= required:
+                    continue
+                remaining = required - len(primary_run)
+                primary_positions = {int(slot.position or 0) for slot in primary_run}
+                edge_positions = [min(primary_positions), max(primary_positions)]
+                for adjacent_level in (level - 1, level + 1):
+                    adjacent_slots = by_equip_level.get((equip_id, adjacent_level), [])
+                    aligned = [
+                        slot for slot in adjacent_slots
+                        if int(slot.position or 0) in primary_positions
+                    ]
+                    aligned_by_edge = sorted(
+                        aligned,
+                        key=lambda slot: (
+                            0 if int(slot.position or 0) in edge_positions else 1,
+                            abs(int(slot.position or 0) - min(edge_positions)),
+                        ),
+                    )
+                    if len(aligned_by_edge) >= remaining:
+                        runs.append(primary_run + aligned_by_edge[:remaining])
+    return runs
+
+
+def _contiguous_slot_runs(slots: list[Slot]) -> list[list[Slot]]:
+    ordered = sorted(slots, key=lambda slot: int(slot.position or 999))
+    runs: list[list[Slot]] = []
+    current: list[Slot] = []
+    previous_position: int | None = None
+    for slot in ordered:
+        position = int(slot.position or 0)
+        if previous_position is None or position == previous_position + 1:
+            current.append(slot)
+        else:
+            if current:
+                runs.append(current)
+            current = [slot]
+        previous_position = position
+    if current:
+        runs.append(current)
+    return runs
 
 
 def _score_run(product: dict[str, Any], run: list[Slot], placement_index: dict[tuple[str, str], list[dict[str, Any]]], curve_zone_map: dict[str, set[int]]) -> float:
@@ -397,6 +460,22 @@ def _score_run(product: dict[str, Any], run: list[Slot], placement_index: dict[t
     positions = sorted(slot.position for slot in run if slot.position is not None)
     if len(positions) == len(run) and positions == list(range(positions[0], positions[0] + len(run))):
         score += 400
+    if len(equips) == 1 and len(levels) == 2:
+        numeric_levels = sorted(int(level) for level in levels if level is not None)
+        if len(numeric_levels) == 2 and numeric_levels[1] == numeric_levels[0] + 1:
+            by_level: dict[int, list[int]] = {}
+            for slot in run:
+                if slot.level is None or slot.position is None:
+                    continue
+                by_level.setdefault(int(slot.level), []).append(int(slot.position))
+            level_positions = [sorted(values) for values in by_level.values()]
+            if len(level_positions) == 2:
+                larger = max(level_positions, key=len)
+                smaller = min(level_positions, key=len)
+                if set(smaller).issubset(set(larger)):
+                    score += 250
+                if smaller and larger and smaller[0] in {larger[0], larger[-1]}:
+                    score += 120
     return score
 
 

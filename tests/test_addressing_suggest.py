@@ -133,6 +133,28 @@ def test_suggest_allocations_blocks_flv_on_dynamic_geladeira_walls():
     assert result["moves"][0]["escaninhoId"] in {"R1-E1-1-2", "R1-E1-2-2"}
 
 
+def test_suggest_allocations_uses_aligned_stacked_fallback_when_same_level_does_not_fit():
+    result = suggest_allocations(
+        unallocated_codes=["FLV1"] * 4,
+        products_data=[_product("FLV1", nome="Alface", grupo="FLV", arm="refrigerado", escsNec=4)],
+        map_structure=_geladeira_map_structure(levels=2, escs_per_nivel=5),
+        allocations=_empty_allocations_grid(levels=2, escs_per_nivel=5),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 4
+    by_level = {}
+    for move in result["moves"]:
+        _, _, level, position = move["escaninhoId"].split("-")
+        by_level.setdefault(int(level), []).append(int(position))
+    assert sorted(len(positions) for positions in by_level.values()) == [1, 3]
+    larger = max((sorted(positions) for positions in by_level.values()), key=len)
+    smaller = min((sorted(positions) for positions in by_level.values()), key=len)
+    assert larger == [2, 3, 4]
+    assert smaller[0] in {2, 4}
+
+
 def test_suggest_allocations_treats_repeated_queue_codes_as_missing_instances():
     result = suggest_allocations(
         unallocated_codes=["PAO1"] * 7,

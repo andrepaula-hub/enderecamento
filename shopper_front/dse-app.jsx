@@ -605,7 +605,15 @@ function reducer(state, action) {
       const originalType = getInitialEquipType(action.equipId);
       if (!action.tipo || action.tipo === originalType) delete pending[action.equipId];
       else pending[action.equipId] = action.tipo;
-      return {...state,mapStructure:ms,pendingEquipmentTypeChanges:pending};
+      const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
+      return {
+        ...state,
+        mapStructure:ms,
+        allocations:result.allocations,
+        collected:result.collected,
+        selectedProduct:null,
+        pendingEquipmentTypeChanges:pending,
+      };
     }
     case 'CLEAR_PENDING_EQUIP_TYPE_CHANGES': {
       return {...state,pendingEquipmentTypeChanges:{}};
@@ -990,7 +998,7 @@ function App() {
         const [equipId, newType] = equipmentTypeChanges[index];
         if (setStatus) setStatus(`Atualizando tipo de ${equipId} na planilha…`);
         setProgress(40 + Math.round(((index + 1) / equipmentTypeChanges.length) * 30));
-        const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, false);
+        const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, true);
         if (!typeResponse || !typeResponse.success) {
           throw new Error((typeResponse && typeResponse.error) || `Não foi possível alterar o tipo de ${equipId}.`);
         }
