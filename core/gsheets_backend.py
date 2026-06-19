@@ -1898,6 +1898,10 @@ def change_equipment_type_gsheet(
 
     if rua_col == -1 or equip_col == -1 or loc_col == -1 or product_col == -1 or tipo_col == -1:
         return {"success": False, "error": "Colunas essenciais não encontradas no Plano_Enderecamento_Final."}
+    if tipo_final_col == -1:
+        return {"success": False, "error": "Coluna tipo_equipamento_final não encontrada no Plano_Enderecamento_Final."}
+    if capacidade_col == -1:
+        return {"success": False, "error": "Coluna capacidade_l não encontrada no Plano_Enderecamento_Final."}
 
     rua_num, equip_num = _parse_equip_numbers(equip_id)
     if rua_num is None or equip_num is None:
@@ -1960,6 +1964,27 @@ def change_equipment_type_gsheet(
             )
         else:
             product_by_slot[(nivel_old, pos_old)] = {"code": produto, "name": product_name, "row": row_data[:]}
+
+    cadastro_values = client.read_values(SHEET_CADASTRO_NOVO)
+    if not cadastro_values:
+        return {"success": False, "error": "Aba Cadastro_Equipamentos não encontrada ou vazia."}
+    cad_headers = [str(h).strip() if h is not None else "" for h in cadastro_values[0]]
+    cad_rows = [row + [None] * (len(cad_headers) - len(row)) for row in cadastro_values[1:]]
+    cad_rua = _find_header_index(cad_headers, "rua_num")
+    cad_equip = _find_header_index(cad_headers, "equipamento_num")
+    cad_tipo = _find_header_index(cad_headers, "tipo_equipamento")
+    if cad_rua < 0 or cad_equip < 0 or cad_tipo < 0:
+        return {"success": False, "error": "Cadastro_Equipamentos precisa de rua_num, equipamento_num e tipo_equipamento."}
+    cad_updates: dict[int, list[Any]] = {}
+    for idx, row in enumerate(cad_rows, start=2):
+        if int(to_float(row[cad_rua] if cad_rua < len(row) else 0)) == rua_num and int(
+            to_float(row[cad_equip] if cad_equip < len(row) else 0)
+        ) == equip_num:
+            new_row = row[:]
+            new_row[cad_tipo] = new_type
+            cad_updates[idx] = new_row
+    if not cad_updates:
+        return {"success": False, "error": f"Equipamento {equip_id} não encontrado no Cadastro_Equipamentos."}
 
     # Delete ALL old bins so we can regenerate from scratch with correct structure.
     rows_to_delete = [item["row_number"] for item in equip_rows]
@@ -2030,24 +2055,7 @@ def change_equipment_type_gsheet(
     if new_rows:
         client.append_rows(SHEET_PLANO_FINAL, new_rows)
 
-    cadastro_values = client.read_values(SHEET_CADASTRO_NOVO)
-    if cadastro_values:
-        cad_headers = [str(h).strip() if h is not None else "" for h in cadastro_values[0]]
-        cad_rows = [row + [None] * (len(cad_headers) - len(row)) for row in cadastro_values[1:]]
-        cad_rua = _find_header_index(cad_headers, "rua_num")
-        cad_equip = _find_header_index(cad_headers, "equipamento_num")
-        cad_tipo = _find_header_index(cad_headers, "tipo_equipamento")
-        if cad_rua >= 0 and cad_equip >= 0 and cad_tipo >= 0:
-            cad_updates: dict[int, list[Any]] = {}
-            for idx, row in enumerate(cad_rows, start=2):
-                if int(to_float(row[cad_rua] if cad_rua < len(row) else 0)) == rua_num and int(
-                    to_float(row[cad_equip] if cad_equip < len(row) else 0)
-                ) == equip_num:
-                    new_row = row[:]
-                    new_row[cad_tipo] = new_type
-                    cad_updates[idx] = new_row
-            if cad_updates:
-                client.update_rows(SHEET_CADASTRO_NOVO, cad_updates, len(cad_headers))
+    client.update_rows(SHEET_CADASTRO_NOVO, cad_updates, len(cad_headers))
 
     if logs:
         client.ensure_sheet(SHEET_LOG_REEND)
@@ -2055,7 +2063,146 @@ def change_equipment_type_gsheet(
         log_rows = [_build_log_row(log_headers, entry) for entry in logs]
         client.append_rows(SHEET_LOG_REEND, log_rows)
 
-    return {"success": True, "message": f'Tipo do equipamento {equip_id} alterado para "{new_type}".'}
+    verification_errors: list[str] = []
+    verification_details: dict[str, Any] = {}
+    for attempt in range(4):
+        if attempt:
+            time.sleep(0.75)
+        verification_errors, verification_details = _verify_equipment_type_change_gsheet(
+            client=client,
+            equip_id=equip_id,
+            rua_num=rua_num,
+            equip_num=equip_num,
+            new_type=new_type,
+            expected_slots=total_novo,
+            expected_capacidade_l=capacidade_real,
+            recolher_produtos=recolher_produtos,
+        )
+        if not verification_errors:
+            return {
+                "success": True,
+                "message": f'Tipo do equipamento {equip_id} alterado para "{new_type}".',
+                "verification": verification_details,
+            }
+
+    return {
+        "success": False,
+        "error": (
+            f'Tipo do equipamento {equip_id} não foi confirmado na planilha: '
+            + "; ".join(verification_errors)
+        ),
+        "verification": verification_details,
+    }
+
+
+def _verify_equipment_type_change_gsheet(
+    *,
+    client: GSheetsClient,
+    equip_id: str,
+    rua_num: int,
+    equip_num: int,
+    new_type: str,
+    expected_slots: int,
+    expected_capacidade_l: float,
+    recolher_produtos: bool,
+) -> tuple[list[str], dict[str, Any]]:
+    errors: list[str] = []
+    details: dict[str, Any] = {"equip_id": equip_id, "expected_type": new_type}
+    target_type = _normalize_text(new_type)
+
+    plano_values = client.read_values(SHEET_PLANO_FINAL)
+    if not plano_values:
+        return ["Plano_Enderecamento_Final vazia após alteração."], details
+    headers = [str(h).strip() if h is not None else "" for h in plano_values[0]]
+    rows = [row + [None] * (len(headers) - len(row)) for row in plano_values[1:]]
+
+    rua_col = _find_header_index(headers, "rua_num")
+    equip_col = _find_header_index(headers, "equipamento_num")
+    tipo_col = _find_header_index(headers, "tipo_equipamento")
+    tipo_final_col = _find_header_index(headers, "tipo_equipamento_final")
+    capacidade_col = _find_header_index(headers, "capacidade_l")
+    product_col = _find_header_index(headers, "product_code")
+    if min(rua_col, equip_col, tipo_col, tipo_final_col, capacidade_col, product_col) < 0:
+        return ["Plano_Enderecamento_Final sem colunas obrigatórias após alteração."], details
+
+    def to_float_safe(value: Any) -> float:
+        try:
+            return float(str(value).replace(",", "."))
+        except Exception:
+            return 0.0
+
+    matching_rows = []
+    for row in rows:
+        if int(to_float_safe(row[rua_col] if rua_col < len(row) else 0)) == rua_num and int(
+            to_float_safe(row[equip_col] if equip_col < len(row) else 0)
+        ) == equip_num:
+            matching_rows.append(row)
+
+    details["plano_slots"] = len(matching_rows)
+    if len(matching_rows) != expected_slots:
+        errors.append(f"Plano_Enderecamento_Final tem {len(matching_rows)} slot(s), esperado {expected_slots}")
+
+    bad_type = [
+        row
+        for row in matching_rows
+        if _normalize_text(row[tipo_col] if tipo_col < len(row) else "") != target_type
+        or _normalize_text(row[tipo_final_col] if tipo_final_col < len(row) else "") != target_type
+    ]
+    details["plano_bad_type_rows"] = len(bad_type)
+    if bad_type:
+        errors.append(f"{len(bad_type)} slot(s) sem tipo_equipamento/tipo_equipamento_final = {new_type}")
+
+    bad_capacity = [
+        row
+        for row in matching_rows
+        if abs(to_float_safe(row[capacidade_col] if capacidade_col < len(row) else 0) - expected_capacidade_l) > 0.0001
+    ]
+    details["plano_bad_capacity_rows"] = len(bad_capacity)
+    if bad_capacity:
+        errors.append(f"{len(bad_capacity)} slot(s) sem capacidade_l recalculada")
+
+    if recolher_produtos:
+        occupied = [
+            row
+            for row in matching_rows
+            if normalize_string(row[product_col] if product_col < len(row) else "").strip()
+            and normalize_string(row[product_col] if product_col < len(row) else "").strip() != "Vazio"
+        ]
+        details["plano_occupied_rows"] = len(occupied)
+        if occupied:
+            errors.append(f"{len(occupied)} slot(s) ainda possuem produto após recolher")
+
+    cadastro_values = client.read_values(SHEET_CADASTRO_NOVO)
+    if not cadastro_values:
+        errors.append("Cadastro_Equipamentos vazio após alteração")
+        return errors, details
+    cad_headers = [str(h).strip() if h is not None else "" for h in cadastro_values[0]]
+    cad_rows = [row + [None] * (len(cad_headers) - len(row)) for row in cadastro_values[1:]]
+    cad_rua = _find_header_index(cad_headers, "rua_num")
+    cad_equip = _find_header_index(cad_headers, "equipamento_num")
+    cad_tipo = _find_header_index(cad_headers, "tipo_equipamento")
+    if min(cad_rua, cad_equip, cad_tipo) < 0:
+        errors.append("Cadastro_Equipamentos sem colunas obrigatórias após alteração")
+        return errors, details
+
+    cad_matches = [
+        row
+        for row in cad_rows
+        if int(to_float_safe(row[cad_rua] if cad_rua < len(row) else 0)) == rua_num
+        and int(to_float_safe(row[cad_equip] if cad_equip < len(row) else 0)) == equip_num
+    ]
+    details["cadastro_matches"] = len(cad_matches)
+    if not cad_matches:
+        errors.append("equipamento não encontrado no Cadastro_Equipamentos após alteração")
+    else:
+        bad_cadastro = [
+            row for row in cad_matches if _normalize_text(row[cad_tipo] if cad_tipo < len(row) else "") != target_type
+        ]
+        details["cadastro_bad_type_rows"] = len(bad_cadastro)
+        if bad_cadastro:
+            errors.append(f"{len(bad_cadastro)} linha(s) do Cadastro_Equipamentos sem tipo_equipamento = {new_type}")
+
+    return errors, details
 
 
 def _empty_row_for_headers(headers: list[str]) -> list[Any]:
