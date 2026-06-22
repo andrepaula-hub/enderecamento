@@ -323,7 +323,10 @@ def _candidate_runs(
     rules: AgentRules,
     existing_product_placements: list[dict[str, Any]] | None = None,
 ) -> list[list[Slot]]:
-    empty_candidates = [slot for slot in candidates if slot.occupant_count == 0]
+    allocatable_candidates = [
+        slot for slot in candidates
+        if slot.occupant_count == 0 or rules.allow_second_slot
+    ]
     existing_product_placements = list(existing_product_placements or [])
     if existing_product_placements:
         equip_ids = {normalize_string(item.get("equip_id")) for item in existing_product_placements if normalize_string(item.get("equip_id"))}
@@ -346,7 +349,7 @@ def _candidate_runs(
         target_equip = next(iter(equip_ids))
         target_level = next(iter(levels))
         matching = [
-            slot for slot in empty_candidates
+            slot for slot in allocatable_candidates
             if normalize_string(slot.equip_id) == target_equip and slot.level == target_level
         ]
         ordered = sorted(matching, key=lambda slot: slot.position if slot.position is not None else 999)
@@ -363,7 +366,7 @@ def _candidate_runs(
 
     runs: list[list[Slot]] = []
     by_level: dict[tuple[str, int | None], list[Slot]] = {}
-    for slot in empty_candidates:
+    for slot in allocatable_candidates:
         by_level.setdefault((slot.equip_id, slot.level), []).append(slot)
 
     for (_, _), slots_same_level in by_level.items():
@@ -379,11 +382,11 @@ def _candidate_runs(
 
     if runs:
         return runs
-    stacked_runs = _candidate_stacked_runs(empty_candidates, required)
+    stacked_runs = _candidate_stacked_runs(allocatable_candidates, required)
     if stacked_runs or rules.require_multi_bin_same_level:
         return stacked_runs
 
-    ordered_all = sorted(empty_candidates, key=lambda slot: (-_score_slot(product, slot, {}, {}), slot.equip_id, slot.level or 999, slot.position or 999))
+    ordered_all = sorted(allocatable_candidates, key=lambda slot: (-_score_slot(product, slot, {}, {}), slot.equip_id, slot.level or 999, slot.position or 999))
     return [ordered_all[:required]] if len(ordered_all) >= required else []
 
 

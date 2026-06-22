@@ -22,6 +22,8 @@ from core.agent_scoring import (
 )
 from core.utils import normalize_string
 
+BLOCKED_SLOT_CODE = "__BLOCKED__"
+
 
 def suggest_allocations(
     unallocated_codes: list[str],
@@ -63,7 +65,7 @@ def suggest_allocations(
         for alloc in allocations.values()
         if isinstance(alloc, dict)
         for code in (alloc.get("p1"), alloc.get("p2"))
-        if code
+        if code and code != BLOCKED_SLOT_CODE
     )
     products_to_allocate = []
     for code in unallocated_codes:
@@ -203,7 +205,7 @@ def _slots_from_map(
                     alloc = allocations.get(loc_id) or {}
                     p1 = alloc.get("p1") if isinstance(alloc, dict) else None
                     p2 = alloc.get("p2") if isinstance(alloc, dict) else None
-                    occupant_count = (1 if p1 else 0) + (1 if p2 else 0)
+                    occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else (1 if p1 else 0) + (1 if p2 else 0)
                     slots.append(Slot(
                         location_id=loc_id,
                         equip_id=equip_id,
@@ -258,7 +260,7 @@ def _slot_from_location_id(
                 alloc = allocations.get(loc_id) or {}
                 p1 = alloc.get("p1") if isinstance(alloc, dict) else None
                 p2 = alloc.get("p2") if isinstance(alloc, dict) else None
-                occupant_count = (1 if p1 else 0) + (1 if p2 else 0)
+                occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else (1 if p1 else 0) + (1 if p2 else 0)
                 return Slot(
                     location_id=loc_id,
                     equip_id=equip_id,

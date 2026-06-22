@@ -280,3 +280,53 @@ def test_suggest_allocations_returns_slot_2_when_second_slot_is_allowed():
 
     assert result["success"] is True
     assert result["moves"] == [{"escaninhoId": "R1-E1-1-1", "productCode": "NEW", "slot": 2}]
+
+
+def test_suggest_allocations_treats_scoped_blocked_slots_as_unavailable_for_second_slot():
+    result = suggest_allocations(
+        unallocated_codes=["NEW"],
+        products_data=[_product("NEW", sub="Outra")],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 2, "cap": 100},
+                ],
+            },
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": "BASE", "p2": None},
+            "R1-E1-1-2": {"p1": "__BLOCKED__", "p2": None},
+        },
+        options={"allow_top_level": True, "allow_second_slot": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [{"escaninhoId": "R1-E1-1-1", "productCode": "NEW", "slot": 2}]
+
+
+def test_suggest_allocations_places_multibin_products_in_second_slot_scope():
+    result = suggest_allocations(
+        unallocated_codes=["LIMPOL", "LIMPOL"],
+        products_data=[_product("LIMPOL", sub="Detergentes e Lava Louças", escsNec=2)],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 3, "cap": 100},
+                ],
+            },
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": "BASE1", "p2": None},
+            "R1-E1-1-2": {"p1": "BASE2", "p2": None},
+            "R1-E1-1-3": {"p1": "__BLOCKED__", "p2": None},
+        },
+        options={"allow_top_level": True, "allow_second_slot": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-1-1", "productCode": "LIMPOL", "slot": 2},
+        {"escaninhoId": "R1-E1-1-2", "productCode": "LIMPOL", "slot": 2},
+    ]
