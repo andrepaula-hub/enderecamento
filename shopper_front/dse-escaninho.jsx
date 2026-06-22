@@ -224,6 +224,8 @@ function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMou
     const gs = GROUP_STYLE[p.grupo] || GROUP_STYLE.Neutro;
     const cc = CURVA_COLOR[p.curva] || '#94A3B8';
     const flags = getFlags(p);
+    const volumePerBin = Math.max(0, (Number(p.vol) || 0) * (Number(p.qtd) || 1) / Math.max(1, Number(p.escsNec) || 1));
+    const volumePerBinLabel = `${Number(volumePerBin.toFixed(3))} L`;
     return (
       <div style={{ marginBottom: product2 ? 12 : 0 }}>
         {label && <div style={{ fontSize:9, fontWeight:700, color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>{label}</div>}
@@ -244,7 +246,7 @@ function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMou
             ['Método', p.metodo],
             ['Altura', `${p.altura} cm`],
             ['Peso', `${p.peso} kg`],
-            ['Vol. unitário', `${p.vol} L`],
+            ['Vol. escaninho', volumePerBinLabel],
             ['Degelo', p.degelo],
             ['Escs. necessários', p.escsNec],
           ].map(([k, v]) => (

@@ -31,7 +31,7 @@ class AgentRules:
     egg_max_level: int = 4
     flv_blocked_prateleira_levels: tuple[int, ...] = (1, 5)
     require_multi_bin_same_level: bool = True
-    second_slot_max_used_capacity_ratio: float = 0.55
+    second_slot_max_used_capacity_ratio: float = 1.0
 
 
 @dataclass
@@ -121,7 +121,8 @@ def _required_volume_l(row: dict[str, Any]) -> float:
             pass
     quantity = parse_number(row.get("quantidade")) or 1
     unit = parse_number(row.get("vol_L_unitario") or row.get("vol_l_unitario")) or 0
-    return max(0.0, float(quantity) * float(unit))
+    bins = max(1, _required_bins(row))
+    return max(0.0, float(quantity) * float(unit) / bins)
 
 
 # ── construção de slots ───────────────────────────────────────────────────────

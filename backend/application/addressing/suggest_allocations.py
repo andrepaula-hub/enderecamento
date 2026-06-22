@@ -18,6 +18,7 @@ from core.agent_scoring import (
     _normalize_text,
     _pick_slots_for_product,
     _placement_for_slot,
+    _required_volume_l,
     _sort_products_for_allocation,
 )
 from core.utils import normalize_string
@@ -73,6 +74,7 @@ def suggest_allocations(
             continue
         product = dict(products_by_code[code])
         required_from_product = max(1, int(product.get("escaninhos_necessarios") or 1))
+        product["_required_volume_l"] = _required_volume_l(product)
         remaining_required = max(0, required_from_product - allocated_counts.get(code, 0))
         requested = min(requested_counts[code], remaining_required)
         if requested <= 0:
@@ -83,7 +85,7 @@ def suggest_allocations(
         del requested_counts[code]
 
     # Build slots from map_structure + current allocations
-    slots = _slots_from_map(map_structure, allocations, allow_second_slot)
+    slots = _slots_from_map(map_structure, allocations, allow_second_slot, products_by_code)
 
     # Build placement index from already-allocated products (for adjacency penalty)
     existing_placements: list[dict[str, Any]] = []
@@ -179,6 +181,7 @@ def _slots_from_map(
     map_structure: list[dict[str, Any]],
     allocations: dict[str, dict[str, str | None]],
     allow_second_slot: bool,
+    products_by_code: dict[str, dict[str, Any]],
 ) -> list[Slot]:
     slots: list[Slot] = []
     for street in map_structure:
@@ -205,7 +208,18 @@ def _slots_from_map(
                     alloc = allocations.get(loc_id) or {}
                     p1 = alloc.get("p1") if isinstance(alloc, dict) else None
                     p2 = alloc.get("p2") if isinstance(alloc, dict) else None
-                    occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else (1 if p1 else 0) + (1 if p2 else 0)
+                    real_codes = [str(code) for code in (p1, p2) if code and code != BLOCKED_SLOT_CODE]
+                    occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else len(real_codes)
+                    occupant_subcategories = {
+                        _normalize_text(products_by_code[code].get("subcategoria"))
+                        for code in real_codes
+                        if code in products_by_code and _normalize_text(products_by_code[code].get("subcategoria"))
+                    }
+                    occupant_volume_l = sum(
+                        _required_volume_l(products_by_code[code])
+                        for code in real_codes
+                        if code in products_by_code
+                    )
                     slots.append(Slot(
                         location_id=loc_id,
                         equip_id=equip_id,
@@ -220,6 +234,9 @@ def _slots_from_map(
                         max_level=niveis,
                         max_position=escs_per_nivel,
                         occupant_count=occupant_count,
+                        occupant_codes=real_codes,
+                        occupant_subcategories=occupant_subcategories,
+                        occupant_volume_l=occupant_volume_l,
                     ))
     return slots
 

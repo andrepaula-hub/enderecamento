@@ -330,3 +330,59 @@ def test_suggest_allocations_places_multibin_products_in_second_slot_scope():
         {"escaninhoId": "R1-E1-1-1", "productCode": "LIMPOL", "slot": 2},
         {"escaninhoId": "R1-E1-1-2", "productCode": "LIMPOL", "slot": 2},
     ]
+
+
+def test_suggest_allocations_second_slot_uses_full_capacity_with_volume_per_bin():
+    result = suggest_allocations(
+        unallocated_codes=["LIMPOL", "LIMPOL"],
+        products_data=[
+            _product("BASE", sub="Outra", vol=10, qtd=1, escsNec=1),
+            _product("LIMPOL", sub="Detergentes e Lava Louças", vol=0.9, qtd=30, escsNec=2),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 2, "cap": 25.92},
+                ],
+            },
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": "BASE", "p2": None},
+            "R1-E1-1-2": {"p1": "BASE", "p2": None},
+        },
+        options={"allow_top_level": True, "allow_second_slot": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-1-1", "productCode": "LIMPOL", "slot": 2},
+        {"escaninhoId": "R1-E1-1-2", "productCode": "LIMPOL", "slot": 2},
+    ]
+
+
+def test_suggest_allocations_second_slot_blocks_when_combined_volume_exceeds_capacity():
+    result = suggest_allocations(
+        unallocated_codes=["LIMPOL", "LIMPOL"],
+        products_data=[
+            _product("BASE", sub="Outra", vol=20, qtd=1, escsNec=1),
+            _product("LIMPOL", sub="Detergentes e Lava Louças", vol=0.9, qtd=30, escsNec=2),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 2, "cap": 25.92},
+                ],
+            },
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": "BASE", "p2": None},
+            "R1-E1-1-2": {"p1": "BASE", "p2": None},
+        },
+        options={"allow_top_level": True, "allow_second_slot": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["unallocated"] == ["LIMPOL"]
