@@ -182,7 +182,16 @@ class GSheetsClient:
         if name in self._sheet_map:
             return
         body = {"requests": [{"addSheet": {"properties": {"title": name}}}]}
-        self._execute(self._sheets.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body))
+        try:
+            self._execute(self._sheets.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body))
+        except HttpError as exc:
+            message = str(exc)
+            if "already exists" not in message and "Já existe uma página" not in message:
+                raise
+            self._metadata = None
+            self._load_metadata()
+            if name not in self._sheet_map:
+                raise
         self._metadata = None
 
     def clear_sheet(self, name: str) -> None:

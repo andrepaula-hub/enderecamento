@@ -716,7 +716,7 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
     logs: list[dict[str, Any]] = []
     missing_targets: list[str] = []
     full_targets: list[str] = []
-    missing_sources: list[str] = []
+    skipped_missing_sources: list[str] = []
     data, hora = _get_log_datetime()
     prepared_moves: list[dict[str, Any]] = []
 
@@ -742,9 +742,9 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
         if clean_anterior and loc_anterior not in {PRANCHETA_ID, UNALLOCATED_ID}:
             src_row_num = _find_source_row(clean_anterior, product_code)
             if not src_row_num:
-                missing_sources.append(f"{clean_anterior}:{product_code}")
-                continue
-            affected_locations.add(clean_anterior)
+                skipped_missing_sources.append(f"{clean_anterior}:{product_code}")
+            else:
+                affected_locations.add(clean_anterior)
 
         prepared_moves.append(
             {
@@ -838,15 +838,6 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
             "error": f"Destino(s) não encontrado(s) no Plano_Enderecamento_Final: {preview}{suffix}",
             "missingTargets": missing_unique,
         }
-    if missing_sources:
-        missing_source_unique = sorted(set(missing_sources))
-        preview = ", ".join(missing_source_unique[:5])
-        suffix = "..." if len(missing_source_unique) > 5 else ""
-        return {
-            "success": False,
-            "error": f"Origem(ns) não encontrada(s) para limpar no Plano_Enderecamento_Final: {preview}{suffix}",
-            "missingSources": missing_source_unique,
-        }
     if full_targets and not skip_full:
         full_unique = sorted(set(full_targets))
         preview = ", ".join(full_unique[:5])
@@ -908,6 +899,8 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
     }
     if full_targets and skip_full:
         result["skippedFullTargets"] = sorted(set(full_targets))
+    if skipped_missing_sources:
+        result["skippedMissingSources"] = sorted(set(skipped_missing_sources))
     return result
 
 

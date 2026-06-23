@@ -100,7 +100,7 @@ def test_initial_data_serializes_unallocated_by_instance_id(monkeypatch):
     assert len(serialized) == 2
 
 
-def test_save_batch_moves_requires_exact_source_row(monkeypatch):
+def test_save_batch_moves_skips_missing_source_row(monkeypatch):
     values = [
         ["location_id", "product_code", "product_name"],
         ["LJ-R1-001-1A", "SKU_OK", "Produto ok"],
@@ -123,10 +123,9 @@ def test_save_batch_moves_requires_exact_source_row(monkeypatch):
         ],
     )
 
-    assert result["success"] is False
-    assert "missingSources" in result
-    assert result["missingSources"] == ["LJ-R1-001-1A:SKU_INEXISTENTE"]
-    assert fake.updated_rows is None
+    assert result["success"] is True
+    assert result["skippedMissingSources"] == ["LJ-R1-001-1A:SKU_INEXISTENTE"]
+    assert fake.updated_rows[1][4][1] == "SKU_INEXISTENTE"
     assert fake.appended_rows is None
 
 
