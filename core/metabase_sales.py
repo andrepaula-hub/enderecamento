@@ -75,9 +75,9 @@ STORE_KEYWORDS_BY_ID = {
     "vilaOlimpia": ["vila olimpia"],
 }
 
-CARD175_CARD_ID = 175
+CARD175_CARD_ID = 788
 CARD175_STORE_CODE_BY_ID = {
-    "pamplona": "LJ060001",
+    "pamplona": "6",
     "pinheiros": "LJ090001",
     "higienopolis": "LJ100001",
     "vilaOlimpia": "LJ110001",

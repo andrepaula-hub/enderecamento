@@ -1,4 +1,4 @@
-// DSE Config Panel — Fluxo 1 (nova loja) + Fluxo 2 (Card 175) + logs
+// DSE Config Panel — Fluxo 1 (nova loja) + Fluxo 2 (Card 788) + logs
 const { useState, useEffect, useRef } = React;
 const { STORES, METABASE_SALES } = window.DSEData;
 
@@ -544,22 +544,23 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
 
   const handleImportCard175 = async () => {
     setRunning('c175');
-    setProgress({ val:35, label:'Importando Card 175…' });
-    addLog('Importando Card 175…', 'info');
+    setProgress({ val:35, label:'Importando Card 788…' });
+    addLog('Importando Card 788…', 'info');
     await new Promise(r => setTimeout(r, 0));
     try {
       const selected = STORES.find(s => s.id === loja);
       const response = window.DSEApi.importCard175Metabase({
         sheet_link: links.mapaEq,
-        store_code: loja,
-        galpao: selected ? selected.codigo : '',
+        card_id: 788,
+        store_code: selected ? selected.codigo : loja,
+        galpao: loja,
       });
       if (response && response.success) {
         setProgress({ val:100, label:'Plano inicial criado.' });
-        addLog(`Importação do Card 175 concluída. ${response.rows_fetched_raw || 0} linhas lidas.`, 'success');
-        setStatusMsg('Importação do Card 175 concluída.', 'success');
+        addLog(`Importação do Card 788 concluída. ${response.rows_fetched_raw || 0} linhas lidas.`, 'success');
+        setStatusMsg('Importação do Card 788 concluída.', 'success');
       } else {
-        throw new Error((response && response.error) || 'Falha ao importar Card 175.');
+        throw new Error((response && response.error) || 'Falha ao importar Card 788.');
       }
     } catch (err) {
       addLog(String(err), 'error');
@@ -582,7 +583,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         <div>
           <div style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Fluxo de trabalho</div>
           <div style={{ display:'flex', gap:6 }}>
-            {[['1','Endereçar nova loja'],['2','Reendereçar (Card 175)']].map(([v,label]) => (
+            {[['1','Endereçar nova loja'],['2','Reendereçar (Card 788)']].map(([v,label]) => (
               <button key={v} onClick={() => setFlow(+v)}
                 style={{ flex:1, padding:'8px 10px', fontSize:11, fontWeight:700, borderRadius:6, cursor:'pointer', textAlign:'left',
                   border: flow === +v ? '1px solid var(--shopper-green)' : '1px solid var(--cfg-border)',
@@ -622,7 +623,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
               <CfgBtn label="Rodar ETL" primary onClick={handleETL} loading={running==='etl'} disabled={!!running && running!=='etl'} />
               <CfgBtn label="Gerar escaninhos" onClick={handleEscaninhos} loading={running==='escs'} disabled={!!running && running!=='escs'} />
             </>}
-            {flow === 2 && <CfgBtn label="Importar Card 175" primary onClick={handleImportCard175} loading={running==='c175'} disabled={!!running && running!=='c175'} />}
+            {flow === 2 && <CfgBtn label="Importar Card 788" primary onClick={handleImportCard175} loading={running==='c175'} disabled={!!running && running!=='c175'} />}
           </div>
         </div>
 

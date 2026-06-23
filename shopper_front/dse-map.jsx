@@ -227,7 +227,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
           <span title="Tipo alterado localmente. Será gravado ao salvar a versão." style={{ fontSize:8, fontWeight:800, color:'#B87200', background:'rgba(245,156,0,0.18)', border:'1px solid rgba(245,156,0,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.05em' }}>PENDENTE</span>
         )}
         {isCard175 && (
-          <span title="Equipamento presente apenas no Card 175" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C175</span>
+          <span title="Equipamento presente apenas no Card 788" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C788</span>
         )}
 
         {/* Swap indicator */}

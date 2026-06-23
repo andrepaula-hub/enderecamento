@@ -179,7 +179,12 @@ def _normalize_card175_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, An
             found_code_column = True
         else:
             continue
-        id_local = normalize_string(row_norm.get("id_localizacao"))
+        id_local = normalize_string(
+            row_norm.get("id_localizacao")
+            or row_norm.get("endereco_generated")
+            or row_norm.get("endereco")
+            or row_norm.get("location_id")
+        )
         galpao = normalize_string(row_norm.get("galpao"))
         rua = normalize_string(row_norm.get("rua"))
         pos = normalize_string(
@@ -215,7 +220,7 @@ def _normalize_card175_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, An
             }
         aggregated[key]["quantidade"] += qty
     if not found_code_column:
-        raise ValueError("Card 175 não possui coluna de código do produto (cod_produto).")
+        raise ValueError("Card 788 não possui coluna de código do produto (cod_produto).")
     return list(aggregated.values())
 
 
@@ -797,5 +802,5 @@ def import_card175_rows(
 ) -> dict[str, Any]:
     normalized_rows = _normalize_card175_rows(rows)
     if not normalized_rows:
-        return {"success": False, "error": "Card 175 sem linhas válidas."}
+        return {"success": False, "error": "Card 788 sem linhas válidas."}
     return _import_card175_normalized_rows(sheet_id, normalized_rows, source_name, user=user, master_sheet_id=master_sheet_id)

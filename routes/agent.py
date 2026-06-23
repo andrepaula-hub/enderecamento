@@ -1,4 +1,4 @@
-"""Rotas do agente de endereçamento automático e importação Card 175."""
+"""Rotas do agente de endereçamento automático e importação do card de estoque."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -14,7 +14,6 @@ from core.agent_tools import (
     infer_store_context,
     validate_plan,
 )
-from core.apps_script_client import call_apps_script_webapp_action
 from core.card175_snapshot import import_card175_rows, import_card175_snapshot
 from core.enrichment_pipeline import run_etl_to_base_products
 from core.gsheets_backend import generate_slots_from_cadastro_gsheet
@@ -22,9 +21,12 @@ from core.gsheets_client import GSheetsClient, set_active_sheet
 from core.metabase_sales import (
     CARD175_CARD_ID,
     CARD175_STORE_CODE_BY_ID,
+    DEFAULT_METABASE_URL,
     STORE_OPTIONS,
     build_vendas_alvo_from_metabase,
     extract_metabase_card_id,
+    metabase_query_card,
+    resolve_metabase_session,
 )
 from core.workflow_context import get_workflow_sheet, set_workflow_sheet
 from routes._state import (
@@ -301,25 +303,32 @@ def api_import_card175_metabase(req: ScriptRequest) -> JSONResponse:
         sheet_link = str(payload.get("sheet_link") or "").strip()
         card_ref = str(payload.get("card_ref") or payload.get("card_id") or CARD175_CARD_ID).strip()
         store_code = str(payload.get("store_code") or payload.get("storeCode") or "").strip()
-        galpao = str(payload.get("galpao") or "").strip().upper()
+        galpao = str(payload.get("galpao") or "").strip()
         if not sheet_link:
             return JSONResponse({"success": False, "error": "Informe o link/ID da planilha de mapeamento."})
         if not store_code and galpao:
             for candidate_store, candidate_code in CARD175_STORE_CODE_BY_ID.items():
-                if str(candidate_code).strip().upper() == galpao:
-                    store_code = candidate_store
+                if candidate_store.lower() == galpao.lower() or str(candidate_code).strip().upper() == galpao.upper():
+                    store_code = str(candidate_code).strip()
                     break
         if not store_code:
-            return JSONResponse({"success": False, "error": "Informe store_code da loja para consultar o Card 175."})
+            return JSONResponse({"success": False, "error": "Informe fulfillment_center_id da loja para consultar o Card 788."})
 
         active_info = set_active_sheet(sheet_link)
         card_id = extract_metabase_card_id(card_ref)
-        card175_result = call_apps_script_webapp_action(
-            "fetchCard175Rows", {"store_code": store_code, "sample_limit": 5}
+        rows = metabase_query_card(
+            base_url=DEFAULT_METABASE_URL,
+            card_id=card_id,
+            session_id=resolve_metabase_session(timeout_seconds=60),
+            parameters=[
+                {
+                    "type": "category",
+                    "target": ["variable", ["template-tag", "fulfillment_center_id"]],
+                    "value": store_code,
+                }
+            ],
+            timeout_seconds=120,
         )
-        rows = list(card175_result.get("rows") or [])
-        if not galpao:
-            galpao = str(card175_result.get("galpao") or "").strip().upper()
         master = get_workflow_sheet("master")
         master_sheet_id = master["sheet_id"] if master else None
         result = import_card175_rows(

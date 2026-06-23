@@ -1638,10 +1638,10 @@ def _build_content_html(
             status_badge = ""
             if only_in_cadastro:
                 equip_classes.append("equipamento-cadastro-only")
-                status_badge = '<span class="equip-status-badge equip-status-cadastro-only" title="Equipamento presente no mapa da loja, mas sem endereçamento no Card 175">No mapa, sem 175</span>'
+                status_badge = '<span class="equip-status-badge equip-status-cadastro-only" title="Equipamento presente no mapa da loja, mas sem endereçamento no Card 788">No mapa, sem 788</span>'
             elif only_in_plan:
                 equip_classes.append("equipamento-card175-only")
-                status_badge = '<span class="equip-status-badge equip-status-card175-only" title="Equipamento presente no Card 175, mas não cadastrado no mapa da loja">No 175, fora do mapa</span>'
+                status_badge = '<span class="equip-status-badge equip-status-card175-only" title="Equipamento presente no Card 788, mas não cadastrado no mapa da loja">No 788, fora do mapa</span>'
 
             content_html += (
                 f'<div class="{" ".join(equip_classes)}" id="{equip_id}">'

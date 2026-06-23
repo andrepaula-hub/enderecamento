@@ -43,6 +43,33 @@ class _FakeClient:
         return f"https://fake/{sheet_name}"
 
 
+def test_normalize_card788_rows_accepts_generated_address():
+    rows = card175_snapshot._normalize_card175_rows(
+        [
+            {
+                "endereco_generated": "LJ060001-A-A-A",
+                "cod_produto": "SHOP69",
+                "desc_produto": "ÁGUA MINERAL PRATA SEM GÁS 1,5L",
+                "quantidade": 22,
+                "data_validade": "18/7/2026",
+            }
+        ]
+    )
+
+    assert rows == [
+        {
+            "id_localizacao": "LJ060001-A-A-A",
+            "galpao": "",
+            "rua": "",
+            "posicao_pallete": "",
+            "escaninho_nivel": "",
+            "cod_produto": "SHOP69",
+            "desc_produto": "ÁGUA MINERAL PRATA SEM GÁS 1,5L",
+            "quantidade": 22.0,
+        }
+    ]
+
+
 def test_import_card175_creates_working_plan_from_map_sheet(monkeypatch):
     values_by_sheet = {
         "Mapa_Final_Escaninhos": [
