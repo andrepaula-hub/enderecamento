@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import unicodedata
 from collections import defaultdict
@@ -301,6 +302,48 @@ def _build_base_products_map(client: GSheetsClient) -> dict[str, dict[str, Any]]
     return mapping
 
 
+def _int_to_letters(value: int) -> str:
+    n = max(1, int(value))
+    out = ""
+    while n:
+        n, rem = divmod(n - 1, 26)
+        out = chr(65 + rem) + out
+    return out
+
+
+def _external_virtual_location_id(galpao: str, group_index: int, slot_index: int) -> str:
+    rua_num = 900 + (group_index // 900)
+    equip_num = (group_index % 900) + 1
+    return f"{normalize_string(galpao).upper()}-R{rua_num}-{equip_num:03d}-1{_int_to_letters(slot_index)}"
+
+
+def _infer_virtual_equipment_type(items: list[dict[str, Any]], base_products: dict[str, dict[str, Any]]) -> str:
+    counters: dict[str, int] = defaultdict(int)
+    for item in items:
+        code = normalize_string(item.get("cod_produto"))
+        base = base_products.get(code, {})
+        storage = normalize_string(
+            base.get("categoria_armazenagem")
+            or base.get("armazenagem")
+            or base.get("tipo_equipamento_final")
+            or base.get("tipo_equipamento")
+        ).lower()
+        grupo = normalize_string(base.get("grupo")).lower()
+        sub = normalize_string(base.get("subcategoria")).lower()
+        text = " ".join([storage, grupo, sub, normalize_string(item.get("desc_produto")).lower()])
+        if "freezer" in text or "congel" in text or "sorvete" in text or "picole" in text or "picol" in text:
+            counters["freezer"] += 1
+        elif "geladeira" in text or "refriger" in text or "resfri" in text or "degelo" in text:
+            counters["geladeira"] += 1
+        elif "quim" in text or grupo == "qmc":
+            counters["quimico"] += 1
+        else:
+            counters["prateleira_pamplona"] += 1
+    if not counters:
+        return "prateleira_pamplona"
+    return sorted(counters.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
 def _set_card175_context(payload: dict[str, Any]) -> None:
     _save_json(CARD175_CONTEXT_PATH, payload)
 
@@ -496,7 +539,9 @@ def _import_card175_normalized_rows(
             skipped_not_in_mix += 1
             continue
         resolved_loc = ""
-        if id_local and id_local in id_map:
+        if id_local and id_local in template_by_loc:
+            resolved_loc = id_local
+        elif id_local and id_local in id_map:
             resolved_loc = id_map[id_local]
         if not resolved_loc:
             gal = normalize_string(item.get("galpao")).upper()
@@ -522,6 +567,9 @@ def _import_card175_normalized_rows(
             pos_raw = normalize_string(item.get("posicao_pallete")).upper()
             esc_raw = normalize_string(item.get("escaninho_nivel")).upper()
             group_key = f"{gal_raw}|{rua_raw}|{pos_raw}|{esc_raw}"
+            id_local_raw = normalize_string(item.get("id_localizacao"))
+            if group_key == "|||":
+                group_key = id_local_raw or group_key
             group = unresolved_groups.get(group_key)
             if not group:
                 group = {
@@ -659,7 +707,7 @@ def _import_card175_normalized_rows(
     virtual_locations_count = 0
     virtual_rows_added = 0
 
-    for group_key in sorted(unresolved_groups.keys()):
+    for group_index, group_key in enumerate(sorted(unresolved_groups.keys())):
         group = unresolved_groups[group_key]
         group_items = sorted(
             group.get("items", []),
@@ -667,6 +715,26 @@ def _import_card175_normalized_rows(
             reverse=True,
         )
         if not group_items:
+            continue
+        external_id = normalize_string(group.get("id_localizacao"))
+        is_non_layout_external = bool(external_id) and not _extract_location_parts(external_id)
+        if is_non_layout_external:
+            galpao_external = external_id.split("-")[0] if "-" in external_id else normalize_string(group.get("galpao"))
+            inferred_tipo = _infer_virtual_equipment_type(group_items, base_products)
+            group["tipo_equipamento"] = inferred_tipo
+            group["tipo_equipamento_final"] = inferred_tipo
+            slot_count = max(1, math.ceil(len(group_items) / 2))
+            for slot_idx in range(1, slot_count + 1):
+                virtual_location_id = _external_virtual_location_id(galpao_external, group_index, slot_idx)
+                template = template_by_loc.get(virtual_location_id)
+                if template is None:
+                    template = _build_virtual_template_row(plan_headers, virtual_location_id, group, None)
+                    template_by_loc[virtual_location_id] = template
+                    ordered_locations.append(virtual_location_id)
+                    virtual_rows_added += 1
+                start = (slot_idx - 1) * 2
+                aggregated_by_loc[virtual_location_id].extend(group_items[start : start + 2])
+            virtual_locations_count += len(group_items)
             continue
         virtual_location_id = _build_virtual_location_id(
             normalize_string(group.get("galpao")),

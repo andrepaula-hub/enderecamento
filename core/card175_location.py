@@ -155,13 +155,17 @@ def _build_virtual_template_row(
         elif key == "grupo_alocado":
             row[idx] = ""
 
+    inferred_tipo = normalize_string(group.get("tipo_equipamento_final") or group.get("tipo_equipamento")).strip()
+    if not inferred_tipo:
+        inferred_tipo = "desconhecido"
+
     if not equipment_template:
         for idx, header in enumerate(headers):
             key = _normalize_header(header)
             if key == "tipo_equipamento":
-                row[idx] = "desconhecido"
+                row[idx] = inferred_tipo
             elif key == "tipo_equipamento_final":
-                row[idx] = "desconhecido"
+                row[idx] = inferred_tipo
             elif key == "capacidade_l":
                 row[idx] = 0
             elif key in {"is_hot_zone", "is_nivel_alto", "is_nivel_inferior", "is_realocado", "is_pesado", "is_alto"}:
