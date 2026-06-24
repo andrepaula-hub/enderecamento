@@ -14,6 +14,7 @@ from core.agent_tools import (
     infer_store_context,
     validate_plan,
 )
+from core.apps_script_client import call_apps_script_webapp_action
 from core.card175_snapshot import import_card175_rows, import_card175_snapshot
 from core.enrichment_pipeline import run_etl_to_base_products
 from core.gsheets_backend import generate_slots_from_cadastro_gsheet
@@ -21,12 +22,9 @@ from core.gsheets_client import GSheetsClient, set_active_sheet
 from core.metabase_sales import (
     CARD175_CARD_ID,
     CARD175_STORE_CODE_BY_ID,
-    DEFAULT_METABASE_URL,
     STORE_OPTIONS,
     build_vendas_alvo_from_metabase,
     extract_metabase_card_id,
-    metabase_query_card,
-    resolve_metabase_session,
 )
 from core.workflow_context import get_workflow_sheet, set_workflow_sheet
 from routes._state import (
@@ -316,19 +314,20 @@ def api_import_card175_metabase(req: ScriptRequest) -> JSONResponse:
 
         active_info = set_active_sheet(sheet_link)
         card_id = extract_metabase_card_id(card_ref)
-        rows = metabase_query_card(
-            base_url=DEFAULT_METABASE_URL,
-            card_id=card_id,
-            session_id=resolve_metabase_session(timeout_seconds=60),
-            parameters=[
-                {
-                    "type": "category",
-                    "target": ["variable", ["template-tag", "fulfillment_center_id"]],
-                    "value": store_code,
-                }
-            ],
+        card_result = call_apps_script_webapp_action(
+            "fetchCard788Rows",
+            {
+                "card_id": card_id,
+                "cardId": card_id,
+                "store_code": store_code,
+                "fulfillment_center_id": store_code,
+                "sample_limit": int(payload.get("sample_limit") or 0) or None,
+            },
             timeout_seconds=120,
         )
+        rows = list(card_result.get("rows") or [])
+        if not galpao:
+            galpao = str(card_result.get("galpao") or "").strip()
         master = get_workflow_sheet("master")
         master_sheet_id = master["sheet_id"] if master else None
         result = import_card175_rows(
