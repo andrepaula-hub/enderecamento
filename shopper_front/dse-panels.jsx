@@ -69,6 +69,7 @@ function CurvaBar({ distribution }) {
 function DSEMetricsPanel({ allocations, onClose }) {
   const metrics = useMemo(() => {
     let totalSlots = 0, filledSlots = 0;
+    let realStoreSlots = 0, doubleAddressSlots = 0;
     const streetStats = {};
     const equipTypeStats = {};
     const allocatedSkus = new Set();
@@ -77,6 +78,7 @@ function DSEMetricsPanel({ allocations, onClose }) {
       let sf = 0, st = 0;
       street.equipment.forEach(eq => {
         const tipo = eq.tipo;
+        const isCardOnlyEquipment = !!eq.card175Only;
         if (!equipTypeStats[tipo]) equipTypeStats[tipo] = { count:0, empty:0, curvaDist:{}, totalA:0, gerador:0 };
         equipTypeStats[tipo].count++;
         let eqFilled = 0;
@@ -84,8 +86,12 @@ function DSEMetricsPanel({ allocations, onClose }) {
         for (let n = 1; n <= eq.niveis; n++) {
           for (let s = 1; s <= eq.escsPerNivel; s++) {
             totalSlots++; st++;
+            if (!isCardOnlyEquipment) realStoreSlots++;
             const key = `${eq.id}-${n}-${s}`;
             const alloc = allocations[key];
+            if (!isCardOnlyEquipment && alloc?.p1 && alloc?.p2) {
+              doubleAddressSlots++;
+            }
             if (alloc?.p1) {
               filledSlots++; sf++; eqFilled++;
               const p = PRODUCT_MAP[alloc.p1];
@@ -104,10 +110,11 @@ function DSEMetricsPanel({ allocations, onClose }) {
       streetStats[street.id] = { filled:sf, total:st, nome:street.nome };
     });
 
-    return { totalSlots, filledSlots, allocatedSkus: allocatedSkus.size, streetStats, equipTypeStats };
+    return { totalSlots, filledSlots, realStoreSlots, doubleAddressSlots, allocatedSkus: allocatedSkus.size, streetStats, equipTypeStats };
   }, [allocations]);
 
   const fillPct = metrics.totalSlots > 0 ? Math.round(metrics.filledSlots / metrics.totalSlots * 100) : 0;
+  const doubleAddressPct = metrics.realStoreSlots > 0 ? Math.round(metrics.doubleAddressSlots / metrics.realStoreSlots * 100) : 0;
 
   const typeLabels = { prateleira:'Prateleiras', prateleira_pamplona:'Prat. Pamplona', geladeira:'Geladeiras', geladeira_alta:'Geladeiras Altas', geladeira_gerador:'Gel. Gerador', freezer:'Freezers', quimico:'Químico' };
 
@@ -121,6 +128,9 @@ function DSEMetricsPanel({ allocations, onClose }) {
             sub={`${metrics.filledSlots} / ${metrics.totalSlots} escaninhos`}
             accent={fillPct >= 75 ? '#0DAB77' : fillPct >= 40 ? '#F59E0B' : '#EF4444'} />
           <StatCard label="SKUs alocados" value={metrics.allocatedSkus} />
+          <StatCard label="Com 2 endereços" value={`${doubleAddressPct}%`}
+            sub={`${metrics.doubleAddressSlots} / ${metrics.realStoreSlots} escaninhos da loja`}
+            accent={doubleAddressPct >= 20 ? '#0DAB77' : doubleAddressPct > 0 ? '#F59E0B' : 'var(--panel-muted)'} />
         </div>
         {/* Fill bar */}
         <div style={{ height:6, background:'var(--panel-border)', borderRadius:3, marginBottom:4 }}>
