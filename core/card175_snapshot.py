@@ -311,10 +311,18 @@ def _int_to_letters(value: int) -> str:
     return out
 
 
-def _external_virtual_location_id(galpao: str, group_index: int, slot_index: int) -> str:
+def _external_virtual_location_id(
+    galpao: str,
+    group_index: int,
+    slot_index: int,
+    slots_per_level: int = 7,
+) -> str:
     rua_num = 900 + (group_index // 900)
     equip_num = (group_index % 900) + 1
-    return f"{normalize_string(galpao).upper()}-R{rua_num}-{equip_num:03d}-1{_int_to_letters(slot_index)}"
+    slots_per_level = max(1, int(slots_per_level))
+    level = ((max(1, slot_index) - 1) // slots_per_level) + 1
+    position = ((max(1, slot_index) - 1) % slots_per_level) + 1
+    return f"{normalize_string(galpao).upper()}-R{rua_num}-{equip_num:03d}-{level}{_int_to_letters(position)}"
 
 
 def _infer_virtual_equipment_type(items: list[dict[str, Any]], base_products: dict[str, dict[str, Any]]) -> str:
