@@ -54,6 +54,19 @@ COR_MAP_EQUIP = {
 ALFABETO = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
+def _position_label(position: Any) -> str:
+    """Convert 1-based slot positions to spreadsheet-style letters: A..Z, AA.."""
+    number = int(parse_number(position) or 0)
+    if number <= 0:
+        return ""
+
+    label = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
+
+
 def _json_dumps(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
 
@@ -1385,7 +1398,7 @@ def _build_content_html(
             )
             equip_grid_html += '<div class="grid-cell header-cell corner-cell"></div>'
             for pos in actual_positions:
-                equip_grid_html += f'<div class="grid-cell header-cell col-header">{ALFABETO[pos-1]}</div>'
+                equip_grid_html += f'<div class="grid-cell header-cell col-header">{_position_label(pos)}</div>'
 
             for visual_row_index in range(1, num_rows + 1):
                 level_array_index = num_rows - visual_row_index
@@ -1972,7 +1985,7 @@ def _build_card175_mode_rows(
             for pos in range(1, qtd_esc + 1):
                 rows_out.append(
                     {
-                        "location_id": f"{galpao}-R{rua_num}-{equip_num:03d}-{nivel}{ALFABETO[pos - 1]}",
+                        "location_id": f"{galpao}-R{rua_num}-{equip_num:03d}-{nivel}{_position_label(pos)}",
                         "galpao_id": galpao,
                         "rua_num": rua_num,
                         "equipamento_num": equip_num,
