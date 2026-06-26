@@ -14,6 +14,11 @@ const TIPO_FISICO_OPTIONS = [
   { id: 'fragil',  label: 'Frágil',  flag: 'fragil' },
 ]
 
+const DEGELO_OPTIONS = [
+  { id: 'PODE', label: 'Pode sofrer' },
+  { id: 'NÃO', label: 'Não pode sofrer' },
+]
+
 const EQUIP_METODO_LABELS: Record<string, string> = {
   prateleira: 'Prateleira', prateleira_pamplona: 'Pamplona',
   geladeira: 'Geladeira', geladeira_alta: 'Gelad. Alta', geladeira_gerador: 'Gelad. Gerador',
@@ -104,6 +109,7 @@ export default function Prancheta({
   const [filterGrupos, setFG] = useState<string[]>([])
   const [filterCurvas, setFC] = useState<string[]>([])
   const [filterTipos, setFT] = useState<string[]>([])
+  const [filterDegelo, setFD] = useState<string[]>([])
   const [filterMetodos, setFM] = useState<string[]>([])
   const [subSearch, setSubSearch] = useState('')
   const [subOpen, setSubOpen] = useState(false)
@@ -149,21 +155,23 @@ export default function Prancheta({
           })
           if (!match) return false
         }
+        if (filterDegelo.length && !filterDegelo.includes(p.degelo)) return false
         if (filterMetodos.length && !filterMetodos.includes(p.metodo)) return false
         if (filterSubs.length && !filterSubs.includes(p.sub)) return false
         return true
       })
       .map(pid => productMap[pid])
       .filter((p): p is Product => p !== undefined)
-  }, [activeList, search, filterGrupos, filterCurvas, filterTipos, filterMetodos, filterSubs, productMap])
+  }, [activeList, search, filterGrupos, filterCurvas, filterTipos, filterDegelo, filterMetodos, filterSubs, productMap])
 
   const toggleGrupo  = (g: string) => setFG(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g])
   const toggleCurva  = (c: string) => setFC(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
   const toggleTipo   = (t: string) => setFT(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  const toggleDegelo = (d: string) => setFD(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
   const toggleMetodo = (m: string) => setFM(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
   const toggleSub    = (s: string) => setFSubs(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
 
-  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterMetodos.length + filterSubs.length
+  const totalFilters = filterGrupos.length + filterCurvas.length + filterTipos.length + filterDegelo.length + filterMetodos.length + filterSubs.length
 
   return (
     <div style={{ width, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--pran-bg)', borderLeft: '1px solid var(--pran-border)', overflow: 'hidden', position: 'relative' }}>
@@ -248,6 +256,15 @@ export default function Prancheta({
               {filterTipos.length > 0 && <Chip label="✕" active={false} onClick={() => setFT([])} />}
             </div>
           </div>
+          <div>
+            <div style={filterLabel}>Degelo</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              {DEGELO_OPTIONS.map(d => (
+                <Chip key={d.id} label={d.label} active={filterDegelo.includes(d.id)} onClick={() => toggleDegelo(d.id)} />
+              ))}
+              {filterDegelo.length > 0 && <Chip label="✕" active={false} onClick={() => setFD([])} />}
+            </div>
+          </div>
           {allMetodos.length > 1 && (
             <div>
               <div style={filterLabel}>Equipamento</div>
@@ -300,7 +317,7 @@ export default function Prancheta({
             </div>
           </div>
           {totalFilters > 0 && (
-            <button onClick={() => { setFG([]); setFC([]); setFT([]); setFM([]); setFSubs([]) }} style={{ padding: '4px', fontSize: 10, fontWeight: 700, background: 'transparent', border: '1px solid var(--pran-border)', borderRadius: 4, cursor: 'pointer', color: 'var(--pran-muted)', fontFamily: 'var(--font-sans)' }}>
+            <button onClick={() => { setFG([]); setFC([]); setFT([]); setFD([]); setFM([]); setFSubs([]) }} style={{ padding: '4px', fontSize: 10, fontWeight: 700, background: 'transparent', border: '1px solid var(--pran-border)', borderRadius: 4, cursor: 'pointer', color: 'var(--pran-muted)', fontFamily: 'var(--font-sans)' }}>
               Limpar todos os filtros
             </button>
           )}

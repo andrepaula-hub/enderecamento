@@ -99,8 +99,15 @@ def _append_rows_chunked(client: GSheetsClient, sheet_name: str, rows: list[list
         client.append_rows(sheet_name, rows[i : i + chunk_size])
 
 
-def _resolve_plan_source_sheet(client: GSheetsClient) -> tuple[str, str]:
+def _resolve_plan_source_sheet(client: GSheetsClient, *, prefer_map: bool = False) -> tuple[str, str]:
     names = client.list_sheet_names()
+    if prefer_map:
+        if MAP_SHEET_FALLBACK in names:
+            return MAP_SHEET_FALLBACK, "mapa"
+        for name in names:
+            norm = _normalize_header(name)
+            if "mapa_final_escaninhos" in norm:
+                return name, "mapa"
     if WORKING_PLAN_SHEET in names:
         return WORKING_PLAN_SHEET, "plano"
     for name in names:
@@ -453,7 +460,8 @@ def _import_card175_normalized_rows(
         return not values or len(values) < 2
 
     try:
-        source_plan_sheet, source_kind = _resolve_plan_source_sheet(client)
+        prefer_map_source = "card_788" in _normalize_header(source_name) or "card788" in _normalize_header(source_name)
+        source_plan_sheet, source_kind = _resolve_plan_source_sheet(client, prefer_map=prefer_map_source)
         source_values = client.read_values(source_plan_sheet)
     except ValueError:
         source_plan_sheet = WORKING_PLAN_SHEET
@@ -470,7 +478,7 @@ def _import_card175_normalized_rows(
                 ),
             }
         client = GSheetsClient(sheet_id)
-        source_plan_sheet, source_kind = _resolve_plan_source_sheet(client)
+        source_plan_sheet, source_kind = _resolve_plan_source_sheet(client, prefer_map=prefer_map_source)
         source_values = client.read_values(source_plan_sheet)
 
     if not source_values or len(source_values) < 2:

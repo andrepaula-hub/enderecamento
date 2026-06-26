@@ -223,6 +223,70 @@ def test_import_card788_external_address_creates_card_only_virtual_equipment(mon
     assert any(row[9] == "SKU3" for row in working_rows[1:])
 
 
+def test_import_card788_prefers_map_sheet_over_stale_working_plan(monkeypatch):
+    values_by_sheet = {
+        "Plano_Enderecamento_Final": [
+            [
+                "location_id",
+                "galpao_id",
+                "rua_num",
+                "equipamento_num",
+                "tipo_equipamento",
+                "nivel",
+                "escaninho_num_no_nivel",
+                "capacidade_l",
+                "tipo_equipamento_final",
+                "product_code",
+                "product_name",
+                "quantidade",
+                "categoria_armazenagem",
+            ],
+            ["LJ1-R900-001-1A", "LJ1", 900, 1, "freezer", 1, 1, 20, "freezer", "OLD", "Antigo", 1, ""],
+        ],
+        "Mapa_Final_Escaninhos": [
+            [
+                "location_id",
+                "galpao_id",
+                "rua_num",
+                "equipamento_num",
+                "tipo_equipamento",
+                "nivel",
+                "escaninho_num_no_nivel",
+                "capacidade_l",
+                "tipo_equipamento_final",
+                "product_code",
+                "product_name",
+                "quantidade",
+                "categoria_armazenagem",
+            ],
+            ["LJ1-R1-001-1A", "LJ1", 1, 1, "prateleira", 1, 1, 20, "prateleira", "Vazio", "", 0, ""],
+        ],
+        "Base_Produtos": [
+            ["product_code", "product_name", "grupo", "categoria_armazenagem"],
+            ["SKU1", "Produto 1", "alimento", "Geladeira"],
+        ],
+    }
+    fake_client = _FakeClient(values_by_sheet)
+
+    monkeypatch.setattr(card175_snapshot, "GSheetsClient", lambda _sheet_id: fake_client)
+    monkeypatch.setattr(card175_snapshot, "_set_card175_context", lambda payload: None)
+
+    result = card175_snapshot.import_card175_rows(
+        sheet_id="fake-sheet",
+        rows=[
+            {"endereco_generated": "LJ1-A-A-A", "cod_produto": "SKU1", "desc_produto": "Produto 1", "quantidade": 3},
+        ],
+        source_name="metabase_card_788",
+    )
+
+    assert result["success"] is True
+    working_rows = values_by_sheet[card175_snapshot.WORKING_PLAN_SHEET]
+    locations = [row[0] for row in working_rows[1:]]
+    assert "LJ1-RA-001-1A" in locations
+    assert "LJ1-R900-001-1A" not in locations
+    assert "OLD" not in [str(value) for row in working_rows for value in row]
+
+
 def test_card788_external_address_uses_seven_slots_per_level():
     assert card175_snapshot._external_virtual_location_id("LJ1", "A", 0, 7) == "LJ1-RA-001-1G"
     assert card175_snapshot._external_virtual_location_id("LJ1", "A", 0, 8) == "LJ1-RA-001-2A"

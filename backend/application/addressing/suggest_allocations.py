@@ -24,6 +24,14 @@ from core.agent_scoring import (
 from core.utils import normalize_string
 
 BLOCKED_SLOT_CODE = "__BLOCKED__"
+BOARD_ENTRY_RE = re.compile(r"^(?:unallocated|collected)::(.+?)::\d+$")
+
+
+def _entry_product_code(value: Any) -> str:
+    """Converte ids da prancheta em código real de produto."""
+    text = normalize_string(value)
+    match = BOARD_ENTRY_RE.match(text)
+    return match.group(1) if match else text
 
 
 def suggest_allocations(
@@ -60,16 +68,17 @@ def suggest_allocations(
             continue
         products_by_code[code] = _react_product_to_scoring(p)
 
-    requested_counts = Counter(code for code in unallocated_codes if code in products_by_code)
+    normalized_unallocated_codes = [_entry_product_code(code) for code in unallocated_codes]
+    requested_counts = Counter(code for code in normalized_unallocated_codes if code in products_by_code)
     allocated_counts = Counter(
-        str(code)
+        _entry_product_code(code)
         for alloc in allocations.values()
         if isinstance(alloc, dict)
         for code in (alloc.get("p1"), alloc.get("p2"))
-        if code and code != BLOCKED_SLOT_CODE
+        if code and _entry_product_code(code) != BLOCKED_SLOT_CODE
     )
     products_to_allocate = []
-    for code in unallocated_codes:
+    for code in normalized_unallocated_codes:
         if code not in requested_counts:
             continue
         product = dict(products_by_code[code])
@@ -91,10 +100,11 @@ def suggest_allocations(
     existing_placements: list[dict[str, Any]] = []
     for loc_id, alloc in allocations.items():
         for field in ("p1", "p2"):
-            code = alloc.get(field) if isinstance(alloc, dict) else None
+            raw_code = alloc.get(field) if isinstance(alloc, dict) else None
+            code = _entry_product_code(raw_code)
             if not code:
                 continue
-            product = products_by_code.get(str(code))
+            product = products_by_code.get(code)
             if not product:
                 continue
             slot_ref = _slot_from_location_id(loc_id, map_structure, allocations, allow_second_slot)
@@ -208,7 +218,11 @@ def _slots_from_map(
                     alloc = allocations.get(loc_id) or {}
                     p1 = alloc.get("p1") if isinstance(alloc, dict) else None
                     p2 = alloc.get("p2") if isinstance(alloc, dict) else None
-                    real_codes = [str(code) for code in (p1, p2) if code and code != BLOCKED_SLOT_CODE]
+                    real_codes = [
+                        _entry_product_code(code)
+                        for code in (p1, p2)
+                        if code and _entry_product_code(code) != BLOCKED_SLOT_CODE
+                    ]
                     occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else len(real_codes)
                     occupant_subcategories = {
                         _normalize_text(products_by_code[code].get("subcategoria"))
@@ -277,7 +291,13 @@ def _slot_from_location_id(
                 alloc = allocations.get(loc_id) or {}
                 p1 = alloc.get("p1") if isinstance(alloc, dict) else None
                 p2 = alloc.get("p2") if isinstance(alloc, dict) else None
-                occupant_count = 2 if BLOCKED_SLOT_CODE in {p1, p2} else (1 if p1 else 0) + (1 if p2 else 0)
+                normalized_p1 = _entry_product_code(p1)
+                normalized_p2 = _entry_product_code(p2)
+                occupant_count = (
+                    2
+                    if BLOCKED_SLOT_CODE in {normalized_p1, normalized_p2}
+                    else (1 if normalized_p1 else 0) + (1 if normalized_p2 else 0)
+                )
                 return Slot(
                     location_id=loc_id,
                     equip_id=equip_id,

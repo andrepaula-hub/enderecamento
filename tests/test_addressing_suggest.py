@@ -213,6 +213,49 @@ def test_suggest_allocations_caps_repeated_queue_codes_by_remaining_bins():
     assert result["summary"]["total_requested"] == 3
 
 
+def test_suggest_allocations_counts_existing_board_entry_ids_as_same_product():
+    allocations = {
+        **_empty_allocations_grid(levels=5, escs_per_nivel=7),
+        "R1-E1-2-3": {"p1": "unallocated::BROCOLIS::1", "p2": None},
+        "R1-E1-2-4": {"p1": "unallocated::BROCOLIS::2", "p2": None},
+    }
+    result = suggest_allocations(
+        unallocated_codes=["BROCOLIS"] * 20,
+        products_data=[
+            _product("BROCOLIS", nome="Brócolis c/ 1UN", grupo="FLV", arm="geladeira", escsNec=5),
+        ],
+        map_structure=_geladeira_map_structure(levels=5, escs_per_nivel=7),
+        allocations=allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 3
+    assert result["summary"]["total_requested"] == 3
+
+
+def test_suggest_allocations_does_not_allocate_when_board_entry_ids_already_satisfy_required_bins():
+    allocations = {
+        **_empty_allocations_grid(levels=5, escs_per_nivel=5),
+        "R1-E1-2-1": {"p1": "unallocated::COUVE::1", "p2": None},
+        "R1-E1-2-2": {"p1": "unallocated::COUVE::2", "p2": None},
+        "R1-E1-2-3": {"p1": "unallocated::COUVE::3", "p2": None},
+    }
+    result = suggest_allocations(
+        unallocated_codes=["COUVE"] * 20,
+        products_data=[
+            _product("COUVE", nome="Couve manteiga 1UN", grupo="FLV", arm="geladeira", escsNec=3),
+        ],
+        map_structure=_geladeira_map_structure(levels=5, escs_per_nivel=5),
+        allocations=allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["summary"]["total_requested"] == 0
+
+
 def test_suggest_allocations_extends_existing_multibin_block_or_leaves_unallocated():
     result = suggest_allocations(
         unallocated_codes=["FLV1", "FLV1"],

@@ -644,13 +644,6 @@ export default function MapPage() {
           />
         )}
 
-        {/* Allocation hint */}
-        {mapState.selectedProduct && (
-          <div style={{ position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 100, background: 'rgba(13,171,119,0.96)', borderRadius: 20, padding: '7px 18px', fontSize: 11, fontWeight: 700, color: '#fff', pointerEvents: 'none', boxShadow: '0 4px 20px rgba(13,171,119,0.4)' }}>
-            Clique em escaninho vazio para alocar · ESC cancela
-          </div>
-        )}
-
         {/* Config overlay */}
         {mapState.configOpen && (
           <ConfigPage asOverlay onClose={() => dispatch({ type: 'CLOSE_PANEL' })} />
