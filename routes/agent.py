@@ -4,9 +4,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
+from backend.application.jobs.job_service import JobService
 from core.agent_tools import (
     apply_auto_address,
     auto_address_preview,
@@ -36,6 +37,73 @@ from routes._state import (
 )
 
 router = APIRouter()
+
+
+def _import_card175_metabase_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    sheet_link = str(payload.get("sheet_link") or "").strip()
+    card_ref = str(payload.get("card_ref") or payload.get("card_id") or CARD175_CARD_ID).strip()
+    store_code = str(payload.get("store_code") or payload.get("storeCode") or "").strip()
+    galpao = str(payload.get("galpao") or "").strip()
+    if not sheet_link:
+        return {"success": False, "error": "Informe o link/ID da planilha de mapeamento."}
+    if not store_code and galpao:
+        for candidate_store, candidate_code in CARD175_STORE_CODE_BY_ID.items():
+            if candidate_store.lower() == galpao.lower() or str(candidate_code).strip().upper() == galpao.upper():
+                store_code = str(candidate_code).strip()
+                break
+    if not store_code:
+        return {"success": False, "error": "Informe fulfillment_center_id da loja para consultar o Card 788."}
+
+    active_info = set_active_sheet(sheet_link)
+    card_id = extract_metabase_card_id(card_ref)
+    card_result = call_apps_script_webapp_action(
+        "fetchCard788Rows",
+        {
+            "card_id": card_id,
+            "cardId": card_id,
+            "store_code": store_code,
+            "fulfillment_center_id": store_code,
+            "sample_limit": int(payload.get("sample_limit") or 0) or None,
+        },
+        timeout_seconds=120,
+    )
+    rows = list(card_result.get("rows") or [])
+    if not galpao:
+        galpao = str(card_result.get("galpao") or "").strip()
+    master = get_workflow_sheet("master")
+    master_sheet_id = master["sheet_id"] if master else None
+    result = import_card175_rows(
+        sheet_id=active_info["sheet_id"],
+        rows=rows,
+        source_name=f"metabase_card_{card_id}",
+        user="local",
+        master_sheet_id=master_sheet_id,
+    )
+    if result.get("success"):
+        result["sheet"] = active_info
+        result["card_id"] = card_id
+        result["store_code"] = store_code
+        result["galpao"] = galpao
+        result["rows_fetched_raw"] = len(rows)
+    return result
+
+
+def _run_import_card175_metabase_job(job_service: JobService, job_id: str, payload: dict[str, Any]) -> None:
+    try:
+        job_service.update(
+            job_id,
+            "running",
+            result={"progress_pct": 12, "progress_label": "Consultando Card 788 no Metabase…"},
+        )
+        result = _import_card175_metabase_payload(payload)
+        if result.get("success"):
+            result.setdefault("progress_pct", 100)
+            result.setdefault("progress_label", "Card 788 importado.")
+            job_service.update(job_id, "done", result=result)
+        else:
+            job_service.update(job_id, "failed", error=str(result.get("error") or "Falha ao importar Card 788."))
+    except Exception as exc:
+        job_service.update(job_id, "failed", error=str(exc))
 
 
 @router.post("/api/agent/inferStoreContext")
@@ -298,51 +366,31 @@ def api_import_card175_metabase(req: ScriptRequest) -> JSONResponse:
     if not isinstance(payload, dict):
         payload = {}
     try:
-        sheet_link = str(payload.get("sheet_link") or "").strip()
-        card_ref = str(payload.get("card_ref") or payload.get("card_id") or CARD175_CARD_ID).strip()
-        store_code = str(payload.get("store_code") or payload.get("storeCode") or "").strip()
-        galpao = str(payload.get("galpao") or "").strip()
-        if not sheet_link:
-            return JSONResponse({"success": False, "error": "Informe o link/ID da planilha de mapeamento."})
-        if not store_code and galpao:
-            for candidate_store, candidate_code in CARD175_STORE_CODE_BY_ID.items():
-                if candidate_store.lower() == galpao.lower() or str(candidate_code).strip().upper() == galpao.upper():
-                    store_code = str(candidate_code).strip()
-                    break
-        if not store_code:
-            return JSONResponse({"success": False, "error": "Informe fulfillment_center_id da loja para consultar o Card 788."})
-
-        active_info = set_active_sheet(sheet_link)
-        card_id = extract_metabase_card_id(card_ref)
-        card_result = call_apps_script_webapp_action(
-            "fetchCard788Rows",
-            {
-                "card_id": card_id,
-                "cardId": card_id,
-                "store_code": store_code,
-                "fulfillment_center_id": store_code,
-                "sample_limit": int(payload.get("sample_limit") or 0) or None,
-            },
-            timeout_seconds=120,
-        )
-        rows = list(card_result.get("rows") or [])
-        if not galpao:
-            galpao = str(card_result.get("galpao") or "").strip()
-        master = get_workflow_sheet("master")
-        master_sheet_id = master["sheet_id"] if master else None
-        result = import_card175_rows(
-            sheet_id=active_info["sheet_id"],
-            rows=rows,
-            source_name=f"metabase_card_{card_id}",
-            user="local",
-            master_sheet_id=master_sheet_id,
-        )
-        if result.get("success"):
-            result["sheet"] = active_info
-            result["card_id"] = card_id
-            result["store_code"] = store_code
-            result["galpao"] = galpao
-            result["rows_fetched_raw"] = len(rows)
-        return JSONResponse(result)
+        return JSONResponse(_import_card175_metabase_payload(payload))
     except Exception as exc:
         return JSONResponse({"success": False, "error": str(exc)})
+
+
+@router.post("/api/importCard175MetabaseJob")
+def api_import_card175_metabase_job(req: ScriptRequest, background_tasks: BackgroundTasks) -> JSONResponse:
+    payload = req.args[0] if req.args else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    sheet_link = str(payload.get("sheet_link") or "").strip()
+    store_code = str(payload.get("store_code") or payload.get("storeCode") or "").strip()
+    galpao = str(payload.get("galpao") or "").strip()
+    if not sheet_link:
+        return JSONResponse({"success": False, "error": "Informe o link/ID da planilha de mapeamento."})
+    if not store_code and galpao:
+        for candidate_store, candidate_code in CARD175_STORE_CODE_BY_ID.items():
+            if candidate_store.lower() == galpao.lower() or str(candidate_code).strip().upper() == galpao.upper():
+                store_code = str(candidate_code).strip()
+                payload = {**payload, "store_code": store_code}
+                break
+    if not store_code and not payload.get("store_code"):
+        return JSONResponse({"success": False, "error": "Informe fulfillment_center_id da loja para consultar o Card 788."})
+
+    job_service = JobService()
+    job_id = job_service.enqueue("card788_import", payload=payload)
+    background_tasks.add_task(_run_import_card175_metabase_job, job_service, job_id, payload)
+    return JSONResponse({"success": True, "job_id": job_id, "status": "pending"})

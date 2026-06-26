@@ -346,6 +346,7 @@
     buildSalesTargetAsync: function (payload) { return postApiAsync('buildMetabaseSalesTargetJob', [payload]); },
     exportSalesXlsx: function (payload) { return postApi('exportMetabaseSalesXlsx', [payload]); },
     importCard175Metabase: function (payload) { return postApi('importCard175Metabase', [payload]); },
+    importCard175MetabaseJobAsync: function (payload) { return postApiAsync('importCard175MetabaseJob', [payload]); },
     saveBatchMoves: function (moves, options) { return postApi('saveBatchMoves', [moves, options || {}]); },
     saveBatchMovesAsync: function (moves, options) { return postApiAsync('saveBatchMoves', [moves, options || {}]); },
     changeEquipmentTypeAsync: function (equipId, newType, recolherProdutos) { return postApiAsync('changeEquipmentType', [equipId, newType, !!recolherProdutos]); },

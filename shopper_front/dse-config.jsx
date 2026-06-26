@@ -544,23 +544,42 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
 
   const handleImportCard175 = async () => {
     setRunning('c175');
-    setProgress({ val:35, label:'Importando Card 788…' });
+    setProgress({ val:12, label:'Iniciando importação do Card 788…' });
     addLog('Importando Card 788…', 'info');
     await new Promise(r => setTimeout(r, 0));
     try {
       const selected = STORES.find(s => s.id === loja);
-      const response = window.DSEApi.importCard175Metabase({
+      const response = await window.DSEApi.importCard175MetabaseJobAsync({
         sheet_link: links.mapaEq,
         card_id: 788,
         store_code: selected ? selected.codigo : loja,
         galpao: loja,
       });
-      if (response && response.success) {
+      if (!response || (!response.success && !response.job_id)) {
+        throw new Error((response && response.error) || 'Falha ao iniciar importação do Card 788.');
+      }
+      const jobId = response.job_id;
+      if (!jobId) {
+        throw new Error('Backend não retornou job_id para importação do Card 788.');
+      }
+      const result = await pollJobResult(jobId, {
+        intervalMs: 1800,
+        onUpdate: function (job) {
+          if (job.status === 'pending') {
+            setProgressMonotonic(16, 'Card 788 aguardando processamento…');
+          } else if (job.status === 'running') {
+            const pct = job.result && job.result.progress_pct ? Number(job.result.progress_pct) : 45;
+            const label = job.result && job.result.progress_label ? job.result.progress_label : 'Importando Card 788…';
+            setProgressMonotonic(Math.max(24, Math.min(95, pct)), label);
+          }
+        },
+      });
+      if (result && result.success) {
         setProgress({ val:100, label:'Plano inicial criado.' });
-        addLog(`Importação do Card 788 concluída. ${response.rows_fetched_raw || 0} linhas lidas.`, 'success');
+        addLog(`Importação do Card 788 concluída. ${result.rows_fetched_raw || 0} linhas lidas.`, 'success');
         setStatusMsg('Importação do Card 788 concluída.', 'success');
       } else {
-        throw new Error((response && response.error) || 'Falha ao importar Card 788.');
+        throw new Error((result && result.error) || 'Falha ao importar Card 788.');
       }
     } catch (err) {
       addLog(String(err), 'error');
