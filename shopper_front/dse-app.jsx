@@ -674,7 +674,8 @@ function reducer(state, action) {
       return {...state,mapStructure:ms};
     }
     case 'ADD_STREET': {
-      const mx=Math.max(0,...state.mapStructure.map(st=>parseInt(st.id.replace('R',''))));
+      const streetNums=state.mapStructure.map(st=>parseInt(st.id.replace('R',''))).filter(Number.isFinite);
+      const mx=Math.max(0,...streetNums);
       return {...state,mapStructure:[...state.mapStructure,{id:`R${mx+1}`,nome:`Rua ${mx+1}`,equipment:[]}]};
     }
     case 'REMOVE_STREET': {

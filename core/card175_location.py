@@ -73,7 +73,7 @@ def _register_addr_mapping(
 
 def _extract_location_parts(location_id: str) -> tuple[str, str, str, str] | None:
     text = normalize_string(location_id).upper()
-    match = re.match(r"^([A-Z0-9_]+)-R(\d+)-(?:E)?(\d+)-(.+)$", text)
+    match = re.match(r"^([A-Z0-9_]+)-R([A-Z0-9]+)-(?:E)?(\d+)-(.+)$", text)
     if not match:
         return None
     galpao = match.group(1)
@@ -135,7 +135,7 @@ def _build_virtual_template_row(
         elif key == "galpao_id":
             row[idx] = galpao
         elif key == "rua_num":
-            row[idx] = int(rua) if rua.isdigit() else row[idx]
+            row[idx] = int(rua) if rua.isdigit() else rua
         elif key == "equipamento_num":
             row[idx] = int(posicao) if posicao.isdigit() else row[idx]
         elif key == "nivel":

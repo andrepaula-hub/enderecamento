@@ -213,13 +213,19 @@ def test_import_card788_external_address_creates_card_only_virtual_equipment(mon
     )
 
     assert result["success"] is True
-    assert result["virtual_rows_added"] == 2
+    assert result["virtual_rows_added"] == 3
     working_rows = values_by_sheet[card175_snapshot.WORKING_PLAN_SHEET]
     locations = [row[0] for row in working_rows[1:]]
-    assert "LJ1-R900-001-1A" in locations
-    assert "LJ1-R900-001-1B" in locations
-    assert any(row[4] == "geladeira" and row[9] == "SKU1" for row in working_rows[1:])
+    assert "LJ1-RA-001-1A" in locations
+    assert "LJ1-RA-001-1B" in locations
+    assert "LJ1-RA-001-1C" in locations
+    assert any(row[4] == "prateleira_pamplona" and row[9] == "SKU1" for row in working_rows[1:])
     assert any(row[9] == "SKU3" for row in working_rows[1:])
+
+
+def test_card788_external_address_uses_seven_slots_per_level():
+    assert card175_snapshot._external_virtual_location_id("LJ1", "A", 0, 7) == "LJ1-RA-001-1G"
+    assert card175_snapshot._external_virtual_location_id("LJ1", "A", 0, 8) == "LJ1-RA-001-2A"
 
 
 def test_import_card175_keeps_virtual_r_addresses_in_working_sheet(monkeypatch):

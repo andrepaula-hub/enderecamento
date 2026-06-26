@@ -181,12 +181,20 @@
     var slotMeta = {};
     var initialPlacements = {};
 
+    function streetSortValue(id) {
+      var raw = normalizeText(id).replace(/^R/i, '');
+      var n = toInt(raw, 0);
+      return n ? { group: 1, n: n, raw: raw } : { group: 0, n: 0, raw: raw };
+    }
+
     Array.prototype.forEach.call(doc.querySelectorAll('.rua[data-rua-num]'), function (streetEl) {
-      var ruaNum = toInt(streetEl.getAttribute('data-rua-num'), 0);
-      if (!ruaNum) return;
+      var ruaRaw = normalizeText(streetEl.getAttribute('data-rua-num')).toUpperCase();
+      if (!ruaRaw) return;
+      var ruaNum = toInt(ruaRaw, 0) || ruaRaw;
+      var streetId = 'R' + ruaRaw;
       var street = {
-        id: 'R' + ruaNum,
-        nome: 'Rua ' + ruaNum,
+        id: streetId,
+        nome: ruaRaw.match(/^\d+$/) ? 'Rua ' + ruaRaw : streetId,
         equipment: [],
       };
 
@@ -250,10 +258,16 @@
       streets.push(street);
     });
 
-    streets.sort(function (a, b) { return toInt(a.id.replace('R', ''), 0) - toInt(b.id.replace('R', ''), 0); });
+    streets.sort(function (a, b) {
+      var aa = streetSortValue(a.id);
+      var bb = streetSortValue(b.id);
+      if (aa.group !== bb.group) return aa.group - bb.group;
+      if (aa.n !== bb.n) return aa.n - bb.n;
+      return aa.raw.localeCompare(bb.raw);
+    });
     streets.forEach(function (street) {
       street.equipment.sort(function (a, b) {
-        return toInt(String(a.id).replace(/^R\d+-E?/, ''), 0) - toInt(String(b.id).replace(/^R\d+-E?/, ''), 0);
+        return toInt(String(a.id).split('-').pop(), 0) - toInt(String(b.id).split('-').pop(), 0);
       });
     });
 

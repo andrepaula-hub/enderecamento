@@ -1204,12 +1204,32 @@ def _build_content_html(
     base_produtos_map: dict[str, dict[str, Any]],
     metrics: dict[str, Any],
 ) -> str:
+    def _format_street_label(value: Any) -> str:
+        raw = normalize_string(value).upper().strip()
+        if not raw:
+            return "R?"
+        return f"R{int(raw)}" if raw.isdigit() else f"R{raw}"
+
+    def _street_sort_key(value: Any) -> tuple[int, int, str]:
+        raw = normalize_string(value).upper().strip()
+        if raw.isdigit():
+            return (1, int(raw), raw)
+        return (0, 0, raw)
+
+    def _row_street_key(row: dict[str, Any]) -> str:
+        raw = normalize_string(row.get("rua_num")).upper().strip()
+        if raw:
+            return raw
+        match = re.search(r"-R([A-Z0-9]+)-", normalize_string(row.get("location_id")).upper())
+        return match.group(1) if match else ""
+
     def _location_sort_key(location_id: str) -> tuple[int, int, int, str]:
-        match = re.search(r"-R(\d+)-(\d+)-(\d+)([A-Za-z]+)$", normalize_string(location_id))
+        match = re.search(r"-R([A-Z0-9]+)-(\d+)-(\d+)([A-Za-z]+)$", normalize_string(location_id))
         if not match:
             return (9999, 9999, 9999, location_id)
+        street_key = _street_sort_key(match.group(1))
         return (
-            int(match.group(1)),
+            street_key[0] * 10000 + street_key[1],
             int(match.group(2)),
             int(match.group(3)),
             match.group(4).upper(),
@@ -1299,20 +1319,20 @@ def _build_content_html(
                 "placement_index": index + 1,
             }
 
-    ruas: dict[int, list[dict[str, Any]]] = {}
+    ruas: dict[str, list[dict[str, Any]]] = {}
     for row in dashboard_data:
-        try:
-            rua_num = int(row.get("rua_num"))
-        except (TypeError, ValueError):
+        rua_num = _row_street_key(row)
+        if not rua_num:
             continue
         ruas.setdefault(rua_num, []).append(row)
 
     content_html = ""
-    for rua_num in sorted(ruas.keys()):
+    for rua_num in sorted(ruas.keys(), key=_street_sort_key):
         rua_group = ruas[rua_num]
-        content_html += f'<div class="rua" data-rua-num="{rua_num}"><h3>Rua {rua_num}</h3>'
+        rua_label = _format_street_label(rua_num)
+        content_html += f'<div class="rua" data-rua-num="{escape_html(rua_num)}"><h3>{escape_html(rua_label)}</h3>'
         content_html += (
-            f'<div class="add-equip-form" id="add-form-R{rua_num}" data-rua-num="{rua_num}">'
+            f'<div class="add-equip-form" id="add-form-{escape_html(rua_label)}" data-rua-num="{escape_html(rua_num)}">'
             "<span>Criar Equipamento:</span>"
             '<input type="number" placeholder="Nº Equip." class="add-equip-num">'
             '<select class="add-equip-type">'
@@ -1334,7 +1354,7 @@ def _build_content_html(
         for equip_num in sorted(equipamentos.keys()):
             equip_group = equipamentos[equip_num]
             info_equip = equip_group[0]
-            equip_id = f"R{rua_num}-{int(equip_num):03d}"
+            equip_id = f"{rua_label}-{int(equip_num):03d}"
             tipo_equip_final = info_equip.get("tipo_equipamento_final") or info_equip.get("tipo_equipamento")
             tipo_equip_final = normalize_string(tipo_equip_final)
             only_in_cadastro = bool(info_equip.get("card175_only_in_cadastro"))
@@ -1820,8 +1840,13 @@ def _build_products_for_search(dashboard_data: list[dict[str, Any]]) -> tuple[di
     products_for_search: dict[str, dict[str, Any]] = {}
 
     for row in dashboard_data:
+        rua_raw = normalize_string(row.get("rua_num")).upper().strip()
+        if not rua_raw:
+            match = re.search(r"-R([A-Z0-9]+)-", normalize_string(row.get("location_id")).upper())
+            rua_raw = match.group(1) if match else ""
         try:
-            equip_id = f"R{int(row.get('rua_num'))}-{int(row.get('equipamento_num')):03d}"
+            rua_label = f"R{int(rua_raw)}" if rua_raw.isdigit() else f"R{rua_raw}"
+            equip_id = f"{rua_label}-{int(row.get('equipamento_num')):03d}"
         except (TypeError, ValueError):
             equip_id = None
 

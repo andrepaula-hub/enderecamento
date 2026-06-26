@@ -313,16 +313,17 @@ def _int_to_letters(value: int) -> str:
 
 def _external_virtual_location_id(
     galpao: str,
-    group_index: int,
+    rua_token: str,
+    equip_index: int,
     slot_index: int,
     slots_per_level: int = 7,
 ) -> str:
-    rua_num = 900 + (group_index // 900)
-    equip_num = (group_index % 900) + 1
+    street_suffix = re.sub(r"[^A-Z0-9]+", "", normalize_string(rua_token).upper()) or "CARD"
+    equip_num = max(1, int(equip_index) + 1)
     slots_per_level = max(1, int(slots_per_level))
     level = ((max(1, slot_index) - 1) // slots_per_level) + 1
     position = ((max(1, slot_index) - 1) % slots_per_level) + 1
-    return f"{normalize_string(galpao).upper()}-R{rua_num}-{equip_num:03d}-{level}{_int_to_letters(position)}"
+    return f"{normalize_string(galpao).upper()}-R{street_suffix}-{equip_num:03d}-{level}{_int_to_letters(position)}"
 
 
 def _infer_virtual_equipment_type(items: list[dict[str, Any]], base_products: dict[str, dict[str, Any]]) -> str:
@@ -727,21 +728,22 @@ def _import_card175_normalized_rows(
         external_id = normalize_string(group.get("id_localizacao"))
         is_non_layout_external = bool(external_id) and not _extract_location_parts(external_id)
         if is_non_layout_external:
-            galpao_external = external_id.split("-")[0] if "-" in external_id else normalize_string(group.get("galpao"))
-            inferred_tipo = _infer_virtual_equipment_type(group_items, base_products)
+            external_parts = external_id.split("-")
+            galpao_external = external_parts[0] if "-" in external_id else normalize_string(group.get("galpao"))
+            rua_external = external_parts[1] if len(external_parts) > 1 else normalize_string(group.get("rua"))
+            inferred_tipo = "prateleira_pamplona"
             group["tipo_equipamento"] = inferred_tipo
             group["tipo_equipamento_final"] = inferred_tipo
-            slot_count = max(1, math.ceil(len(group_items) / 2))
+            slot_count = len(group_items)
             for slot_idx in range(1, slot_count + 1):
-                virtual_location_id = _external_virtual_location_id(galpao_external, group_index, slot_idx)
+                virtual_location_id = _external_virtual_location_id(galpao_external, rua_external, group_index, slot_idx)
                 template = template_by_loc.get(virtual_location_id)
                 if template is None:
                     template = _build_virtual_template_row(plan_headers, virtual_location_id, group, None)
                     template_by_loc[virtual_location_id] = template
                     ordered_locations.append(virtual_location_id)
                     virtual_rows_added += 1
-                start = (slot_idx - 1) * 2
-                aggregated_by_loc[virtual_location_id].extend(group_items[start : start + 2])
+                aggregated_by_loc[virtual_location_id].append(group_items[slot_idx - 1])
             virtual_locations_count += len(group_items)
             continue
         virtual_location_id = _build_virtual_location_id(
