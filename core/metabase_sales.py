@@ -19,12 +19,11 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 from openpyxl import Workbook
 
-from .apps_script_client import get_metabase_session_from_script
+from .apps_script_client import call_apps_script_webapp_action, get_metabase_session_from_script
 from .gsheets_client import CREDENTIALS_DIR, GSheetsClient
 from .utils import normalize_string, parse_number
 
 DEFAULT_METABASE_URL = "https://metabase.kdabra.com.br"
-METABASE_PROXY_SCRIPT_ID = "1Ypp21M1kGmv0dL5bYCl6q9JfbVg7sOhs9qttK89u9iBFzq2fmEBEUffl"
 DEFAULT_CARD_ID = 823
 DEFAULT_TIMEOUT_SECONDS = 180
 METABASE_EARLIEST_DATE = "2020-01-01"
@@ -294,6 +293,49 @@ def _fetch_rows_directly(
         "data_final_effective": data_final,
         "fallback_applied": False,
         "fallback_reason": "",
+    }
+
+
+def _fetch_rows_via_apps_script(
+    *,
+    data_inicial: str,
+    data_final: str,
+    stores: list[str],
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Busca o card 823 pelo Apps Script, que encapsula MetabaseAPI/autenticação."""
+    result = call_apps_script_webapp_action(
+        "fetchVendasPorDiaRows",
+        {
+            "data_inicial": data_inicial,
+            "data_final": data_final,
+            "stores": stores,
+        },
+        timeout_seconds=timeout_seconds,
+    )
+    rows = list(result.get("rows") or [])
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        requested_store = str(item.get("_requested_store") or item.get("store_code") or "").strip()
+        if requested_store:
+            item["_requested_store"] = requested_store
+        normalized_rows.append(item)
+
+    errors = [str(error) for error in (result.get("errors") or []) if str(error).strip()]
+    if errors and not normalized_rows:
+        raise RuntimeError("Apps Script/MetabaseAPI não retornou vendas: " + " | ".join(errors[:5]))
+
+    return {
+        "rows": normalized_rows,
+        "data_inicial_effective": str(result.get("data_inicial") or data_inicial),
+        "data_final_effective": str(result.get("data_final") or data_final),
+        "fallback_applied": False,
+        "fallback_reason": " | ".join(errors[:5]),
+        "source": "apps_script_metabase_api",
+        "stores_processed": list(result.get("stores_processed") or []),
     }
 
 
@@ -635,7 +677,7 @@ def fetch_card_823_rows_result(
         raise ValueError("Data inicial não pode ser maior que a data final.")
 
     resolved_store = resolve_store_value(loja=loja, cod_loja=cod_loja)
-    result = _fetch_rows_directly(
+    result = _fetch_rows_via_apps_script(
         data_inicial=valid_initial,
         data_final=valid_final,
         stores=[resolved_store],
@@ -793,7 +835,7 @@ def build_vendas_alvo_from_metabase(
 
     save_metabase_sales_context(data_inicial=valid_initial, data_final=valid_final, stores=selected_stores)
 
-    result = _fetch_rows_directly(
+    result = _fetch_rows_via_apps_script(
         data_inicial=valid_initial,
         data_final=valid_final,
         stores=selected_stores,

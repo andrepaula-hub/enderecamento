@@ -38,7 +38,7 @@ def test_validate_sales_rows_flags_outside_period_and_store_mismatch():
 def test_build_vendas_alvo_from_metabase_aggregates_and_writes(monkeypatch):
     written_payload: dict[str, object] = {}
 
-    def fake_fetch_rows_directly(*, data_inicial, data_final, stores, timeout_seconds):
+    def fake_fetch_rows_via_apps_script(*, data_inicial, data_final, stores, timeout_seconds):
         assert data_inicial == "2026-03-01"
         assert data_final == "2026-03-31"
         assert stores == ["pamplona", "moema"]
@@ -63,7 +63,7 @@ def test_build_vendas_alvo_from_metabase_aggregates_and_writes(monkeypatch):
             "rows_written": len(rows),
         }
 
-    monkeypatch.setattr(metabase_sales, "_fetch_rows_directly", fake_fetch_rows_directly)
+    monkeypatch.setattr(metabase_sales, "_fetch_rows_via_apps_script", fake_fetch_rows_via_apps_script)
     monkeypatch.setattr(metabase_sales, "write_vendas_alvo_sheet", fake_write_vendas_alvo_sheet)
     monkeypatch.setattr(metabase_sales, "save_metabase_sales_context", lambda **kwargs: kwargs)
 
@@ -98,7 +98,7 @@ def test_write_metabase_rows_to_xlsx_writes_marker_when_empty(tmp_path: Path):
 def test_fetch_card_823_rows_uses_card_api(monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_fetch_rows_directly(*, data_inicial, data_final, stores, timeout_seconds):
+    def fake_fetch_rows_via_apps_script(*, data_inicial, data_final, stores, timeout_seconds):
         captured["data_inicial"] = data_inicial
         captured["data_final"] = data_final
         captured["stores"] = stores
@@ -111,7 +111,7 @@ def test_fetch_card_823_rows_uses_card_api(monkeypatch):
             "fallback_reason": "",
         }
 
-    monkeypatch.setattr(metabase_sales, "_fetch_rows_directly", fake_fetch_rows_directly)
+    monkeypatch.setattr(metabase_sales, "_fetch_rows_via_apps_script", fake_fetch_rows_via_apps_script)
 
     store, rows = metabase_sales.fetch_card_823_rows(
         data_inicial="2026-04-01",
@@ -147,3 +147,36 @@ def test_metabase_query_card_with_auth_retry_refreshes_expired_session(monkeypat
 
     assert result == [{"cod_produto": "CT1"}]
     assert calls == ["expired", "fresh"]
+
+
+def test_fetch_rows_via_apps_script_uses_metabase_proxy(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_call(action, payload, *, timeout_seconds):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["timeout_seconds"] = timeout_seconds
+        return {
+            "rows": [{"cod_produto": "CT1", "store_code": "pamplona"}],
+            "data_inicial": "2026-03-01",
+            "data_final": "2026-03-31",
+            "errors": [],
+        }
+
+    monkeypatch.setattr(metabase_sales, "call_apps_script_webapp_action", fake_call)
+
+    result = metabase_sales._fetch_rows_via_apps_script(
+        data_inicial="2026-03-01",
+        data_final="2026-03-31",
+        stores=["pamplona"],
+        timeout_seconds=123,
+    )
+
+    assert captured["action"] == "fetchVendasPorDiaRows"
+    assert captured["payload"] == {
+        "data_inicial": "2026-03-01",
+        "data_final": "2026-03-31",
+        "stores": ["pamplona"],
+    }
+    assert result["source"] == "apps_script_metabase_api"
+    assert result["rows"] == [{"cod_produto": "CT1", "store_code": "pamplona", "_requested_store": "pamplona"}]
