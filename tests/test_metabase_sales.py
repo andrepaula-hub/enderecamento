@@ -38,7 +38,7 @@ def test_validate_sales_rows_flags_outside_period_and_store_mismatch():
 def test_build_vendas_alvo_from_metabase_aggregates_and_writes(monkeypatch):
     written_payload: dict[str, object] = {}
 
-    def fake_fetch_rows_via_apps_script(*, data_inicial, data_final, stores, timeout_seconds):
+    def fake_fetch_rows_directly(*, data_inicial, data_final, stores, timeout_seconds):
         assert data_inicial == "2026-03-01"
         assert data_final == "2026-03-31"
         assert stores == ["pamplona", "moema"]
@@ -63,7 +63,7 @@ def test_build_vendas_alvo_from_metabase_aggregates_and_writes(monkeypatch):
             "rows_written": len(rows),
         }
 
-    monkeypatch.setattr(metabase_sales, "_fetch_rows_via_apps_script", fake_fetch_rows_via_apps_script)
+    monkeypatch.setattr(metabase_sales, "_fetch_rows_directly", fake_fetch_rows_directly)
     monkeypatch.setattr(metabase_sales, "write_vendas_alvo_sheet", fake_write_vendas_alvo_sheet)
     monkeypatch.setattr(metabase_sales, "save_metabase_sales_context", lambda **kwargs: kwargs)
 
@@ -98,7 +98,7 @@ def test_write_metabase_rows_to_xlsx_writes_marker_when_empty(tmp_path: Path):
 def test_fetch_card_823_rows_uses_card_api(monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_fetch_rows_via_apps_script(*, data_inicial, data_final, stores, timeout_seconds):
+    def fake_fetch_rows_directly(*, data_inicial, data_final, stores, timeout_seconds):
         captured["data_inicial"] = data_inicial
         captured["data_final"] = data_final
         captured["stores"] = stores
@@ -111,7 +111,7 @@ def test_fetch_card_823_rows_uses_card_api(monkeypatch):
             "fallback_reason": "",
         }
 
-    monkeypatch.setattr(metabase_sales, "_fetch_rows_via_apps_script", fake_fetch_rows_via_apps_script)
+    monkeypatch.setattr(metabase_sales, "_fetch_rows_directly", fake_fetch_rows_directly)
 
     store, rows = metabase_sales.fetch_card_823_rows(
         data_inicial="2026-04-01",
@@ -124,3 +124,26 @@ def test_fetch_card_823_rows_uses_card_api(monkeypatch):
     assert captured["data_inicial"] == "2026-04-01"
     assert captured["data_final"] == "2026-04-30"
     assert captured["stores"] == ["pamplona"]
+
+
+def test_metabase_query_card_with_auth_retry_refreshes_expired_session(monkeypatch):
+    calls: list[str] = []
+
+    def fake_query_card(*, session_id, **kwargs):
+        calls.append(session_id)
+        if session_id == "expired":
+            raise RuntimeError("Erro ao consultar card 823: status=401 body=Unauthenticated")
+        return [{"cod_produto": "CT1"}]
+
+    monkeypatch.setattr(metabase_sales, "metabase_query_card", fake_query_card)
+    monkeypatch.setattr(metabase_sales, "_resolve_fresh_metabase_session", lambda timeout_seconds: "fresh")
+
+    result = metabase_sales.metabase_query_card_with_auth_retry(
+        base_url="https://metabase.kdabra.com.br",
+        card_id=823,
+        session_id="expired",
+        parameters=[],
+    )
+
+    assert result == [{"cod_produto": "CT1"}]
+    assert calls == ["expired", "fresh"]

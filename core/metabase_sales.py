@@ -280,7 +280,7 @@ def _fetch_rows_directly(
         {"type": "date/single", "value": data_inicial, "target": ["variable", ["template-tag", "data_inicial"]]},
         {"type": "date/single", "value": data_final, "target": ["variable", ["template-tag", "data_final"]]},
     ]
-    all_rows = metabase_query_card(
+    all_rows = metabase_query_card_with_auth_retry(
         base_url=DEFAULT_METABASE_URL,
         card_id=DEFAULT_CARD_ID,
         session_id=session_id,
@@ -342,7 +342,7 @@ def _fetch_store_options_from_metabase(timeout_seconds: int = DEFAULT_TIMEOUT_SE
             {"type": "date/single", "value": ini, "target": ["variable", ["template-tag", "data_inicial"]]},
             {"type": "date/single", "value": fim, "target": ["variable", ["template-tag", "data_final"]]},
         ]
-        rows = metabase_query_card(
+        rows = metabase_query_card_with_auth_retry(
             base_url=DEFAULT_METABASE_URL,
             card_id=DEFAULT_CARD_ID,
             session_id=sid,
@@ -462,6 +462,30 @@ def resolve_metabase_session(session_id: str = "", timeout_seconds: int = DEFAUL
     )
 
 
+def _is_metabase_auth_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "status=401" in text or "unauthenticated" in text or "unauthorized" in text
+
+
+def _resolve_fresh_metabase_session(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> str:
+    """Renova sessão ignorando MB_SESSION_ID local, que pode expirar."""
+    _, username, password = _load_metabase_backend_credentials()
+
+    try:
+        session = get_metabase_session_from_script(timeout_seconds=min(timeout_seconds, 30))
+        if session:
+            return session
+    except Exception:
+        pass
+
+    if username and password:
+        return metabase_login(DEFAULT_METABASE_URL, username, password, timeout_seconds)
+
+    raise RuntimeError(
+        "Sessão do Metabase expirou e não consegui renovar. Verifique Apps Script ou MB_USER/MB_PASS."
+    )
+
+
 def _normalize_metabase_payload(payload: Any, card_id: int) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [row if isinstance(row, dict) else {"value": row} for row in payload]
@@ -517,6 +541,36 @@ def metabase_query_card(
         raise RuntimeError(f"Erro ao consultar card {card_id}: {_decode_http_error(exc)}") from exc
     payload = json.loads(raw or "[]")
     return _normalize_metabase_payload(payload, card_id)
+
+
+def metabase_query_card_with_auth_retry(
+    *,
+    base_url: str,
+    card_id: int,
+    session_id: str,
+    parameters: list[dict[str, Any]],
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> list[dict[str, Any]]:
+    try:
+        return metabase_query_card(
+            base_url=base_url,
+            card_id=card_id,
+            session_id=session_id,
+            parameters=parameters,
+            timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError as exc:
+        if not _is_metabase_auth_error(exc):
+            raise
+
+        refreshed_session = _resolve_fresh_metabase_session(timeout_seconds=timeout_seconds)
+        return metabase_query_card(
+            base_url=base_url,
+            card_id=card_id,
+            session_id=refreshed_session,
+            parameters=parameters,
+            timeout_seconds=timeout_seconds,
+        )
 
 
 def extract_metabase_card_id(value: Any) -> int:

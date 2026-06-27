@@ -148,6 +148,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   const [alerts, setAlerts] = useState([]);
   const [alertAction, setAlertAction] = useState(null); // { id, mode }
   const [autoOpen, setAutoOpen] = useState(false);
+  const [logsHeight, setLogsHeight] = useState(150);
   const logsEndRef = useRef(null);
   const runningProgressTimerRef = useRef(null);
 
@@ -155,6 +156,22 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
 
   const addLog = (msg, type = 'info') => setLogs(l => [...l, { msg, type, ts: now() }]);
   const setStatusMsg = (msg, type = 'info') => setStatus({ msg, type });
+
+  const startLogsResize = (event) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = logsHeight;
+    const onMove = (moveEvent) => {
+      const nextHeight = startHeight + (moveEvent.clientY - startY);
+      setLogsHeight(Math.max(96, Math.min(420, nextHeight)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   useEffect(() => {
     if (logsEndRef.current) {
@@ -738,14 +755,27 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
         )}
 
         {/* Log list */}
-        <div style={{ flex:1, overflowY:'auto', padding:'8px 16px', minHeight:0 }}>
+        <div style={{ height:logsHeight, overflowY:'auto', padding:'8px 16px', minHeight:96, maxHeight:420, flexShrink:0, background:'rgba(255,255,255,0.32)' }}>
           {logs.length === 0 && <div style={{ color:'var(--cfg-text-muted)', fontSize:11, paddingTop:8 }}>Nenhuma operação executada ainda.</div>}
           {logs.map((e, i) => <LogItem key={i} entry={e} />)}
           <div ref={logsEndRef} />
         </div>
 
+        <div
+          onMouseDown={startLogsResize}
+          title="Arraste para redimensionar a área de logs"
+          style={{
+            height:8,
+            cursor:'row-resize',
+            borderTop:'1px solid var(--cfg-border)',
+            borderBottom:'1px solid var(--cfg-border)',
+            background:'linear-gradient(90deg, transparent, rgba(148,163,184,0.30), transparent)',
+            flexShrink:0,
+          }}
+        />
+
         {/* ETL Alerts */}
-        <div style={{ borderTop:'1px solid var(--cfg-border)', padding:'10px 16px', flexShrink:0 }}>
+        <div style={{ padding:'10px 16px', flex:1, minHeight:0, overflowY:'auto' }}>
           <div style={{ fontSize:10, fontWeight:700, color:'var(--cfg-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Alertas ETL</div>
           {alerts.length === 0
             ? <div style={{ fontSize:11, color:'var(--cfg-text-muted)' }}>Nenhum alerta crítico no ETL.</div>
