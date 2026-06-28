@@ -135,6 +135,30 @@ def test_refresh_single_etl_warning_calls_ensure_sheet_before_read(monkeypatch):
     )
 
 
+def test_refresh_single_etl_warning_rebuilds_base_before_evaluating(monkeypatch):
+    """Refresh must use a freshly generated Base_Produtos, not stale warning rows."""
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_sheet_id: str):
+        calls.append((master_sheet_id, mix_sheet_id, target_sheet_id))
+        return {"success": True, "warnings": []}
+
+    import core.enrichment_pipeline as ep
+    monkeypatch.setattr(ep, "run_etl_to_base_products", fake_run_etl_to_base_products)
+
+    result = refresh_single_etl_warning(
+        master_sheet_id="master_id",
+        mix_sheet_id="mix_id",
+        target_sheet_id="target_id",
+        warning_type="degelo_geladeira_vazio",
+    )
+
+    assert calls == [("master_id", "mix_id", "target_id")]
+    assert result["success"] is True
+    assert result["resolved"] is True
+    assert result["warning"]["count"] == 0
+
+
 # ---------------------------------------------------------------------------
 # Fix 2 — Prateleira products: escaninhos capped at 7 in data_prep
 # ---------------------------------------------------------------------------

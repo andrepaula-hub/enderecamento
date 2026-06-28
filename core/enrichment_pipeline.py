@@ -865,25 +865,13 @@ def refresh_single_etl_warning(
     if not warning_norm:
         return {"success": False, "error": "Informe o tipo do alerta para refresh."}
 
-    mix = GSheetsClient(mix_sheet_id)
-    target = GSheetsClient(target_sheet_id)
-    master = GSheetsClient(master_sheet_id)
+    # Refresh needs to reflect the current master/mix sheets. Reading Base_Produtos
+    # directly can keep showing stale warnings after the user fixes the source tabs.
+    etl_result = run_etl_to_base_products(master_sheet_id, mix_sheet_id, target_sheet_id)
+    if not etl_result.get("success"):
+        return etl_result
 
-    duplicated_codes: list[str] = []
-    if warning_norm == "duplicados_mix":
-        mix_df = _build_mix_df(mix)
-        duplicated_codes = _extract_duplicated_codes(mix_df)
-
-    barcode_codes: set[str] | None = None
-    if warning_norm == "sem_barcode":
-        barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
-        df_barcode = _normalize_columns(_safe_df(master.read_values(barcode_name))) if barcode_name else pd.DataFrame()
-        barcode_codes = _extract_barcode_set(df_barcode)
-
-    target.ensure_sheet(SHEET_BASE_PRODUTOS)
-    target_values = target.read_values(SHEET_BASE_PRODUTOS)
-    df_target = _normalize_columns(_safe_df(target_values))
-    warnings = _build_etl_warnings(df_target, duplicated_codes=duplicated_codes, barcode_codes=barcode_codes)
+    warnings = list(etl_result.get("warnings") or [])
 
     warning = next((item for item in warnings if _norm(item.get("type")) == warning_norm), None)
     if warning:
