@@ -1940,28 +1940,45 @@ def _lookup_from_row(row: dict[str, Any], aliases: list[str]) -> Any:
     return None
 
 
-def _card175_extract_equip_key(row: dict[str, Any]) -> tuple[int, int] | None:
-    rua = parse_number(row.get("rua_num"))
+def _card175_street_key(value: Any) -> str:
+    raw = normalize_string(value).upper().strip()
+    if not raw:
+        return ""
+    parsed = parse_number(raw)
+    if parsed is not None:
+        return str(int(parsed))
+    return raw.removeprefix("R")
+
+
+def _street_sort_key_for_card175(value: Any) -> tuple[int, int, str]:
+    raw = _card175_street_key(value)
+    if raw.isdigit():
+        return (1, int(raw), raw)
+    return (0, 0, raw)
+
+
+def _card175_extract_equip_key(row: dict[str, Any]) -> tuple[str, int] | None:
+    rua = _card175_street_key(row.get("rua_num"))
     equip = parse_number(row.get("equipamento_num"))
-    if rua is not None and equip is not None:
-        return int(rua), int(equip)
+    if rua and equip is not None:
+        return rua, int(equip)
 
     location_id = normalize_string(row.get("location_id")).upper()
-    match = re.search(r"-R(\d+)-(?:E)?(\d+)-", location_id)
+    match = re.search(r"-R([A-Z0-9]+)-(?:E)?(\d+)-", location_id)
     if not match:
         return None
-    return int(match.group(1)), int(match.group(2))
+    return _card175_street_key(match.group(1)), int(match.group(2))
 
 
-def _build_cadastro_equipment_map(cadastro_data: list[dict[str, Any]]) -> dict[tuple[int, int], dict[str, Any]]:
-    mapping: dict[tuple[int, int], dict[str, Any]] = {}
+def _build_cadastro_equipment_map(cadastro_data: list[dict[str, Any]]) -> dict[tuple[str, int], dict[str, Any]]:
+    mapping: dict[tuple[str, int], dict[str, Any]] = {}
     for row in cadastro_data:
-        rua = parse_number(_lookup_from_row(row, ["rua_num", "rua"]))
+        rua = _card175_street_key(_lookup_from_row(row, ["rua_num", "rua"]))
         equip = parse_number(_lookup_from_row(row, ["equipamento_num", "equipamento", "equip_num"]))
-        if rua is None or equip is None:
+        if not rua or equip is None:
             continue
-        mapping[(int(rua), int(equip))] = {
-            "rua_num": int(rua),
+        mapping[(rua, int(equip))] = {
+            "rua_num": rua,
             "equipamento_num": int(equip),
             "tipo_equipamento": normalize_string(_lookup_from_row(row, ["tipo_equipamento", "tipo"])).strip(),
             "galpao_id": normalize_string(_lookup_from_row(row, ["galpao_id", "galpao"])).strip(),
@@ -1977,7 +1994,7 @@ def _build_card175_mode_rows(
     cadastro_map = _build_cadastro_equipment_map(cadastro_data)
     volumetria_map = load_volumetria_map(volumetria_data)
     rows_out: list[dict[str, Any]] = []
-    plan_keys: set[tuple[int, int]] = set()
+    plan_keys: set[tuple[str, int]] = set()
     galpao_default = ""
 
     for row in plano_data:
@@ -2030,7 +2047,7 @@ def _build_card175_mode_rows(
 
     rows_out.sort(
         key=lambda row: (
-            int(parse_number(row.get("rua_num")) or 9999),
+            _street_sort_key_for_card175(row.get("rua_num")),
             int(parse_number(row.get("equipamento_num")) or 9999),
             int(parse_number(row.get("nivel")) or 9999),
             int(parse_number(row.get("escaninho_num_no_nivel")) or 9999),

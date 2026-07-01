@@ -167,7 +167,7 @@ function QuickBtn({ label, onClick }) {
 }
 
 // ── Main Prancheta ────────────────────────────────────────────────────────────
-function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width, onVisibleProductsChange, onRegroupPartialProducts }) {
+function DSEPrancheta({ collected, unallocated, allocations, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width, onVisibleProductsChange, onRegroupPartialProducts, quickActionMessage }) {
   const [tab, setTab]           = useState('nao_alocados');
   const [search, setSearch]     = useState('');
   const [filterGrupos, setFG]   = useState([]);
@@ -206,13 +206,20 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
   }, [activeEntries, tab]);
 
   const partialProductCodes = useMemo(() => {
+    const currentlyAllocated = new Set();
+    Object.values(allocations || {}).forEach((allocation) => {
+      if (allocation?.p1) currentlyAllocated.add(String(allocation.p1).trim().toUpperCase());
+      if (allocation?.p2) currentlyAllocated.add(String(allocation.p2).trim().toUpperCase());
+    });
     const codes = new Set();
     activeEntries.forEach((entry) => {
       const hasAddress = entry?.raw?.has_any_address === true || entry?.raw?.hasAnyAddress === '1';
-      if (hasAddress && entry.productCode) codes.add(entry.productCode);
+      if (hasAddress && entry.productCode && currentlyAllocated.has(String(entry.productCode).trim().toUpperCase())) {
+        codes.add(entry.productCode);
+      }
     });
     return Array.from(codes);
-  }, [activeEntries]);
+  }, [activeEntries, allocations]);
 
   // Collect all subcategories from current list
   const allSubs = useMemo(() => {
@@ -505,10 +512,14 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         {showQuick && (
           <div style={{ padding:'4px 8px 10px', display:'flex', flexDirection:'column', gap:3 }}>
             <QuickBtn
-              label={`Reagrupar produtos parciais (${partialProductCodes.length})`}
+              label={`Recolher produtos dispersos (${partialProductCodes.length})`}
               onClick={()=>partialProductCodes.length && onRegroupPartialProducts?.(partialProductCodes)}
             />
-            <QuickBtn label="Recolher produtos dispersos" onClick={()=>{}} />
+            {quickActionMessage && (
+              <div style={{ padding:'5px 7px', borderRadius:4, background:'rgba(13,171,119,0.10)', color:'var(--shopper-green)', fontSize:9, lineHeight:1.4 }}>
+                {quickActionMessage}
+              </div>
+            )}
             <QuickBtn label="Recolher altos em geladeiras" onClick={()=>{}} />
             <QuickBtn label="Recolher 2º slot de prateleiras" onClick={()=>{}} />
             <QuickBtn label="Recolher 2º slot de geladeiras" onClick={()=>{}} />

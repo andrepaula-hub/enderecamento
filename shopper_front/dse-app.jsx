@@ -296,6 +296,7 @@ const initState = {
   collected:[], unallocated:[...INITIAL_UNALLOCATED], searchQuery:'',
   mapStructure:initMapStructure, equipCollapsed:{}, streetCollapsed:{},
   pendingEquipmentTypeChanges:{},
+  quickActionMessage:'',
   pendingConfirm:null,
   swapSource:null,
   highlightProductId:null,
@@ -567,7 +568,7 @@ function reducer(state, action) {
       };
     }
     case 'REGROUP_PARTIAL_PRODUCTS': {
-      const codes = new Set((action.productCodes || []).map(code=>String(code || '').trim()).filter(Boolean));
+      const codes = new Set((action.productCodes || []).map(code=>String(code || '').trim().toUpperCase()).filter(Boolean));
       if (!codes.size) return state;
       const newA = { ...state.allocations };
       const nextUnallocated = [ ...state.unallocated ];
@@ -576,12 +577,12 @@ function reducer(state, action) {
         const alloc = newA[key] || {};
         let p1 = alloc.p1;
         let p2 = alloc.p2;
-        if (p1 && codes.has(String(p1))) {
+        if (p1 && codes.has(String(p1).trim().toUpperCase())) {
           nextUnallocated.push(createUnallocatedEntryId(p1, nextUnallocated));
           p1 = null;
           changed = true;
         }
-        if (p2 && codes.has(String(p2))) {
+        if (p2 && codes.has(String(p2).trim().toUpperCase())) {
           nextUnallocated.push(createUnallocatedEntryId(p2, nextUnallocated));
           p2 = null;
           changed = true;
@@ -597,6 +598,7 @@ function reducer(state, action) {
       return {
         ...commitAllocs(state,newA,null,{ collected:state.collected, unallocated:nextUnallocated }),
         selectedProduct:null,
+        quickActionMessage:`${action.productCodes.length} produto(s) recolhido(s) por completo e devolvido(s) para Não alocados.`,
       };
     }
     case 'UNDO': {
@@ -1134,15 +1136,16 @@ function App() {
           />
 
           {state.pranchetaOpen&&(
-            <DSEPrancheta collected={state.collected} unallocated={state.unallocated}
+            <DSEPrancheta collected={state.collected} unallocated={state.unallocated} allocations={state.allocations}
               selectedProduct={state.selectedProduct} onSelectProduct={id=>dispatch({type:'SELECT_PRODUCT',productId:id})}
               mode2aLeva={state.mode2aLeva} onToggle2aLeva={()=>dispatch({type:'TOGGLE_2A_LEVA'})} width={300}
               onRegroupPartialProducts={(productCodes)=>dispatch({type:'SET_CONFIRM',dialog:{
-                title:'Reagrupar produtos parciais',
+                title:'Recolher produtos dispersos',
                 message:`Os endereços atuais de <strong>${productCodes.length} produto(s)</strong> serão removidos do mapa. Todas as unidades necessárias voltarão juntas para Não alocados.`,
                 confirmLabel:'Reagrupar',
                 onConfirm:()=>dispatch({type:'REGROUP_PARTIAL_PRODUCTS',productCodes}),
               }})}
+              quickActionMessage={state.quickActionMessage}
               onVisibleProductsChange={setVisibleQueue}/>
           )}
         </>)}
