@@ -38,6 +38,19 @@ function createCollectedEntryId(code, existingEntries) {
   return prefix + nextIdx;
 }
 
+function createUnallocatedEntryId(code, existingEntries) {
+  const normalized = String(code || '').trim();
+  const prefix = 'unallocated::' + normalized + '::';
+  let nextIdx = 1;
+  (existingEntries || []).forEach((entryId) => {
+    if (String(entryId || '').startsWith(prefix)) {
+      const suffix = parseInt(String(entryId).slice(prefix.length), 10);
+      if (Number.isFinite(suffix) && suffix >= nextIdx) nextIdx = suffix + 1;
+    }
+  });
+  return prefix + nextIdx;
+}
+
 function parseEscaninhoId(escaninhoId) {
   const parts = String(escaninhoId || '').split('-');
   const pos = parseInt(parts.pop() || '', 10);
@@ -550,6 +563,39 @@ function reducer(state, action) {
       if (!result.changed) return state;
       return {
         ...commitAllocs(state,result.allocations,null,{ collected:result.collected, unallocated:state.unallocated }),
+        selectedProduct:null,
+      };
+    }
+    case 'REGROUP_PARTIAL_PRODUCTS': {
+      const codes = new Set((action.productCodes || []).map(code=>String(code || '').trim()).filter(Boolean));
+      if (!codes.size) return state;
+      const newA = { ...state.allocations };
+      const nextUnallocated = [ ...state.unallocated ];
+      let changed = false;
+      Object.keys(newA).forEach((key) => {
+        const alloc = newA[key] || {};
+        let p1 = alloc.p1;
+        let p2 = alloc.p2;
+        if (p1 && codes.has(String(p1))) {
+          nextUnallocated.push(createUnallocatedEntryId(p1, nextUnallocated));
+          p1 = null;
+          changed = true;
+        }
+        if (p2 && codes.has(String(p2))) {
+          nextUnallocated.push(createUnallocatedEntryId(p2, nextUnallocated));
+          p2 = null;
+          changed = true;
+        }
+        if (!p1 && p2) {
+          p1 = p2;
+          p2 = null;
+        }
+        if (p1 || p2) newA[key] = { p1:p1 || null, p2:p2 || null };
+        else delete newA[key];
+      });
+      if (!changed) return state;
+      return {
+        ...commitAllocs(state,newA,null,{ collected:state.collected, unallocated:nextUnallocated }),
         selectedProduct:null,
       };
     }
@@ -1091,6 +1137,12 @@ function App() {
             <DSEPrancheta collected={state.collected} unallocated={state.unallocated}
               selectedProduct={state.selectedProduct} onSelectProduct={id=>dispatch({type:'SELECT_PRODUCT',productId:id})}
               mode2aLeva={state.mode2aLeva} onToggle2aLeva={()=>dispatch({type:'TOGGLE_2A_LEVA'})} width={300}
+              onRegroupPartialProducts={(productCodes)=>dispatch({type:'SET_CONFIRM',dialog:{
+                title:'Reagrupar produtos parciais',
+                message:`Os endereços atuais de <strong>${productCodes.length} produto(s)</strong> serão removidos do mapa. Todas as unidades necessárias voltarão juntas para Não alocados.`,
+                confirmLabel:'Reagrupar',
+                onConfirm:()=>dispatch({type:'REGROUP_PARTIAL_PRODUCTS',productCodes}),
+              }})}
               onVisibleProductsChange={setVisibleQueue}/>
           )}
         </>)}

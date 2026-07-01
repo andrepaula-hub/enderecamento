@@ -292,6 +292,36 @@ def test_card788_external_address_uses_seven_slots_per_level():
     assert card175_snapshot._external_virtual_location_id("LJ1", "A", 0, 8) == "LJ1-RA-001-2A"
 
 
+def test_card788_special_streets_each_start_with_single_equipment(monkeypatch):
+    values_by_sheet = {
+        "Mapa_Final_Escaninhos": [
+            ["location_id", "galpao_id", "rua_num", "equipamento_num", "tipo_equipamento", "nivel", "escaninho_num_no_nivel", "capacidade_l", "tipo_equipamento_final", "product_code"],
+            ["LJ1-R1-001-1A", "LJ1", 1, 1, "prateleira", 1, 1, 20, "prateleira", "Vazio"],
+        ],
+        "Base_Produtos": [["product_code", "product_name", "grupo"]],
+    }
+    fake_client = _FakeClient(values_by_sheet)
+    monkeypatch.setattr(card175_snapshot, "GSheetsClient", lambda _sheet_id: fake_client)
+    monkeypatch.setattr(card175_snapshot, "_set_card175_context", lambda payload: None)
+
+    result = card175_snapshot.import_card175_rows(
+        sheet_id="fake-sheet",
+        rows=[
+            {"endereco_generated": "LJ1-A-A-A", "cod_produto": "A1", "desc_produto": "A", "quantidade": 1},
+            {"endereco_generated": "LJ1-GE04-05A-A", "cod_produto": "G1", "desc_produto": "G", "quantidade": 1},
+            {"endereco_generated": "LJ1-DEVOL-999-0", "cod_produto": "D1", "desc_produto": "D", "quantidade": 1},
+        ],
+        source_name="metabase_card_788",
+    )
+
+    assert result["success"] is True
+    locations = [row[0] for row in values_by_sheet[card175_snapshot.WORKING_PLAN_SHEET][1:]]
+    assert "LJ1-RA-001-1A" in locations
+    assert "LJ1-RGE04-001-1A" in locations
+    assert "LJ1-RDEVOL-001-1A" in locations
+    assert not any("-R900-" in location for location in locations)
+
+
 def test_import_card175_keeps_virtual_r_addresses_in_working_sheet(monkeypatch):
     values_by_sheet = {
         "Mapa_Final_Escaninhos": [
@@ -347,7 +377,7 @@ def test_import_card175_keeps_virtual_r_addresses_in_working_sheet(monkeypatch):
     assert "LJ1-R2-002-1A" not in generated_locations
 
 
-def test_import_card175_skips_products_not_in_mix(monkeypatch):
+def test_import_card175_keeps_card_only_products_visible(monkeypatch):
     values_by_sheet = {
         "Mapa_Final_Escaninhos": [
             [
@@ -391,6 +421,7 @@ def test_import_card175_skips_products_not_in_mix(monkeypatch):
     )
 
     assert result["success"] is True
-    assert result["skipped_not_in_mix"] == 1
+    assert result["skipped_not_in_mix"] == 0
+    assert result["card_only_products"] == 1
     working_rows = values_by_sheet[card175_snapshot.WORKING_PLAN_SHEET]
-    assert "REMOVIDO" not in [str(value) for row in working_rows for value in row]
+    assert "REMOVIDO" in [str(value) for row in working_rows for value in row]

@@ -167,7 +167,7 @@ function QuickBtn({ label, onClick }) {
 }
 
 // ── Main Prancheta ────────────────────────────────────────────────────────────
-function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width, onVisibleProductsChange }) {
+function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct, mode2aLeva, onToggle2aLeva, width, onVisibleProductsChange, onRegroupPartialProducts }) {
   const [tab, setTab]           = useState('nao_alocados');
   const [search, setSearch]     = useState('');
   const [filterGrupos, setFG]   = useState([]);
@@ -204,6 +204,15 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
     });
     return Array.from(grouped.values());
   }, [activeEntries, tab]);
+
+  const partialProductCodes = useMemo(() => {
+    const codes = new Set();
+    activeEntries.forEach((entry) => {
+      const hasAddress = entry?.raw?.has_any_address === true || entry?.raw?.hasAnyAddress === '1';
+      if (hasAddress && entry.productCode) codes.add(entry.productCode);
+    });
+    return Array.from(codes);
+  }, [activeEntries]);
 
   // Collect all subcategories from current list
   const allSubs = useMemo(() => {
@@ -495,7 +504,10 @@ function DSEPrancheta({ collected, unallocated, selectedProduct, onSelectProduct
         </button>
         {showQuick && (
           <div style={{ padding:'4px 8px 10px', display:'flex', flexDirection:'column', gap:3 }}>
-            <QuickBtn label="Recolher todos com falta de escaninho" onClick={()=>{}} />
+            <QuickBtn
+              label={`Reagrupar produtos parciais (${partialProductCodes.length})`}
+              onClick={()=>partialProductCodes.length && onRegroupPartialProducts?.(partialProductCodes)}
+            />
             <QuickBtn label="Recolher produtos dispersos" onClick={()=>{}} />
             <QuickBtn label="Recolher altos em geladeiras" onClick={()=>{}} />
             <QuickBtn label="Recolher 2º slot de prateleiras" onClick={()=>{}} />

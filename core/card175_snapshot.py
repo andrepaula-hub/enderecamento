@@ -465,7 +465,28 @@ def _import_card175_normalized_rows(
         source_values = client.read_values(source_plan_sheet)
     except ValueError:
         source_plan_sheet = WORKING_PLAN_SHEET
+        source_kind = "plano"
         source_values = []
+
+    # The working plan contains the previous Card 788 snapshot and must never be
+    # reused as a layout template. Rebuild from Cadastro when no clean map sheet
+    # exists, otherwise virtual streets from older imports (for example R900)
+    # become permanent.
+    sheet_names_normalized = {_normalize_header(name) for name in client.list_sheet_names()}
+    has_cadastro_equipamentos = "cadastro_equipamentos" in sheet_names_normalized
+    if prefer_map_source and source_kind != "mapa" and has_cadastro_equipamentos:
+        gen = _generate_slots_from_cadastro(sheet_id, master_sheet_id=master_sheet_id)
+        if not gen.get("success"):
+            return {
+                "success": False,
+                "error": (
+                    "Não foi possível reconstruir o mapa a partir do Cadastro_Equipamentos: "
+                    f"{gen.get('error', 'erro desconhecido')}"
+                ),
+            }
+        client = GSheetsClient(sheet_id)
+        source_plan_sheet, source_kind = _resolve_plan_source_sheet(client, prefer_map=prefer_map_source)
+        source_values = client.read_values(source_plan_sheet)
 
     if _needs_generation(source_values) and source_plan_sheet == WORKING_PLAN_SHEET:
         gen = _generate_slots_from_cadastro(sheet_id, master_sheet_id=master_sheet_id)
@@ -547,14 +568,16 @@ def _import_card175_normalized_rows(
     invalid_rows: list[list[Any]] = []
     unresolved = 0
     skipped_not_in_mix = 0
+    card_only_products = 0
     for item in upload_rows:
         id_local = normalize_string(item.get("id_localizacao"))
         code = normalize_string(item.get("cod_produto"))
         if not code:
             continue
         if code not in base_products:
-            skipped_not_in_mix += 1
-            continue
+            # Card 788 is the source of truth for the current physical address.
+            # Keep card-only SKUs visible, but without inventing ETL metadata.
+            card_only_products += 1
         resolved_loc = ""
         if id_local and id_local in template_by_loc:
             resolved_loc = id_local
@@ -724,7 +747,7 @@ def _import_card175_normalized_rows(
     virtual_locations_count = 0
     virtual_rows_added = 0
 
-    for group_index, group_key in enumerate(sorted(unresolved_groups.keys())):
+    for group_key in sorted(unresolved_groups.keys()):
         group = unresolved_groups[group_key]
         group_items = sorted(
             group.get("items", []),
@@ -744,7 +767,7 @@ def _import_card175_normalized_rows(
             group["tipo_equipamento_final"] = inferred_tipo
             slot_count = len(group_items)
             for slot_idx in range(1, slot_count + 1):
-                virtual_location_id = _external_virtual_location_id(galpao_external, rua_external, group_index, slot_idx)
+                virtual_location_id = _external_virtual_location_id(galpao_external, rua_external, 0, slot_idx)
                 template = template_by_loc.get(virtual_location_id)
                 if template is None:
                     template = _build_virtual_template_row(plan_headers, virtual_location_id, group, None)
@@ -870,6 +893,7 @@ def _import_card175_normalized_rows(
         "unmapped_rows": unresolved,
         "overflow_rows": overflow_count,
         "skipped_not_in_mix": skipped_not_in_mix,
+        "card_only_products": card_only_products,
         "virtual_locations": virtual_locations_count,
         "virtual_address_groups": len(unresolved_groups),
         "virtual_rows_added": virtual_rows_added,
