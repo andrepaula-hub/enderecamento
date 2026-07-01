@@ -75,6 +75,7 @@ CARD175_REQUIRED_PLAN_HEADERS = [
     "slot_duplo",
     "produto_alocado_code",
     "grupo_alocado",
+    "card788_address_original",
 ]
 
 
@@ -650,6 +651,7 @@ def _import_card175_normalized_rows(
         "degelo",
         "metodo",
         "location_id_atual",
+        "card788_address_original",
     ]
     product_col_indices = [idx for idx, h in enumerate(plan_headers) if _normalize_header(h) in product_columns]
 
@@ -679,6 +681,9 @@ def _import_card175_normalized_rows(
 
         for idx, header in enumerate(plan_headers):
             key = _normalize_header(header)
+            if key == "card788_address_original":
+                row_data[idx] = normalize_string(product_data.get("id_localizacao"))
+                continue
             if key in {"product_code", "produto_alocado_code", "product_name", "quantidade", "location_id_atual", "grupo_alocado"}:
                 continue
             if key in base and normalize_string(base.get(key)) != "":

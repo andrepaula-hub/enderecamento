@@ -249,6 +249,7 @@ function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMou
             ['Vol. escaninho', volumePerBinLabel],
             ['Degelo', p.degelo],
             ['Escs. necessários', p.escsNec],
+            ...(p.cardAddressOriginal ? [['Endereço Card 788', p.cardAddressOriginal]] : []),
           ].map(([k, v]) => (
             <div key={k} style={{ display:'flex', flexDirection:'column', gap:1 }}>
               <span style={{ color:'#64748B', fontSize:9, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{k}</span>

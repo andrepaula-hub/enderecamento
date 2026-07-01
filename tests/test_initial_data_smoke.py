@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from core.initial_data import _build_card175_mode_rows, get_initial_data
+from core.initial_data import _build_card175_mode_rows, _build_dashboard_data, get_initial_data
 
 
 def test_card788_mode_keeps_alphanumeric_special_streets():
@@ -31,6 +31,23 @@ def test_card788_mode_keeps_alphanumeric_special_streets():
 
     assert {row["product_code"] for row in result} == {"SKU-A", "SKU-GE", "SKU-D"}
     assert all(row["card175_only_in_plan"] for row in result)
+
+
+def test_card_only_product_is_rendered_without_base_product():
+    dashboard = _build_dashboard_data(
+        [
+            {
+                "location_id": "LJ060001-RDEVOL-001-1A",
+                "product_code": "KDB813",
+                "product_name": "Produto em devolução",
+                "card788_address_original": "LJ060001-DEVOL-999-0",
+            }
+        ],
+        {},
+    )
+
+    assert dashboard[0]["product_code"] == "KDB813"
+    assert "LJ060001-DEVOL-999-0" in dashboard[0]["info_hover"]
 
 
 def test_get_initial_data_smoke():

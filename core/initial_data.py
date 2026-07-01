@@ -202,6 +202,7 @@ def _criar_info_hover(row: dict[str, Any], base_produtos_map: dict[str, dict[str
 
     product_code = normalize_string(row.get("product_code"))
     product_data = base_produtos_map.get(product_code, {})
+    card788_address = normalize_string(row.get("card788_address_original"))
 
     cat_armz = product_data.get("categoria_armazenagem") or row.get("categoria_armazenagem") or "N/A"
     grupo = (
@@ -264,6 +265,7 @@ def _criar_info_hover(row: dict[str, Any], base_produtos_map: dict[str, dict[str
         f"<b>Grupo:</b> {escape_html(grupo)}<br>"
         f"<b>Subcategoria:</b> {subcategoria}<br>"
         f"<b>Código:</b> {escape_html(product_code)}<br>"
+        f"<b>Endereço Card 788:</b> {escape_html(card788_address) if card788_address else 'N/A'}<br>"
         f"<b>Curva:</b> {curva_final}<br>"
         f"<b>Altura:</b> {altura}<br><b>Peso:</b> {peso}<br>"
         f"<b>Quantidade total:</b> {_fmt_measure(quantidade_total)}<br>"
@@ -284,8 +286,6 @@ def _build_dashboard_data(
 ) -> list[dict[str, Any]]:
     def _merge_product_row(row: dict[str, Any]) -> dict[str, Any]:
         product_code = normalize_string(row.get("product_code"))
-        if product_code and product_code != "Vazio" and product_code not in base_produtos_map:
-            return {}
         product_info = (
             base_produtos_map.get(product_code, {})
             if product_code and product_code != "Vazio"
@@ -1626,6 +1626,7 @@ def _build_content_html(
                         f'data-slot2-required="{slot2_required}" '
                         f'data-slot1-missing="{slot1_missing}" '
                         f'data-slot2-missing="{slot2_missing}" '
+                        f'data-card-address-original="{escape_html(merged_bin_info.get("card788_address_original") or "")}" '
                         f'data-missing-total="{total_missing}" '
                         f'data-volume-over-capacity="{"SIM" if over_capacity else "NAO"}" '
                         f'data-slot-duplo="{escape_html(merged_bin_info.get("slot_duplo") or slot_duplo)}" '
@@ -1868,7 +1869,17 @@ def _build_products_for_search(dashboard_data: list[dict[str, Any]]) -> tuple[di
                     product_location_map[code].append(equip_id)
             product_name = slot_names[idx]
             if product_name and code not in products_for_search:
-                products_for_search[code] = {"name": str(product_name), "code": code}
+                products_for_search[code] = {
+                    "name": str(product_name),
+                    "code": code,
+                    "product_name": str(product_name),
+                    "grupo": row.get("grupo") or row.get("grupo_alocado"),
+                    "categoria_armazenagem": row.get("categoria_armazenagem"),
+                    "subcategoria": row.get("subcategoria"),
+                    "curva": row.get("curva"),
+                    "nm_fabricante": row.get("nm_fabricante"),
+                    "card788_address_original": row.get("card788_address_original"),
+                }
 
     return product_location_map, products_for_search
 

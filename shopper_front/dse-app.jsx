@@ -434,6 +434,27 @@ function collectAllocationKeys(state, shouldCollectKey) {
   return { allocations, collected, changed };
 }
 
+function compactCardOnlyAllocations(mapStructure, allocations) {
+  const compacted = { ...allocations };
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => {
+      if (!eq.card175Only) return;
+      const contents = [];
+      for (let n=1;n<=eq.niveis;n++) for (let s=1;s<=eq.escsPerNivel;s++) {
+        const key = `${eq.id}-${n}-${s}`;
+        if (compacted[key]?.p1 || compacted[key]?.p2) contents.push(compacted[key]);
+        delete compacted[key];
+      }
+      contents.forEach((value, index) => {
+        const level = Math.floor(index / eq.escsPerNivel) + 1;
+        const pos = (index % eq.escsPerNivel) + 1;
+        compacted[`${eq.id}-${level}-${pos}`] = value;
+      });
+    });
+  });
+  return compacted;
+}
+
 function pendingStateFingerprint(state) {
   return JSON.stringify({
     allocations: state.allocations,
@@ -595,8 +616,9 @@ function reducer(state, action) {
         else delete newA[key];
       });
       if (!changed) return state;
+      const compacted = compactCardOnlyAllocations(state.mapStructure, newA);
       return {
-        ...commitAllocs(state,newA,null,{ collected:state.collected, unallocated:nextUnallocated }),
+        ...commitAllocs(state,compacted,null,{ collected:state.collected, unallocated:nextUnallocated }),
         selectedProduct:null,
         quickActionMessage:`${action.productCodes.length} produto(s) recolhido(s) por completo e devolvido(s) para Não alocados.`,
       };

@@ -1,7 +1,7 @@
 // DSE Map v3 — Shopper palette, swap contents, recolher rua, highlight + scroll
 const { useState, useCallback, useMemo, useRef, useEffect, memo } = React;
 const { DSEEscaninho, DSEProductTooltip } = window;
-const { PRODUCT_MAP } = window.DSEData;
+const { PRODUCT_MAP, SLOT_META } = window.DSEData;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 const DSEHelpers = window.DSEHelpers || {};
@@ -943,7 +943,10 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
     if(!p1){setTooltip(null);return;}
-    setTooltip(prev=>prev?.escsId===escsId?prev:{escsId,product:p1,product2:p2,x:0,y:0});
+    const sourceAddress = SLOT_META?.[escsId]?.cardAddressOriginal || '';
+    const product = sourceAddress ? {...p1, cardAddressOriginal:sourceAddress} : p1;
+    const product2 = sourceAddress && p2 ? {...p2, cardAddressOriginal:sourceAddress} : p2;
+    setTooltip(prev=>prev?.escsId===escsId?prev:{escsId,product,product2,x:0,y:0});
     const c = containerRef.current;
     if(c){
       c.querySelectorAll('.dse-peer-hovered').forEach(el=>el.classList.remove('dse-peer-hovered'));

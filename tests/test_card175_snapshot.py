@@ -100,11 +100,8 @@ def test_import_card175_creates_working_plan_from_map_sheet(monkeypatch):
     result = card175_snapshot.import_card175_rows(
         sheet_id="fake-sheet",
         rows=[
-            {
-                "galpao": "LJ1",
-                "rua": "1",
-                "posicao_pallete": "1",
-                "escaninho_nivel": "1A",
+                {
+                    "endereco_generated": "LJ1-R1-001-1A",
                 "cod_produto": "SKU1",
                 "desc_produto": "Produto 1",
                 "quantidade": 3,
@@ -408,10 +405,7 @@ def test_import_card175_keeps_card_only_products_visible(monkeypatch):
         sheet_id="fake-sheet",
         rows=[
             {
-                "galpao": "LJ1",
-                "rua": "1",
-                "posicao_pallete": "1",
-                "escaninho_nivel": "1A",
+                "endereco_generated": "LJ1-R1-001-1A",
                 "cod_produto": "REMOVIDO",
                 "desc_produto": "Produto removido do mix",
                 "quantidade": 3,
@@ -425,3 +419,7 @@ def test_import_card175_keeps_card_only_products_visible(monkeypatch):
     assert result["card_only_products"] == 1
     working_rows = values_by_sheet[card175_snapshot.WORKING_PLAN_SHEET]
     assert "REMOVIDO" in [str(value) for row in working_rows for value in row]
+    headers = working_rows[0]
+    address_idx = headers.index("card788_address_original")
+    removed_row = next(row for row in working_rows[1:] if "REMOVIDO" in row)
+    assert removed_row[address_idx] == "LJ1-R1-001-1A"

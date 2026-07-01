@@ -138,11 +138,17 @@
       seenCodes[normalized] = true;
       codes.push(normalized);
     });
+    Object.keys(searchByCode).forEach(function (code) {
+      var normalized = normalizeText(code);
+      if (!normalized || seenCodes[normalized]) return;
+      seenCodes[normalized] = true;
+      codes.push(normalized);
+    });
 
     var products = codes
       .filter(function (code) { return code && code !== 'Vazio'; })
       .map(function (code) {
-        var row = baseMap[code] || extraByCode[code] || {};
+        var row = baseMap[code] || extraByCode[code] || searchByCode[code] || {};
         return {
           id: code,
           nome: normalizeText(row.product_name || (searchByCode[code] || {}).name || code),
@@ -236,6 +242,7 @@
             pos: pos,
             slot1InstanceId: normalizeText(binEl.getAttribute('data-slot1-instance-id')),
             slot2InstanceId: normalizeText(binEl.getAttribute('data-slot2-instance-id')),
+            cardAddressOriginal: normalizeText(binEl.getAttribute('data-card-address-original')),
           };
 
           [slot1, slot2].forEach(function (code) {
