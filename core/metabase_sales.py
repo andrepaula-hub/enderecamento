@@ -34,6 +34,7 @@ METABASE_ENV_PATH = CREDENTIALS_DIR / "metabase.env"
 METABASE_CREDENTIALS_JSON_PATH = CREDENTIALS_DIR / "metabase_credentials.json"
 METABASE_STORES_CACHE_PATH = CREDENTIALS_DIR / "metabase_stores_cache.json"
 STORES_CACHE_TTL_HOURS = 12
+STORES_CACHE_SCHEMA_VERSION = 2
 
 STORE_OPTIONS: list[dict[str, str]] = [
     {"value": "altoDePinheiros", "label": "Alto de Pinheiros"},
@@ -48,6 +49,7 @@ STORE_OPTIONS: list[dict[str, str]] = [
     {"value": "pinheiros", "label": "Pinheiros"},
     {"value": "saoCaetanoDoSul", "label": "São Caetano do Sul"},
     {"value": "tatupae", "label": "Tatuapé"},
+    {"value": "vilaGuilherme", "label": "Vila Guilherme", "query_value": "Vila Guilherme"},
     {"value": "vilaMariana", "label": "Vila Mariana"},
     {"value": "vilaOlimpia", "label": "Vila Olímpia"},
 ]
@@ -56,6 +58,7 @@ STORE_LABEL_BY_ID = {item["value"]: item["label"] for item in STORE_OPTIONS}
 STORE_CODE_TO_METABASE_LOJA = {
     "LJ060001": "pamplona",
     "LJ180001": "campinas",
+    "LJ210001": "vilaGuilherme",
 }
 STORE_KEYWORDS_BY_ID = {
     "altoDePinheiros": ["alto de pinheiros"],
@@ -70,6 +73,7 @@ STORE_KEYWORDS_BY_ID = {
     "pinheiros": ["dark store pinheiros"],  # específico para não colidir com alto de pinheiros
     "saoCaetanoDoSul": ["sao caetano do sul"],
     "tatupae": ["tatuape"],
+    "vilaGuilherme": ["vila guilherme"],
     "vilaMariana": ["vila mariana"],
     "vilaOlimpia": ["vila olimpia"],
 }
@@ -86,6 +90,7 @@ CARD175_STORE_CODE_BY_ID = {
     "vilaMariana": "LJ150001",
     "brooklin": "LJ160001",
     "campinas": "LJ180001",
+    "vilaGuilherme": "LJ210001",
 }
 
 
@@ -122,8 +127,8 @@ def _default_sales_range(today: date | None = None) -> tuple[str, str]:
     return start_date.isoformat(), end_date.isoformat()
 
 
-def _normalize_store_ids(raw_stores: Any) -> list[str]:
-    known = set(STORE_LABEL_BY_ID.keys())
+def _normalize_store_ids(raw_stores: Any, available_stores: list[dict[str, str]] | None = None) -> list[str]:
+    known = {str(item.get("value") or "").strip() for item in (available_stores or STORE_OPTIONS)}
     normalized: list[str] = []
     for raw in raw_stores or []:
         value = str(raw or "").strip()
@@ -137,7 +142,7 @@ def get_metabase_sales_context() -> dict[str, Any]:
     context = _load_context()
     default_initial, default_final = _default_sales_range()
     available_stores = _fetch_store_options_from_metabase()
-    stores = _normalize_store_ids(context.get("stores")) or [item["value"] for item in available_stores]
+    stores = _normalize_store_ids(context.get("stores"), available_stores) or [item["value"] for item in available_stores]
     return {
         "data_inicial": default_initial,
         "data_final": default_final,
@@ -155,9 +160,8 @@ def save_metabase_sales_context(
     data_final: str,
     stores: list[str],
 ) -> dict[str, Any]:
-    payload = {
-        "stores": _normalize_store_ids(stores),
-    }
+    available_stores = _fetch_store_options_from_metabase()
+    payload = {"stores": _normalize_store_ids(stores, available_stores)}
     _save_context(payload)
     return get_metabase_sales_context()
 
@@ -304,12 +308,19 @@ def _fetch_rows_via_apps_script(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Busca o card 823 pelo Apps Script, que encapsula MetabaseAPI/autenticação."""
+    available_stores = _fetch_store_options_from_metabase(timeout_seconds=timeout_seconds)
+    option_by_id = {str(item.get("value") or ""): item for item in available_stores}
+    query_store_by_id = {
+        store_id: str(option_by_id.get(store_id, {}).get("query_value") or store_id).strip()
+        for store_id in stores
+    }
+    id_by_query_store = {query_value: store_id for store_id, query_value in query_store_by_id.items()}
     result = call_apps_script_webapp_action(
         "fetchVendasPorDiaRows",
         {
             "data_inicial": data_inicial,
             "data_final": data_final,
-            "stores": stores,
+            "stores": list(query_store_by_id.values()),
         },
         timeout_seconds=timeout_seconds,
     )
@@ -321,7 +332,7 @@ def _fetch_rows_via_apps_script(
         item = dict(row)
         requested_store = str(item.get("_requested_store") or item.get("store_code") or "").strip()
         if requested_store:
-            item["_requested_store"] = requested_store
+            item["_requested_store"] = id_by_query_store.get(requested_store, requested_store)
         normalized_rows.append(item)
 
     errors = [str(error) for error in (result.get("errors") or []) if str(error).strip()]
@@ -335,19 +346,23 @@ def _fetch_rows_via_apps_script(
         "fallback_applied": False,
         "fallback_reason": " | ".join(errors[:5]),
         "source": "apps_script_metabase_api",
-        "stores_processed": list(result.get("stores_processed") or []),
+        "stores_processed": [
+            id_by_query_store.get(str(store), str(store)) for store in (result.get("stores_processed") or [])
+        ],
     }
 
 
-def _read_stores_cache() -> list[dict[str, str]] | None:
+def _read_stores_cache(*, allow_stale: bool = False) -> list[dict[str, str]] | None:
     """Lê o cache de lojas se ele existir e for válido (< STORES_CACHE_TTL_HOURS horas)."""
     if not METABASE_STORES_CACHE_PATH.exists():
         return None
     try:
         payload = json.loads(METABASE_STORES_CACHE_PATH.read_text(encoding="utf-8"))
+        if int(payload.get("schema_version") or 0) != STORES_CACHE_SCHEMA_VERSION:
+            return None
         cached_at = datetime.fromisoformat(str(payload.get("cached_at") or ""))
         age_hours = (datetime.now() - cached_at).total_seconds() / 3600
-        if age_hours > STORES_CACHE_TTL_HOURS:
+        if age_hours > STORES_CACHE_TTL_HOURS and not allow_stale:
             return None
         stores = payload.get("stores")
         if isinstance(stores, list) and stores:
@@ -361,7 +376,14 @@ def _write_stores_cache(stores: list[dict[str, str]]) -> None:
     try:
         METABASE_STORES_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         METABASE_STORES_CACHE_PATH.write_text(
-            json.dumps({"cached_at": datetime.now().isoformat(), "stores": stores}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "schema_version": STORES_CACHE_SCHEMA_VERSION,
+                    "cached_at": datetime.now().isoformat(),
+                    "stores": stores,
+                },
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     except Exception:
@@ -369,58 +391,43 @@ def _write_stores_cache(stores: list[dict[str, str]]) -> None:
 
 
 def _fetch_store_options_from_metabase(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> list[dict[str, str]]:
-    """Descobre lojas consultando o card 823 sem filtro de Loja (último mês).
-    Usa cache de 12h para evitar consultas demoradas a cada page load."""
+    """Descobre lojas pelo Apps Script/MetabaseAPI e mantém cache de 12h."""
     cached = _read_stores_cache()
     if cached is not None:
         return cached
 
     try:
-        sid = resolve_metabase_session(timeout_seconds=timeout_seconds)
         today = date.today()
-        ini = (today - timedelta(days=30)).isoformat()
-        fim = today.isoformat()
-        params = [
-            {"type": "date/single", "value": ini, "target": ["variable", ["template-tag", "data_inicial"]]},
-            {"type": "date/single", "value": fim, "target": ["variable", ["template-tag", "data_final"]]},
-        ]
-        rows = metabase_query_card_with_auth_retry(
-            base_url=DEFAULT_METABASE_URL,
-            card_id=DEFAULT_CARD_ID,
-            session_id=sid,
-            parameters=params,
+        result_payload = call_apps_script_webapp_action(
+            "fetchVendasStoreOptions",
+            {
+                "data_inicial": (today - timedelta(days=30)).isoformat(),
+                "data_final": today.isoformat(),
+            },
             timeout_seconds=timeout_seconds,
         )
-        dark_stores = sorted({_norm_text(str(r.get("dark_store") or "")) for r in rows if r.get("dark_store")})
-        if not dark_stores:
-            return list(STORE_OPTIONS)
-
-        reverse: dict[str, str] = {}
-        for store_id, keywords in STORE_KEYWORDS_BY_ID.items():
-            for kw in keywords:
-                for ds in dark_stores:
-                    if kw in ds and ds not in reverse:
-                        reverse[ds] = store_id
-
-        options: list[dict[str, str]] = []
+        options = []
         seen_ids: set[str] = set()
-        for ds in dark_stores:
-            store_id = reverse.get(ds)
-            if store_id and store_id not in seen_ids:
-                seen_ids.add(store_id)
-                options.append({"value": store_id, "label": STORE_LABEL_BY_ID.get(store_id, store_id)})
-            elif not store_id:
-                raw = str(next((r.get("dark_store") for r in rows if _norm_text(str(r.get("dark_store", ""))) == ds), ds))
-                generated_id = re.sub(r"[^a-zA-Z0-9]", "", raw.title())[:30]
-                if generated_id and generated_id not in seen_ids:
-                    seen_ids.add(generated_id)
-                    options.append({"value": generated_id, "label": raw})
-
-        result = options if options else list(STORE_OPTIONS)
+        for raw in result_payload.get("stores") or []:
+            if not isinstance(raw, dict):
+                continue
+            value = str(raw.get("value") or "").strip()
+            label = str(raw.get("label") or value).strip()
+            if not value or not label or value in seen_ids:
+                continue
+            seen_ids.add(value)
+            option = {"value": value, "label": label}
+            query_value = str(raw.get("query_value") or "").strip()
+            if query_value and query_value != value:
+                option["query_value"] = query_value
+            options.append(option)
+        if not options:
+            raise RuntimeError("Card 823 não retornou nenhuma loja nos últimos 30 dias.")
+        result = sorted(options, key=lambda item: _norm_text(item["label"]))
         _write_stores_cache(result)
         return result
     except Exception:
-        return list(STORE_OPTIONS)
+        return _read_stores_cache(allow_stale=True) or list(STORE_OPTIONS)
 
 
 def resolve_store_value(loja: str = "", cod_loja: str = "") -> str:
@@ -829,7 +836,8 @@ def build_vendas_alvo_from_metabase(
     if valid_initial > valid_final:
         raise ValueError("Data inicial não pode ser maior que a data final.")
 
-    selected_stores = _normalize_store_ids(stores)
+    available_stores = _fetch_store_options_from_metabase(timeout_seconds=timeout_seconds)
+    selected_stores = _normalize_store_ids(stores, available_stores)
     if not selected_stores:
         raise ValueError("Selecione pelo menos uma loja para montar Vendas Alvo.")
 
@@ -850,9 +858,13 @@ def build_vendas_alvo_from_metabase(
             continue
         rows_by_store.setdefault(row_store, []).append(row)
 
+    label_by_id = {
+        str(item.get("value") or ""): str(item.get("label") or item.get("value") or "")
+        for item in available_stores
+    }
     for store_id in selected_stores:
         validation = validate_sales_rows(rows_by_store.get(store_id, []), store_id, valid_initial, valid_final)
-        store_results.append({"store_id": store_id, "store_label": STORE_LABEL_BY_ID.get(store_id, store_id), **validation})
+        store_results.append({"store_id": store_id, "store_label": label_by_id.get(store_id, store_id), **validation})
 
     aggregated_rows = aggregate_sales_rows(all_rows)
     write_result = write_vendas_alvo_sheet(master_sheet_id, aggregated_rows)
@@ -866,7 +878,7 @@ def build_vendas_alvo_from_metabase(
         "rows_written": write_result["rows_written"],
         "rows_fetched_raw": len(all_rows),
         "stores": selected_stores,
-        "stores_labels": [STORE_LABEL_BY_ID.get(store_id, store_id) for store_id in selected_stores],
+        "stores_labels": [label_by_id.get(store_id, store_id) for store_id in selected_stores],
         "data_inicial": valid_initial,
         "data_final": valid_final,
         "data_inicial_effective": effective_initial,

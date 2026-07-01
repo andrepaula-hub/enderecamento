@@ -164,6 +164,11 @@ def test_fetch_rows_via_apps_script_uses_metabase_proxy(monkeypatch):
         }
 
     monkeypatch.setattr(metabase_sales, "call_apps_script_webapp_action", fake_call)
+    monkeypatch.setattr(
+        metabase_sales,
+        "_fetch_store_options_from_metabase",
+        lambda timeout_seconds: [{"value": "pamplona", "label": "Jardins / Pamplona"}],
+    )
 
     result = metabase_sales._fetch_rows_via_apps_script(
         data_inicial="2026-03-01",
@@ -180,3 +185,73 @@ def test_fetch_rows_via_apps_script_uses_metabase_proxy(monkeypatch):
     }
     assert result["source"] == "apps_script_metabase_api"
     assert result["rows"] == [{"cod_produto": "CT1", "store_code": "pamplona", "_requested_store": "pamplona"}]
+
+
+def test_fetch_rows_uses_query_value_and_maps_result_back_to_store_id(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_call(action, payload, *, timeout_seconds):
+        captured["payload"] = payload
+        return {
+            "rows": [{"cod_produto": "CT1", "_requested_store": "Vila Guilherme"}],
+            "stores_processed": ["Vila Guilherme"],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(metabase_sales, "call_apps_script_webapp_action", fake_call)
+    monkeypatch.setattr(
+        metabase_sales,
+        "_fetch_store_options_from_metabase",
+        lambda timeout_seconds: [
+            {"value": "vilaGuilherme", "label": "Vila Guilherme", "query_value": "Vila Guilherme"}
+        ],
+    )
+
+    result = metabase_sales._fetch_rows_via_apps_script(
+        data_inicial="2026-06-01",
+        data_final="2026-07-01",
+        stores=["vilaGuilherme"],
+        timeout_seconds=123,
+    )
+
+    assert captured["payload"]["stores"] == ["Vila Guilherme"]
+    assert result["rows"][0]["_requested_store"] == "vilaGuilherme"
+    assert result["stores_processed"] == ["vilaGuilherme"]
+
+
+def test_fetch_store_options_uses_apps_script_and_keeps_new_store(monkeypatch, tmp_path):
+    cache_path = tmp_path / "stores.json"
+    captured: dict[str, object] = {}
+
+    def fake_call(action, payload, *, timeout_seconds):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {
+            "stores": [
+                {"value": "pamplona", "label": "Jardins / Pamplona"},
+                {"value": "vilaGuilherme", "label": "Vila Guilherme"},
+            ]
+        }
+
+    monkeypatch.setattr(metabase_sales, "METABASE_STORES_CACHE_PATH", cache_path)
+    monkeypatch.setattr(metabase_sales, "call_apps_script_webapp_action", fake_call)
+
+    result = metabase_sales._fetch_store_options_from_metabase(timeout_seconds=45)
+
+    assert captured["action"] == "fetchVendasStoreOptions"
+    assert result == [
+        {"value": "pamplona", "label": "Jardins / Pamplona"},
+        {"value": "vilaGuilherme", "label": "Vila Guilherme"},
+    ]
+    assert cache_path.exists()
+
+
+def test_normalize_store_ids_accepts_dynamically_discovered_store():
+    available = [
+        {"value": "pamplona", "label": "Jardins / Pamplona"},
+        {"value": "vilaGuilherme", "label": "Vila Guilherme"},
+    ]
+
+    assert metabase_sales._normalize_store_ids(
+        ["vilaGuilherme", "unknown", "pamplona"], available
+    ) == ["vilaGuilherme", "pamplona"]

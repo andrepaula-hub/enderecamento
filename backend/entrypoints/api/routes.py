@@ -264,7 +264,8 @@ def new_suggest_allocations(req: SuggestAllocationsRequest) -> JSONResponse:
 
 @router.get("/api/stores")
 def new_list_stores() -> JSONResponse:
-    """Retorna lista de lojas disponíveis (hardcoded, migração futura para SQLite)."""
-    from core.metabase_sales import STORE_OPTIONS
-    stores = [{"id": s["value"], "nome": s["label"]} for s in STORE_OPTIONS]
+    """Retorna as lojas atualmente disponíveis no Card 823."""
+    from core.metabase_sales import get_metabase_sales_context
+    available = get_metabase_sales_context()["available_stores"]
+    stores = [{"id": s["value"], "nome": s["label"]} for s in available]
     return JSONResponse({"success": True, "stores": stores})
