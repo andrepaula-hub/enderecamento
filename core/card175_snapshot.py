@@ -840,8 +840,7 @@ def _import_card175_normalized_rows(
 
     apply_slot_duplo_flags(plan_rows_out)
 
-    client.clear_sheet(CARD175_PLAN_SHEET)
-    _append_rows_chunked(client, CARD175_PLAN_SHEET, [plan_headers] + plan_rows_out)
+    client.replace_sheet_values(CARD175_PLAN_SHEET, [plan_headers] + plan_rows_out)
 
     working_rows_out = list(plan_rows_out)
     if virtual_rows_added > 0:
@@ -854,11 +853,9 @@ def _import_card175_normalized_rows(
 
     apply_slot_duplo_flags(working_rows_out)
 
-    client.clear_sheet(WORKING_PLAN_SHEET)
-    _append_rows_chunked(client, WORKING_PLAN_SHEET, [plan_headers] + working_rows_out)
+    client.replace_sheet_values(WORKING_PLAN_SHEET, [plan_headers] + working_rows_out)
 
-    client.clear_sheet(CARD175_BASE_SHEET)
-    _append_rows_chunked(client, CARD175_BASE_SHEET, [plan_headers] + plan_rows_out)
+    client.replace_sheet_values(CARD175_BASE_SHEET, [plan_headers] + plan_rows_out)
 
     changelog_headers = [
         "timestamp",
@@ -869,8 +866,7 @@ def _import_card175_normalized_rows(
         "origem_operacao",
         "arquivo_card_175",
     ]
-    client.clear_sheet(CARD175_CHANGELOG_SHEET)
-    _append_rows_chunked(client, CARD175_CHANGELOG_SHEET, [changelog_headers])
+    client.replace_sheet_values(CARD175_CHANGELOG_SHEET, [changelog_headers])
 
     _set_card175_context(
         {

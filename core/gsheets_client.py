@@ -177,11 +177,25 @@ class GSheetsClient:
             return base
         return f"{base}/edit#gid={gid}"
 
-    def ensure_sheet(self, name: str) -> None:
+    def ensure_sheet(self, name: str, row_count: int = 1000, column_count: int = 26) -> None:
         self._load_metadata()
         if name in self._sheet_map:
             return
-        body = {"requests": [{"addSheet": {"properties": {"title": name}}}]}
+        body = {
+            "requests": [
+                {
+                    "addSheet": {
+                        "properties": {
+                            "title": name,
+                            "gridProperties": {
+                                "rowCount": max(1, int(row_count)),
+                                "columnCount": max(1, int(column_count)),
+                            },
+                        }
+                    }
+                }
+            ]
+        }
         try:
             self._execute(self._sheets.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body))
         except HttpError as exc:
@@ -193,6 +207,40 @@ class GSheetsClient:
             if name not in self._sheet_map:
                 raise
         self._metadata = None
+
+    def resize_sheet(self, name: str, row_count: int, column_count: int) -> None:
+        self._load_metadata()
+        sheet_gid = self._sheet_map.get(name)
+        if sheet_gid is None:
+            raise ValueError(f"Aba '{name}' não encontrada")
+        body = {
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_gid,
+                            "gridProperties": {
+                                "rowCount": max(1, int(row_count)),
+                                "columnCount": max(1, int(column_count)),
+                            },
+                        },
+                        "fields": "gridProperties.rowCount,gridProperties.columnCount",
+                    }
+                }
+            ]
+        }
+        self._execute(self._sheets.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body))
+        self._metadata = None
+
+    def replace_sheet_values(self, name: str, rows: list[list[Any]]) -> None:
+        row_count = max(1, len(rows))
+        column_count = max(1, max((len(row) for row in rows), default=1))
+        self.ensure_sheet(name, row_count=row_count, column_count=column_count)
+        self.clear_sheet(name)
+        self.resize_sheet(name, row_count, column_count)
+        if rows:
+            end_col = col_to_letter(column_count - 1)
+            self.update_range(f"{name}!A1:{end_col}{row_count}", rows)
 
     def clear_sheet(self, name: str) -> None:
         self.ensure_sheet(name)

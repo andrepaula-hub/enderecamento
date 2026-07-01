@@ -39,6 +39,9 @@ class _FakeClient:
         self._values_by_sheet.setdefault(sheet_name, [])
         self._values_by_sheet[sheet_name].extend(rows)
 
+    def replace_sheet_values(self, sheet_name: str, rows: list[list[Any]]) -> None:
+        self._values_by_sheet[sheet_name] = [list(row) for row in rows]
+
     def get_sheet_url(self, sheet_name: str) -> str:
         return f"https://fake/{sheet_name}"
 

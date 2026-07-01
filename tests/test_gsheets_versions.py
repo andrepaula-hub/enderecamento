@@ -11,6 +11,7 @@ class _FakeClient:
         self.values = [["h1"], ["v1"]]
         self.cleared = []
         self.appended = []
+        self.resized = []
 
     def list_sheet_names(self):
         return list(self._sheet_names)
@@ -26,6 +27,13 @@ class _FakeClient:
         self.cleared.append(name)
 
     def append_rows(self, name, rows):
+        self.appended.append((name, rows))
+
+    def resize_sheet(self, name, row_count, column_count):
+        self.resized.append((name, row_count, column_count))
+
+    def replace_sheet_values(self, name, rows):
+        self.cleared.append(name)
         self.appended.append((name, rows))
 
     def delete_sheet(self, name):
@@ -67,3 +75,16 @@ def test_list_versions_gsheet_uses_metadata_timestamp(monkeypatch, tmp_path: Pat
     assert result["success"] is True
     assert result["versions"][0]["label"] == "teste_ENDERECAMENTO[1]"
     assert result["versions"][0]["timestamp"] == "2026-06-17T08:54:10-03:00"
+
+
+def test_save_version_compacts_source_and_replaces_target_values(monkeypatch, tmp_path: Path):
+    fake = _FakeClient([gv.SHEET_PLANO_FINAL])
+    fake.values = [["h1", "h2"], ["v1", "v2"]]
+    monkeypatch.setattr(gv, "VERSION_METADATA_PATH", tmp_path / "versions.json")
+    monkeypatch.setattr(gv, "GSheetsClient", lambda sheet_id: fake)
+
+    result = gv.save_plano_version_gsheet("sheet-1", "teste")
+
+    assert result["success"] is True
+    assert fake.resized == [(gv.SHEET_PLANO_FINAL, 2, 2)]
+    assert fake.appended == [("teste_ENDERECAMENTO[1]", fake.values)]

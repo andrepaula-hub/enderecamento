@@ -122,9 +122,9 @@ def save_plano_version_gsheet(sheet_id: str, name: str) -> dict[str, Any]:
         return {"success": False, "error": "Aba Plano_Enderecamento_Final vazia ou não encontrada."}
     sheet_name = _build_version_sheet_name(client, name)
     created_at = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
-    client.ensure_sheet(sheet_name)
-    client.clear_sheet(sheet_name)
-    client.append_rows(sheet_name, values)
+    source_cols = max((len(row) for row in values), default=1)
+    client.resize_sheet(SHEET_PLANO_FINAL, max(1, len(values)), source_cols)
+    client.replace_sheet_values(sheet_name, values)
     _store_version_metadata(sheet_id, sheet_name, sheet_name, created_at)
     return {
         "success": True,
@@ -166,8 +166,7 @@ def restore_plano_version_gsheet(sheet_id: str, version_id: str) -> dict[str, An
     values = client.read_values(version_id)
     if not values:
         return {"success": False, "error": "Versão vazia."}
-    client.clear_sheet(SHEET_PLANO_FINAL)
-    client.append_rows(SHEET_PLANO_FINAL, values)
+    client.replace_sheet_values(SHEET_PLANO_FINAL, values)
     return {
         "success": True,
         "rows": len(values),
