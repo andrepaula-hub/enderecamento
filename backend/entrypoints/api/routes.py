@@ -62,6 +62,10 @@ class SuggestAllocationsRequest(BaseModel):
     options: dict[str, Any] = {}
 
 
+class FillStreetRequest(SuggestAllocationsRequest):
+    target_groups: list[dict[str, Any]] = []
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -255,6 +259,23 @@ def new_suggest_allocations(req: SuggestAllocationsRequest) -> JSONResponse:
             products_data=req.products_data,
             map_structure=req.map_structure,
             allocations=req.allocations,
+            options=req.options,
+        )
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)})
+
+
+@router.post("/api/addressing/fill-street")
+def new_fill_street_allocations(req: FillStreetRequest) -> JSONResponse:
+    from backend.application.addressing.fill_street import fill_street_allocations
+    try:
+        result = fill_street_allocations(
+            unallocated_codes=req.unallocated_codes,
+            products_data=req.products_data,
+            map_structure=req.map_structure,
+            allocations=req.allocations,
+            target_groups=req.target_groups,
             options=req.options,
         )
         return JSONResponse(result)

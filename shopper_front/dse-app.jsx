@@ -64,6 +64,116 @@ function parseEscaninhoId(escaninhoId) {
   };
 }
 
+function requiredBinsForQueueCode(productCode) {
+  const product = PRODUCT_MAP[productCode];
+  const raw = product && (product.escsNec || product.escaninhos_necessarios);
+  const parsed = parseInt(String(raw == null ? '' : raw), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function capQueueByRemainingBins(queue, allocations) {
+  const allocatedCountByCode = {};
+  Object.values(allocations || {}).forEach((alloc) => {
+    if (!alloc) return;
+    ['p1', 'p2'].forEach((field) => {
+      const code = resolveBoardEntryProductCode(alloc[field]);
+      if (!code) return;
+      allocatedCountByCode[code] = (allocatedCountByCode[code] || 0) + 1;
+    });
+  });
+  const used = {};
+  return (queue || []).filter((entryId) => {
+    const code = resolveBoardEntryProductCode(entryId);
+    if (!code) return false;
+    const remaining = Math.max(0, requiredBinsForQueueCode(code) - (allocatedCountByCode[code] || 0));
+    if ((used[code] || 0) >= remaining) return false;
+    used[code] = (used[code] || 0) + 1;
+    return true;
+  });
+}
+
+function collectStreetFillTargets(state, options) {
+  const streetId = options && options.streetId;
+  const equipmentIds = new Set(options && options.equipmentIds || []);
+  const levelMode = options && options.levelMode || 'all';
+  const targets = [];
+  (state.mapStructure || []).forEach((street) => {
+    if (streetId && street.id !== streetId) return;
+    if (state.streetCollapsed[street.id]) return;
+    (street.equipment || []).forEach((eq) => {
+      if (equipmentIds.size && !equipmentIds.has(eq.id)) return;
+      for (let level = 1; level <= eq.niveis; level += 1) {
+        if (levelMode === 'without_top' && level === 1) continue;
+        for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
+          const escaninhoId = `${eq.id}-${level}-${pos}`;
+          const alloc = state.allocations[escaninhoId] || {};
+          if (!alloc.p1) targets.push(escaninhoId);
+        }
+      }
+    });
+  });
+  return targets;
+}
+
+function summarizeNumberList(numbers) {
+  return (numbers || [])
+    .slice()
+    .sort((a, b) => Number(a) - Number(b))
+    .map((number) => String(number).padStart(3, '0'))
+    .join(', ');
+}
+
+function equipmentSummaryLabel(eq, allocations) {
+  const tipo = normalizeSearchText(eq?.tipo || '');
+  let degeloNao = 0;
+  let occupied = 0;
+  for (let level = 1; level <= (eq?.niveis || 0); level += 1) {
+    for (let pos = 1; pos <= (eq?.escsPerNivel || 0); pos += 1) {
+      const alloc = allocations[`${eq.id}-${level}-${pos}`] || {};
+      ['p1', 'p2'].forEach((slot) => {
+        const code = resolveBoardEntryProductCode(alloc[slot]);
+        const product = PRODUCT_MAP[code];
+        if (!product) return;
+        occupied += 1;
+        if (product.degelo === 'NÃO') degeloNao += 1;
+      });
+    }
+  }
+  const isGeladeira = tipo.includes('geladeira') || tipo.includes('refriger');
+  if (isGeladeira && occupied > 0 && degeloNao / occupied >= 0.5) return 'geladeira de gerador';
+  if (tipo.includes('freezer')) return 'freezer';
+  if (isGeladeira && tipo.includes('alta')) return 'geladeira alta';
+  if (isGeladeira) return 'geladeira';
+  if (tipo.includes('prateleira') || tipo.includes('pamplona') || tipo.includes('lateral')) return 'prateleira';
+  return eq?.tipo || 'equipamento';
+}
+
+function buildEquipmentSummaryText(state) {
+  const preferredOrder = ['geladeira de gerador', 'geladeira alta', 'geladeira', 'freezer', 'prateleira'];
+  const lines = [];
+  (state.mapStructure || []).forEach((street) => {
+    const groups = {};
+    (street.equipment || []).forEach((eq) => {
+      const parsed = parseEscaninhoId(`${eq.id}-1-1`);
+      const number = parsed.equipId ? parseInt(String(parsed.equipId).split('-').pop().replace(/^E/i, ''), 10) : NaN;
+      if (!Number.isFinite(number)) return;
+      const label = equipmentSummaryLabel(eq, state.allocations);
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(number);
+    });
+    lines.push(`${street.id}:`);
+    const orderedLabels = preferredOrder.filter((label) => groups[label]);
+    orderedLabels.push(...Object.keys(groups).filter((label) => !preferredOrder.includes(label)).sort());
+    orderedLabels.forEach((label) => {
+      const numbers = summarizeNumberList(groups[label]);
+      const verb = groups[label].length === 1 ? 'é' : 'são';
+      lines.push(`${numbers} ${verb} ${label}`);
+    });
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+
 // ── Confirm modal ─────────────────────────────────────────────────────────────
 function ConfirmModal({ dialog, onConfirm, onCancel }) {
   const [inp, setInp] = useState('');
@@ -108,7 +218,9 @@ function SearchBar({ allocations, onHighlight }) {
       .slice(0,9)
       .map(p=>{
         const locs=[];
-        Object.entries(allocations).forEach(([k,a])=>{ if(a.p1===p.id||a.p2===p.id) locs.push(k); });
+        Object.entries(allocations).forEach(([k,a])=>{
+          if(resolveBoardEntryProductCode(a?.p1)===p.id||resolveBoardEntryProductCode(a?.p2)===p.id) locs.push(k);
+        });
         return { product:p, locs };
       });
   },[query, allocations]);
@@ -148,15 +260,15 @@ function SearchBar({ allocations, onHighlight }) {
             {results.length} resultado{results.length!==1?'s':''}
           </div>
           {results.map(r=>{
-            const cc = CURVA_COLOR[r.product.curva]||'#94A3B8';
             const gs = GROUP_STYLE[r.product.grupo]||GROUP_STYLE.Neutro;
+            const groupColor = gs.text || '#94A3B8';
             return (
               <button key={r.product.id} onClick={()=>handleSelect(r)}
                 style={{ display:'flex', alignItems:'center', gap:9, width:'100%', padding:'8px 12px', border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:'transparent' }}
                 onMouseEnter={e=>e.currentTarget.style.background='var(--dropdown-hover)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <div style={{ width:24, height:24, borderRadius:5, background:`${cc}20`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <span style={{ fontSize:11, fontWeight:800, color:cc }}>{r.product.curva}</span>
+                <div style={{ width:24, height:24, borderRadius:5, background:`${groupColor}20`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <span style={{ fontSize:11, fontWeight:800, color:groupColor }}>{r.product.curva}</span>
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:11, fontWeight:600, color:'var(--dropdown-text)', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }}>{r.product.nome}</div>
@@ -301,6 +413,7 @@ const initState = {
   swapSource:null,
   highlightProductId:null,
   subcatFilters:[],
+  globalEquipmentFilter:'all',
 };
 
 function historySnapshot(state, allocations, unallocated, collected) {
@@ -356,10 +469,39 @@ function collectPlacements(allocations) {
   return placements;
 }
 
-function diffMoves(currentAllocations) {
+function backendMetaForEscaninho(escaninhoId, mapStructure, pendingEquipmentTypeChanges) {
+  const slotMeta = BOOTSTRAP.SLOT_META || {};
+  const existing = slotMeta[escaninhoId];
+  const parsed = parseEscaninhoId(escaninhoId);
+  if (!pendingEquipmentTypeChanges || !pendingEquipmentTypeChanges[parsed.equipId]) return existing;
+  const eq = findEquip(mapStructure, parsed.equipId);
+  if (!eq) return existing;
+  const anyEqMeta = Object.values(slotMeta).find((meta) => meta && meta.equipId === parsed.equipId);
+  const sampleLocation = String(anyEqMeta?.locationId || anyEqMeta?.backendBinId || '');
+  const galpaoMatch = sampleLocation.match(/(?:bin-)?([A-Z]{2}\d+)-R/i);
+  const galpaoId = galpaoMatch ? galpaoMatch[1] : 'LJ000000';
+  const equipNum = parseInt(String(parsed.equipId).split('-').pop() || '', 10);
+  const ruaPart = String(parsed.equipId).split('-')[0] || '';
+  const ruaNum = ruaPart.replace(/^R/i, '');
+  if (!ruaNum || !Number.isFinite(equipNum) || !parsed.level || !parsed.pos) return existing;
+  const posLetter = String.fromCharCode(64 + parsed.pos);
+  const heightNumber = Math.max(1, (eq.niveis || parsed.level) - parsed.level + 1);
+  const locationId = `${galpaoId}-R${ruaNum}-${String(equipNum).padStart(3, '0')}-${heightNumber}${posLetter}`;
+  return {
+    escId:escaninhoId,
+    locationId,
+    backendBinId:'bin-' + locationId,
+    equipId:parsed.equipId,
+    ruaNum,
+    equipNum,
+    level:parsed.level,
+    pos:parsed.pos,
+  };
+}
+
+function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges) {
   const original = BOOTSTRAP.INITIAL_PLACEMENTS || {};
   const current = collectPlacements(currentAllocations);
-  const slotMeta = BOOTSTRAP.SLOT_META || {};
   const rawMap = BOOTSTRAP.RAW_PRODUCT_DATA_MAP || {};
   const allCodes = new Set([...Object.keys(original), ...Object.keys(current)]);
   const moves = [];
@@ -379,8 +521,8 @@ function diffMoves(currentAllocations) {
     const pairs = Math.min(remainingOriginal.length, remainingCurrent.length);
 
     for (let i = 0; i < pairs; i += 1) {
-      const src = slotMeta[remainingOriginal[i]];
-      const dst = slotMeta[remainingCurrent[i]];
+      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges);
+      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges);
       if (!src || !dst) continue;
       moves.push({
         productCode: code,
@@ -392,7 +534,7 @@ function diffMoves(currentAllocations) {
     }
 
     for (let i = pairs; i < remainingOriginal.length; i += 1) {
-      const src = slotMeta[remainingOriginal[i]];
+      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges);
       if (!src) continue;
       moves.push({
         productCode: code,
@@ -404,7 +546,7 @@ function diffMoves(currentAllocations) {
     }
 
     for (let i = pairs; i < remainingCurrent.length; i += 1) {
-      const dst = slotMeta[remainingCurrent[i]];
+      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges);
       if (!dst) continue;
       moves.push({
         productCode: code,
@@ -474,6 +616,7 @@ function reducer(state, action) {
     case 'TOGGLE_2A_LEVA':  return {...state, mode2aLeva:!state.mode2aLeva};
     case 'SET_SEARCH':      return {...state, searchQuery:action.query};
     case 'SET_SUBCAT_FILTERS': return {...state, subcatFilters:action.filters};
+    case 'SET_GLOBAL_EQUIP_FILTER': return {...state, globalEquipmentFilter:action.filter || 'all'};
     case 'SET_CONFIRM':     return {...state, pendingConfirm:action.dialog};
     case 'CLEAR_CONFIRM':   return {...state, pendingConfirm:null};
     case 'TOGGLE_EQUIP':    return {...state, equipCollapsed:{...state.equipCollapsed,[action.id]:!state.equipCollapsed[action.id]}};
@@ -932,9 +1075,85 @@ function TBtn({ label, icon, onClick, active, disabled, title }) {
   );
 }
 
+function ToolbarEyeIcon({ size=13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display:'block' }} aria-hidden="true">
+      <path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{ display:'block' }} aria-hidden="true">
+      <path d="M1.3 2.2h9.4L7.1 6.35v2.9L4.9 10.1V6.35L1.3 2.2z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function Sep() { return <div style={{ width:1, height:20, background:'rgba(255,255,255,0.13)', margin:'0 3px', flexShrink:0 }} />; }
 
-function ActionsDropdown({ dispatch }) {
+const GLOBAL_EQUIP_FILTERS = [
+  { id:'all', label:'Todos', short:'Todos' },
+  { id:'prateleira', label:'Prateleiras', short:'Prateleiras' },
+  { id:'geladeira', label:'Geladeiras', short:'Geladeiras' },
+  { id:'freezer', label:'Freezers', short:'Freezers' },
+];
+
+function equipmentMatchesGlobalFilter(eq, filter) {
+  if (!filter || filter === 'all') return true;
+  const tipo = String(eq?.tipo || '').toLowerCase();
+  const tipoAnterior = String(eq?.tipoAnterior || '').toLowerCase();
+  const matches = (value) => {
+    if (filter === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
+    if (filter === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
+    if (filter === 'freezer') return value.includes('freezer');
+    return value === filter;
+  };
+  return matches(tipo) || matches(tipoAnterior);
+}
+
+function GlobalEquipmentFilter({ state, dispatch }) {
+  const [open, setOpen] = useState(false);
+  const counts = useMemo(() => {
+    const next = { all:0, prateleira:0, geladeira:0, freezer:0 };
+    (state.mapStructure || []).forEach((street) => {
+      (street.equipment || []).forEach((eq) => {
+        next.all += 1;
+        ['prateleira', 'geladeira', 'freezer'].forEach((filter) => {
+          if (equipmentMatchesGlobalFilter(eq, filter)) next[filter] += 1;
+        });
+      });
+    });
+    return next;
+  }, [state.mapStructure]);
+  const active = state.globalEquipmentFilter || 'all';
+  const activeConfig = GLOBAL_EQUIP_FILTERS.find((item) => item.id === active) || GLOBAL_EQUIP_FILTERS[0];
+  return (
+    <div style={{ position:'relative' }}>
+      <TBtn label={active === 'all' ? 'Equip.' : activeConfig.short} icon={<FilterIcon />} active={open || active !== 'all'} onClick={()=>setOpen(v=>!v)} title="Filtro global de equipamentos" />
+      {open&&(<>
+        <div onClick={()=>setOpen(false)} style={{ position:'fixed', inset:0, zIndex:50 }} />
+        <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:100, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:8, padding:'6px', minWidth:190, boxShadow:'0 12px 40px rgba(0,0,0,0.35)' }}>
+          <div style={{ padding:'4px 8px 7px', fontSize:9, fontWeight:800, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>Equipamentos no mapa</div>
+          {GLOBAL_EQUIP_FILTERS.map((item) => (
+            <button key={item.id} onClick={()=>{ dispatch({ type:'SET_GLOBAL_EQUIP_FILTER', filter:item.id }); setOpen(false); }}
+              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'6px 9px', borderRadius:5, border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:active===item.id?'rgba(13,171,119,0.12)':'transparent', color:active===item.id?'var(--shopper-green)':'var(--dropdown-text)', fontSize:11, fontWeight:700 }}
+              onMouseEnter={e=>{ if (active!==item.id) e.currentTarget.style.background='var(--dropdown-hover)'; }}
+              onMouseLeave={e=>{ if (active!==item.id) e.currentTarget.style.background='transparent'; }}>
+              <span style={{ width:8, height:8, borderRadius:999, background:active===item.id?'var(--shopper-green)':'var(--dropdown-border)', flexShrink:0 }} />
+              <span style={{ flex:1 }}>{item.label}</span>
+              <span style={{ color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', fontSize:10 }}>{counts[item.id] || 0}</span>
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function ActionsDropdown({ dispatch, onExportAction }) {
   const [open,setOpen]=useState(false);
   const items=[
     {label:'Expandir todos',icon:'⊞',action:()=>dispatch({type:'EXPAND_ALL'})},
@@ -942,9 +1161,9 @@ function ActionsDropdown({ dispatch }) {
     {sep:true},
     {label:'Baixar XLSX atual',icon:'⬇',action:()=>API.download()},
     {sep:true},
-    {label:'Gerar resumo de equipamentos',icon:'≡',action:()=>{ const res = API.generateLayoutAtual(); alert(res.success ? 'Layout atual gerado.' : res.error); }},
-    {label:'Gerar planilha KDABTA',icon:'⊞',action:()=>{ const res = API.generateKdabraEnderecarSheet(); alert(res.success ? 'Planilha KDABTA gerada.' : res.error); }},
-    {label:'Gerar planilha KDABRA',icon:'⊞',action:()=>{ const res = API.generateKdabraSheet(); alert(res.success ? 'Planilha KDABRA gerada.' : res.error); }},
+    {label:'Gerar resumo de equipamentos',icon:'≡',action:()=>onExportAction('equipment-summary')},
+    {label:'Gerar kdabra enderecar',icon:'⊞',action:()=>onExportAction('kdabta')},
+    {label:'Gerar planilha KDABRA',icon:'⊞',action:()=>onExportAction('kdabra')},
   ];
   return (
     <div style={{ position:'relative' }}>
@@ -966,7 +1185,55 @@ function ActionsDropdown({ dispatch }) {
   );
 }
 
-function Toolbar({ state, dispatch, onHighlight, onSave }) {
+function ActionToast({ notice, onClose }) {
+  if (!notice) return null;
+  const isError = notice.type === 'error';
+  const isLoading = notice.type === 'loading';
+  const hasText = !!notice.copyText;
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(notice.copyText || '');
+    } catch (error) {
+      const textarea = document.createElement('textarea');
+      textarea.value = notice.copyText || '';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+  };
+  return (
+    <div style={{ position:'fixed', top:96, left:'50%', transform:'translateX(-50%)', zIndex:180, width:hasText?760:620, maxWidth:'calc(100vw - 48px)', background:'#FFFCF7', border:`1px solid ${isError?'rgba(239,68,68,0.42)':'rgba(13,171,119,0.34)'}`, borderRadius:10, boxShadow:'0 18px 48px rgba(15,43,26,0.24)', padding:'18px 20px', color:'#1D1D1B', fontFamily:'var(--font-sans)' }}>
+      <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
+        <div style={{ width:38, height:38, borderRadius:10, display:'grid', placeItems:'center', background:isError?'#FEE2E2':isLoading?'#E8F3D8':'#DCFCE7', color:isError?'#DC2626':'#0DAB77', fontSize:22, fontWeight:900, flexShrink:0 }}>
+          {isError ? '!' : isLoading ? '…' : '✓'}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:18, fontWeight:900, marginBottom:6 }}>{notice.title}</div>
+          <div style={{ fontSize:14, color:'#666', lineHeight:1.45 }}>{notice.message}</div>
+          {hasText && (
+            <>
+              <textarea readOnly value={notice.copyText} style={{ marginTop:12, width:'100%', height:260, resize:'vertical', border:'1px solid #D7D0C5', borderRadius:8, padding:12, fontSize:13, lineHeight:1.45, fontFamily:'var(--font-numeric), ui-monospace, SFMono-Regular, Menlo, monospace', color:'#1D1D1B', background:'#FFF9F0' }} />
+              <button onClick={copyText} style={{ marginTop:10, border:'1px solid rgba(13,171,119,0.35)', background:'#0DAB77', color:'#fff', borderRadius:7, padding:'8px 12px', cursor:'pointer', fontSize:12, fontWeight:900, fontFamily:'var(--font-sans)' }}>
+                Copiar resumo
+              </button>
+            </>
+          )}
+          {notice.url && (
+            <a href={notice.url} target="_blank" rel="noreferrer" style={{ display:'inline-flex', marginTop:12, fontSize:13, fontWeight:800, color:'#0DAB77', textDecoration:'none' }}>
+              Abrir aba gerada ↗
+            </a>
+          )}
+        </div>
+        {!isLoading && (
+          <button onClick={onClose} style={{ border:'none', background:'transparent', color:'#797979', cursor:'pointer', fontSize:24, lineHeight:1, padding:0 }}>×</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Toolbar({ state, dispatch, onHighlight, onSave, onExportAction, planogramAll=false, onTogglePlanogramAll }) {
   const canUndo=state.histIdx>0, canRedo=state.histIdx<state.history.length-1;
   const isMap=state.view==='map';
   return (
@@ -989,7 +1256,16 @@ function Toolbar({ state, dispatch, onHighlight, onSave }) {
         <TBtn icon="↩" onClick={()=>dispatch({type:'UNDO'})} disabled={!canUndo} title="Desfazer (Ctrl+Z)"/>
         <TBtn icon="↪" onClick={()=>dispatch({type:'REDO'})}  disabled={!canRedo} title="Refazer (Ctrl+Y)"/>
         <Sep/>
-        <ActionsDropdown dispatch={dispatch}/>
+        <GlobalEquipmentFilter state={state} dispatch={dispatch} />
+        <TBtn
+          icon={<ToolbarEyeIcon />}
+          label="Planograma"
+          active={planogramAll}
+          onClick={onTogglePlanogramAll}
+          title={planogramAll ? 'Voltar loja para visão operacional' : 'Ver loja inteira em planograma'}
+        />
+        <Sep/>
+        <ActionsDropdown dispatch={dispatch} onExportAction={onExportAction}/>
         <Sep/>
         <button onClick={onSave} title="Salvar versão do endereçamento"
           style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 11px', borderRadius:5, cursor:'pointer',
@@ -1017,7 +1293,9 @@ function App() {
   const [tweaks,setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [state,dispatch]  = useReducer(reducer, initState);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState(null);
   const [visibleQueue, setVisibleQueue] = useState({ tab:'nao_alocados', total:0, filtered:0, productIds:[] });
+  const [planogramAll, setPlanogramAll] = useState(false);
   const pendingFingerprint = useMemo(() => pendingStateFingerprint(state), [state.allocations, state.mapStructure]);
   const savedFingerprintRef = useRef(pendingFingerprint);
 
@@ -1030,7 +1308,7 @@ function App() {
   }, []);
   useEffect(() => {
     if (!state.highlightProductId) return undefined;
-    const timer = window.setTimeout(() => dispatch({ type:'CLEAR_HIGHLIGHT' }), 4000);
+    const timer = window.setTimeout(() => dispatch({ type:'CLEAR_HIGHLIGHT' }), 9000);
     return () => window.clearTimeout(timer);
   }, [state.highlightProductId]);
 
@@ -1081,6 +1359,68 @@ function App() {
     if(!state.swapSource||state.swapSource===eqId) { dispatch({type:'CLEAR_SWAP_SOURCE'}); return; }
     dispatch({type:'SWAP_EQUIP_CONTENTS',equipA:state.swapSource,equipB:eqId});
   },[state.swapSource]);
+  const handleExportAction = useCallback(async (kind) => {
+    const configs = {
+      'equipment-summary': {
+        title:'Gerando resumo de equipamentos',
+        successTitle:'Resumo de equipamentos gerado',
+        loading:'Montando texto com os tipos de equipamento por rua…',
+        run:()=>({
+          success:true,
+          summary_text:buildEquipmentSummaryText(state),
+          total_equipment:(state.mapStructure || []).reduce((total, street) => total + ((street.equipment || []).length), 0),
+        }),
+      },
+      kdabta: {
+        title:'Gerando planilha KDABTA',
+        successTitle:'kdabra enderecar gerada',
+        loading:'Criando aba kdabra enderecar na planilha ativa…',
+        run:()=>API.generateKdabraEnderecarSheetAsync(),
+      },
+      kdabra: {
+        title:'Gerando planilha KDABRA',
+        successTitle:'Planilha KDABRA gerada',
+        loading:'Criando aba KDABTA reenderecar na planilha ativa…',
+        run:()=>API.generateKdabraSheetAsync(),
+      },
+    };
+    const config = configs[kind];
+    if (!config) return;
+    setActionNotice({ type:'loading', title:config.title, message:config.loading });
+    try {
+      const result = await config.run();
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Ação não retornou sucesso.');
+      }
+      if (result.summary_text) {
+        setActionNotice({
+          type:'success',
+          title:config.successTitle,
+          message:`Resumo textual pronto para copiar. ${result.total_equipment || 0} equipamento(s) analisado(s).`,
+          copyText:result.summary_text,
+        });
+        return;
+      }
+      const sheetName = result.sheetName || result.output_sheet || 'aba gerada';
+      const rowText = Number.isFinite(Number(result.total_rows)) ? ` ${Number(result.total_rows)} linha(s).` : '';
+      const warningText = result.warning ? ` ${result.warning}` : '';
+      setActionNotice({
+        type:'success',
+        title:config.successTitle,
+        message:`Aba ${sheetName} criada/atualizada na planilha ativa.${rowText}${warningText}`,
+        url:result.url || '',
+      });
+      window.setTimeout(() => {
+        setActionNotice((current) => current && current.type === 'success' ? null : current);
+      }, 9000);
+    } catch (error) {
+      setActionNotice({
+        type:'error',
+        title:'Ação não concluída',
+        message:String(error).replace(/^Error:\s*/, ''),
+      });
+    }
+  }, []);
   const handleRecolherRua = useCallback(streetId=>{
     dispatch({type:'SET_CONFIRM',dialog:{
       title:`Recolher todos os produtos de ${streetId}?`,
@@ -1091,27 +1431,27 @@ function App() {
   },[]);
 
   const handleSaveVersion = useCallback(async (name, setProgress, setStatus) => {
-    const moves = diffMoves(state.allocations);
     const equipmentTypeChanges = Object.entries(state.pendingEquipmentTypeChanges || {});
-    if (moves.length > 0) {
-      if (setStatus) setStatus('Salvando movimentos pendentes…');
-      setProgress(equipmentTypeChanges.length ? 35 : 45);
-      const movesResponse = await API.saveBatchMovesAsync(moves, {});
-      if (!movesResponse || !movesResponse.success) {
-        throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
-      }
-    }
     if (equipmentTypeChanges.length > 0) {
       for (let index = 0; index < equipmentTypeChanges.length; index += 1) {
         const [equipId, newType] = equipmentTypeChanges[index];
         if (setStatus) setStatus(`Atualizando tipo de ${equipId} na planilha…`);
-        setProgress(40 + Math.round(((index + 1) / equipmentTypeChanges.length) * 30));
+        setProgress(20 + Math.round(((index + 1) / equipmentTypeChanges.length) * 25));
         const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, true);
         if (!typeResponse || !typeResponse.success) {
           throw new Error((typeResponse && typeResponse.error) || `Não foi possível alterar o tipo de ${equipId}.`);
         }
       }
       dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
+    }
+    const moves = diffMoves(state.allocations, state.mapStructure, state.pendingEquipmentTypeChanges);
+    if (moves.length > 0) {
+      if (setStatus) setStatus('Salvando movimentos pendentes…');
+      setProgress(equipmentTypeChanges.length ? 58 : 45);
+      const movesResponse = await API.saveBatchMovesAsync(moves, {});
+      if (!movesResponse || !movesResponse.success) {
+        throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
+      }
     }
     if (setStatus) setStatus('Criando aba da versão…');
     setProgress(80);
@@ -1125,9 +1465,110 @@ function App() {
     return versionResponse;
   }, [state.allocations, state.pendingEquipmentTypeChanges, pendingFingerprint]);
 
+  const yieldToBrowser = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+  const handleFillStreet = useCallback(async ({ streetId, equipmentIds, levelMode, onProgress }) => {
+    const remainingEntries = capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations);
+    if (!remainingEntries.length) throw new Error('Nenhum produto elegível na lista atual.');
+
+    const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];
+    if (!orderedEquipmentIds.length) throw new Error('Nenhum equipamento visível nesta rua.');
+    const targetGroups = [];
+    let totalTargets = 0;
+    orderedEquipmentIds.forEach((equipmentId, index) => {
+      const equipmentTargets = collectStreetFillTargets(
+        state,
+        { streetId, equipmentIds:[equipmentId], levelMode }
+      );
+      totalTargets += equipmentTargets.length;
+      if (typeof onProgress === 'function') {
+        onProgress({ done:index + 1, total:orderedEquipmentIds.length, equipmentId, applied:0, phase:'preparando' });
+      }
+      if (equipmentTargets.length) targetGroups.push({ equipmentId, targets:equipmentTargets });
+    });
+    if (!totalTargets) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
+
+    const codeToEntryIds = {};
+    const unallocatedCodes = remainingEntries.map((entryId) => {
+      const code = resolveBoardEntryProductCode(entryId);
+      if (!code) return '';
+      if (!codeToEntryIds[code]) codeToEntryIds[code] = [];
+      codeToEntryIds[code].push(entryId);
+      return code;
+    }).filter(Boolean);
+    if (!unallocatedCodes.length) throw new Error('Nenhum produto elegível na lista atual.');
+
+    if (typeof onProgress === 'function') {
+      onProgress({ done:0, total:orderedEquipmentIds.length, equipmentId:streetId, applied:0, phase:'calculando' });
+    }
+    await yieldToBrowser();
+
+    const response = await fetch('/api/addressing/fill-street', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({
+        unallocated_codes:unallocatedCodes,
+        products_data:Object.values(PRODUCT_MAP),
+        map_structure:state.mapStructure,
+        allocations:state.allocations,
+        target_groups:targetGroups,
+        options:{
+          allow_top_level:true,
+          allow_second_slot:false,
+          whole_street:true,
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`Preenchimento da rua falhou com HTTP ${response.status}.`);
+    const result = await response.json();
+    if (!result || !result.success) throw new Error((result && result.error) || 'Preenchimento da rua não retornou sucesso.');
+
+    const allTargetIds = new Set(targetGroups.flatMap((group) => group.targets || []));
+    const moves = (result.moves || []).map((move) => {
+      const queueForCode = codeToEntryIds[move.productCode] || [];
+      const productId = queueForCode.shift() || move.productCode;
+      return {
+        escaninhoId:move.escaninhoId,
+        productId,
+        slot:move.slot || 1,
+      };
+    }).filter((item) => item.productId && allTargetIds.has(item.escaninhoId));
+
+    const allMoves = moves;
+    if (!allMoves.length) throw new Error('Nenhuma alocação possível para os filtros atuais.');
+
+    const historyGroup = allMoves.length > 1 ? `fill-street:${streetId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;
+    for (let index = 0; index < allMoves.length; index += 1) {
+      const move = allMoves[index];
+      dispatch({
+        type:'ALLOCATE',
+        escaninhoId:move.escaninhoId,
+        productId:move.productId,
+        slot:move.slot,
+        historyGroup,
+      });
+      if (typeof onProgress === 'function') {
+        onProgress({
+          done:index + 1,
+          total:allMoves.length,
+          equipmentId:String(move.escaninhoId || '').split('-').slice(0, 2).join('-') || streetId,
+          applied:index + 1,
+          phase:'aplicando',
+        });
+      }
+      if (index < allMoves.length - 1) await new Promise((resolve) => window.setTimeout(resolve, 18));
+    }
+    if (typeof onProgress === 'function') {
+      onProgress({ done:allMoves.length, total:allMoves.length, equipmentId:streetId, applied:allMoves.length, phase:'concluido' });
+    }
+    await yieldToBrowser();
+    return { applied:allMoves.length, targets:totalTargets, products:capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations).length, equipmentDone:orderedEquipmentIds.length };
+  }, [state, visibleQueue]);
+
   return (
     <div data-dse-theme={tweaks.dark?'dark':'light'} style={{ height:'100vh', display:'flex', flexDirection:'column', background:'var(--app-bg)', fontFamily:'var(--font-sans)' }}>
-      <Toolbar state={state} dispatch={dispatch} onSave={()=>setSaveModalOpen(true)} />
+      <Toolbar state={state} dispatch={dispatch} onSave={()=>setSaveModalOpen(true)} onExportAction={handleExportAction} planogramAll={planogramAll} onTogglePlanogramAll={()=>setPlanogramAll(v=>!v)} />
+      <ActionToast notice={actionNotice} onClose={()=>setActionNotice(null)} />
 
       <div style={{ flex:1, display:'flex', overflow:'hidden', position:'relative' }}>
         {state.view==='config'&&(
@@ -1153,8 +1594,11 @@ function App() {
             colWidth={tweaks.colWidth} searchQuery={state.searchQuery} dispatch={dispatch}
             swapSource={state.swapSource} onStartSwap={handleStartSwap} onCompleteSwap={handleCompleteSwap}
             onRecolherRua={handleRecolherRua} highlightProductId={state.highlightProductId}
-            subcatFilters={state.subcatFilters} queueProductIds={visibleQueue.tab==='nao_alocados' ? visibleQueue.productIds : []}
+            subcatFilters={state.subcatFilters} queueProductIds={visibleQueue.productIds || []}
             pendingEquipmentTypeChanges={state.pendingEquipmentTypeChanges}
+            globalEquipmentFilter={state.globalEquipmentFilter}
+            globalPlanogramMode={planogramAll}
+            onFillStreet={handleFillStreet}
           />
 
           {state.pranchetaOpen&&(
@@ -1173,12 +1617,18 @@ function App() {
         </>)}
 
         {state.view==='map'&&state.configOpen&&(
-          <DSEConfigPanel asOverlay={true} onClose={()=>dispatch({type:'CLOSE_PANEL'})} onOpenMap={()=>{}}
+          <DSEConfigPanel asOverlay={true} onClose={()=>dispatch({type:'CLOSE_PANEL'})} onOpenMap={()=>{
+            window.sessionStorage.setItem('dse-open-map', '1');
+            window.location.reload();
+          }}
             selectedStore={state.selectedStore} onStoreChange={s=>dispatch({type:'SET_STORE',store:s})}/>
         )}
 
         {state.openPanel==='metrics'  &&<DSEMetricsPanel  allocations={state.allocations} onClose={()=>dispatch({type:'CLOSE_PANEL'})}/>}
-        {state.openPanel==='versions' &&<DSEVersionsPanel onClose={()=>dispatch({type:'CLOSE_PANEL'})} onRestore={()=>window.location.reload()}/>}
+        {state.openPanel==='versions' &&<DSEVersionsPanel onClose={()=>dispatch({type:'CLOSE_PANEL'})} onRestore={()=>{
+          window.sessionStorage.setItem('dse-open-map', '1');
+          window.location.reload();
+        }}/>}
         {state.openPanel==='legend'   &&<DSELegendPanel   onClose={()=>dispatch({type:'CLOSE_PANEL'})}/>}
       </div>
 

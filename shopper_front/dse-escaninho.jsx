@@ -107,7 +107,7 @@ function ProductHalf({ product, compact }) {
 }
 
 // ── Main Escaninho cell ──────────────────────────────────────────────────────
-const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
+const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isHighlighted, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
   const [hov, setHov] = useState(false);
   const gs1 = product1 ? (GROUP_STYLE[product1.grupo] || GROUP_STYLE.Neutro) : null;
   const gs2 = product2 ? (GROUP_STYLE[product2.grupo] || GROUP_STYLE.Neutro) : null;
@@ -131,7 +131,7 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
 
   if (isEmpty || !product1) {
     return (
-      <div style={{ ...baseStyle, ...emptyStyle }}
+      <div data-location-id={escaninhoId} style={{ ...baseStyle, ...emptyStyle }}
         onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseLeave={onHoverEnd} />
     );
   }
@@ -139,10 +139,10 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
   if (isDual) {
     const dualColor = gs1?.text || '#64748B';
     return (
-      <div data-pid={product1.id} style={{ ...baseStyle, '--cc': '#EF4444', background: gs1.bg,
-          border: `2px solid ${dualColor}`,
-          boxShadow: isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px ${dualColor}55` : `0 0 6px ${dualColor}33`,
-          transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
+      <div data-pid={product1.id} data-location-id={escaninhoId} style={{ ...baseStyle, '--cc': '#EF4444', background: gs1.bg,
+          border: isHighlighted ? '4px solid #DC2626' : `2px solid ${dualColor}`,
+          boxShadow: isHighlighted ? '0 0 0 4px rgba(220,38,38,0.35), 0 0 28px rgba(220,38,38,0.50)' : isSelected ? `0 0 0 2px ${cc1}` : hov ? `0 4px 14px ${dualColor}55` : `0 0 6px ${dualColor}33`,
+          transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: isHighlighted ? 20 : hov ? 2 : 'auto', animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none' }}
         onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
         {/* Left curva border */}
         <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
@@ -165,11 +165,11 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
   // Single product
   const flags = flags1;
   return (
-    <div data-pid={product1.id} style={{ ...baseStyle, '--cc': cc1,
+    <div data-pid={product1.id} data-location-id={escaninhoId} style={{ ...baseStyle, '--cc': cc1,
         background: gs1.bg,
-        border: isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent',
-        boxShadow: isSelected ? `0 0 0 2px ${cc1}40` : hov ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
-        transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: hov ? 2 : 'auto' }}
+        border: isHighlighted ? '4px solid #DC2626' : isSelected ? `2px solid ${cc1}` : hov ? `1px solid ${cc1}60` : '1px solid transparent',
+        boxShadow: isHighlighted ? '0 0 0 4px rgba(220,38,38,0.35), 0 0 28px rgba(220,38,38,0.50)' : isSelected ? `0 0 0 2px ${cc1}40` : hov ? `0 4px 14px ${cc1}40, 0 0 0 1px ${cc1}50` : 'none',
+        transform: hov ? 'translateY(-2px) scale(1.03)' : 'scale(1)', zIndex: isHighlighted ? 20 : hov ? 2 : 'auto', animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none' }}
       onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseEnter={() => { setHov(true); onHover && onHover(escaninhoId, product1, product2); }} onMouseLeave={() => { setHov(false); onHoverEnd && onHoverEnd(); }}>
       {/* Curva border left */}
       <div style={{ position:'absolute', left:0, top:0, bottom:0, width:3, background: cc1, borderRadius:'4px 0 0 4px' }} />
@@ -226,11 +226,34 @@ function DSEProductTooltip({ product, product2, position, onClose, onEdit, onMou
     const flags = getFlags(p);
     const volumePerBin = Math.max(0, (Number(p.vol) || 0) * (Number(p.qtd) || 1) / Math.max(1, Number(p.escsNec) || 1));
     const volumePerBinLabel = `${Number(volumePerBin.toFixed(3))} L`;
+    const photoUrl = String(p.photoUrl || p.photo_url || p.raw?.photo_url || '').trim();
+    const showPhoto = /^https?:\/\//i.test(photoUrl) && !['sem foto', 'n/a', 'na', 'none', 'null', 'nan'].includes(photoUrl.toLowerCase());
     return (
       <div style={{ marginBottom: product2 ? 12 : 0 }}>
         {label && <div style={{ fontSize:9, fontWeight:700, color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>{label}</div>}
         {/* Product name */}
-        <div style={{ fontSize:14, fontWeight:700, color:'#F1F5F9', marginBottom:2, lineHeight:1.3 }}>{p.nome}</div>
+        <div style={{ fontSize:14, fontWeight:700, color:'#F1F5F9', marginBottom:8, lineHeight:1.3 }}>{p.nome}</div>
+        {showPhoto && (
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:10 }}>
+            <img
+              src={photoUrl}
+              alt={p.nome}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              style={{
+                display: 'block',
+                width: 150,
+                maxWidth: '100%',
+                maxHeight: 150,
+                objectFit: 'contain',
+                background: '#fff',
+                borderRadius: 8,
+                padding: 5,
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        )}
         {/* Curva + group row */}
         <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:8 }}>
           <span style={{ fontSize:12, fontWeight:800, color:cc, background:`${cc}22`, padding:'2px 7px', borderRadius:4 }}>{p.curva}</span>

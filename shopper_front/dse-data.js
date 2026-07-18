@@ -29,11 +29,13 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ args: args || [] }),
     });
-    if (!response.ok) {
-      throw new Error('HTTP ' + response.status + ' ao chamar ' + funcName);
-    }
     var text = await response.text();
-    return text ? JSON.parse(text) : {};
+    var payload = {};
+    try { payload = text ? JSON.parse(text) : {}; } catch (error) { payload = {}; }
+    if (!response.ok) {
+      throw new Error(payload.error || ('HTTP ' + response.status + ' ao chamar ' + funcName));
+    }
+    return payload;
   }
 
   function normalizeText(value) {
@@ -154,6 +156,7 @@
           nome: normalizeText(row.product_name || (searchByCode[code] || {}).name || code),
           grupo: normalizeGroup(row.grupo || row.grupo_alocado),
           sub: normalizeText(row.subcategoria || 'Sem subcategoria'),
+          fabricante: normalizeText(row.nm_fabricante || row.fabricante || row.marca || ''),
           curva: normalizeCurve(row.curva, row.nm_fabricante),
           altura: toNumber(row.altura_cm, 0),
           peso: toNumber(row.peso_kg_unitario, 0),
@@ -161,6 +164,7 @@
           qtd: toNumber(row.quantidade, 0),
           degelo: normalizeDegelo(row.degelo),
           metodo: normalizeText(row.metodo || row.metodo_enderecamento || 'N/A'),
+          photoUrl: normalizeText(row.photo_url || row.url_foto || row.foto || ''),
           escsNec: requiredBins(row),
           pequeno: String(row.is_pequeno || '').toUpperCase() === 'SIM' || row.is_pequeno === true,
           fragil: String(row.is_fragil || '').toUpperCase() === 'SIM',
@@ -361,8 +365,9 @@
     getWorkflowSheets: function () { return postApi('getWorkflowSheets', []); },
     runEtl: function () { return postApi('runEtlToBaseProducts', []); },
     sendEtlWarningGroupAsync: function (warningType) { return postApiAsync('sendEtlWarningGroupJob', [warningType]); },
+    sendMissingVolumetriaDefaultAsync: function (defaultVolumeCm3) { return postApiAsync('sendMissingVolumetriaDefault', [defaultVolumeCm3]); },
     refreshEtlWarningAsync: function (warningType) { return postApiAsync('refreshEtlWarning', [warningType]); },
-    generateSlots: function () { return postApi('generateSlotsFromCadastro', [true]); },
+    generateSlots: function () { return postApi('generateSlotsFromCadastro', [false]); },
     buildSalesTarget: function (payload) { return postApi('buildMetabaseSalesTarget', [payload]); },
     buildSalesTargetAsync: function (payload) { return postApiAsync('buildMetabaseSalesTargetJob', [payload]); },
     exportSalesXlsx: function (payload) { return postApi('exportMetabaseSalesXlsx', [payload]); },
@@ -372,8 +377,12 @@
     saveBatchMovesAsync: function (moves, options) { return postApiAsync('saveBatchMoves', [moves, options || {}]); },
     changeEquipmentTypeAsync: function (equipId, newType, recolherProdutos) { return postApiAsync('changeEquipmentType', [equipId, newType, !!recolherProdutos]); },
     generateLayoutAtual: function () { return postApi('generateLayoutAtual', []); },
+    generateLayoutAtualAsync: function () { return postApiAsync('generateLayoutAtual', []); },
+    generateEquipmentSummaryAsync: function () { return postApiAsync('generateEquipmentSummary', []); },
     generateKdabraSheet: function () { return postApi('generateKdabraSheet', []); },
+    generateKdabraSheetAsync: function () { return postApiAsync('generateKdabraSheet', []); },
     generateKdabraEnderecarSheet: function () { return postApi('generateKdabraEnderecarSheet', []); },
+    generateKdabraEnderecarSheetAsync: function () { return postApiAsync('generateKdabraEnderecarSheet', []); },
     download: function () { window.location.href = '/api/download'; },
     refreshBootstrap: function () {
       window.location.reload();

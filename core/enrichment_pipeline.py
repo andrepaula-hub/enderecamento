@@ -18,6 +18,7 @@ SHEET_DIC_CAT_TARGET = "Dicionario_Categorias"
 SHEET_VOLUMETRIA_TARGET = "Volumetria_Equipamentos"
 SHEET_BARCODE_TARGET = "Código de barras produtos"
 SHEET_EDICOES_MANUAIS = "Edicoes_Manuais"
+SHEET_MIX_INPUT = "MIX"
 
 BASE_OUTPUT_HEADERS = [
     "product_code",
@@ -55,6 +56,7 @@ BASE_OUTPUT_HEADERS = [
     "metodo",
     "caixa_volume_cm3_final",
     "caixas_necessarias",
+    "photo_url",
 ]
 
 PRESERVED_ALLOCATED_OVERRIDES = {
@@ -68,6 +70,7 @@ PRESERVED_ALLOCATED_OVERRIDES = {
     "escaninhos_necessarios_geladeira_alta",
     "escaninhos_necessarios_prateleira",
     "escaninhos_necessarios_prateleira_lateral",
+    "photo_url",
 }
 
 
@@ -359,37 +362,39 @@ def _read_manual_overrides(target_client: GSheetsClient) -> dict[str, dict[str, 
 
 
 def _resolve_mix_sheet(mix_client: GSheetsClient) -> dict[str, Any] | None:
-    for sheet_name in mix_client.list_sheet_names():
-        values = mix_client.read_values(sheet_name)
-        df = _normalize_columns(_safe_df(values))
-        if df.empty:
-            continue
-        code_col = _pick_col(df, ["product_code", "cod_produto", "codigo", "sku"])
-        name_col = _pick_col(df, ["product_name", "descricao", "desc_produto", "produto"])
-        qty_col = _pick_col(df, ["Quantidade", "quantidade", "qtd", "qtd_total"])
-        if code_col and name_col and qty_col:
-            chosen_df = df[[code_col, name_col, qty_col]].copy()
-            chosen_df.columns = ["product_code", "product_name", "quantidade"]
-            headers = [str(h).strip() if h is not None else "" for h in (values[0] if values else [])]
-            idx_code = headers.index(code_col) if code_col in headers else list(df.columns).index(code_col)
-            idx_name = headers.index(name_col) if name_col in headers else list(df.columns).index(name_col)
-            idx_qty = headers.index(qty_col) if qty_col in headers else list(df.columns).index(qty_col)
-            return {
-                "sheet_name": sheet_name,
-                "headers": headers,
-                "rows": [list(r) for r in values[1:]],
-                "idx_code": idx_code,
-                "idx_name": idx_name,
-                "idx_qty": idx_qty,
-                "mix_df": chosen_df,
-            }
+    sheet_name = _find_sheet_name(mix_client, [SHEET_MIX_INPUT], required=False)
+    if not sheet_name:
+        return None
+    values = mix_client.read_values(sheet_name)
+    df = _normalize_columns(_safe_df(values))
+    if df.empty:
+        return None
+    code_col = _pick_col(df, ["product_code", "cod_produto", "codigo", "sku"])
+    name_col = _pick_col(df, ["product_name", "descricao", "desc_produto", "produto"])
+    qty_col = _pick_col(df, ["Quantidade", "quantidade", "qtd", "qtd_total"])
+    if code_col and name_col and qty_col:
+        chosen_df = df[[code_col, name_col, qty_col]].copy()
+        chosen_df.columns = ["product_code", "product_name", "quantidade"]
+        headers = [str(h).strip() if h is not None else "" for h in (values[0] if values else [])]
+        idx_code = headers.index(code_col) if code_col in headers else list(df.columns).index(code_col)
+        idx_name = headers.index(name_col) if name_col in headers else list(df.columns).index(name_col)
+        idx_qty = headers.index(qty_col) if qty_col in headers else list(df.columns).index(qty_col)
+        return {
+            "sheet_name": sheet_name,
+            "headers": headers,
+            "rows": [list(r) for r in values[1:]],
+            "idx_code": idx_code,
+            "idx_name": idx_name,
+            "idx_qty": idx_qty,
+            "mix_df": chosen_df,
+        }
     return None
 
 
 def _build_mix_df(mix_client: GSheetsClient) -> pd.DataFrame:
     resolved = _resolve_mix_sheet(mix_client)
     if not resolved:
-        raise ValueError("Não encontrei aba de mix com colunas product_code, product_name e quantidade.")
+        raise ValueError("Não encontrei a aba MIX com colunas product_code, product_name e quantidade.")
     chosen_df = resolved["mix_df"].copy()
 
     chosen_df["product_code"] = chosen_df["product_code"].apply(_norm_code)
@@ -403,7 +408,7 @@ def sanitize_mix_duplicates(mix_sheet_id: str, target_sheet_id: str | None = Non
     mix = GSheetsClient(mix_sheet_id)
     resolved = _resolve_mix_sheet(mix)
     if not resolved:
-        return {"success": False, "error": "Não encontrei aba de mix com colunas product_code, product_name e quantidade."}
+        return {"success": False, "error": "Não encontrei a aba MIX com colunas product_code, product_name e quantidade."}
 
     sheet_name = str(resolved.get("sheet_name") or "")
     headers = list(resolved.get("headers") or [])
@@ -503,6 +508,28 @@ def _build_map_from_df(df: pd.DataFrame, code_candidates: list[str], selected_co
             if value in (None, "", "nan", "NaN"):
                 continue
             bucket[wanted] = value
+    return output
+
+
+def _build_photo_map(df: pd.DataFrame) -> dict[str, str]:
+    df = _normalize_columns(df)
+    if df.empty:
+        return {}
+    code_col = _pick_col(df, ["product_code", "cod_produto", "codigo_produto", "sku"])
+    url_col = _pick_col(df, ["photo_url", "url_foto", "URL Foto", "foto", "imagem"])
+    if not code_col or not url_col:
+        return {}
+
+    output: dict[str, str] = {}
+    invalid = {"", "nan", "none", "n/a", "na", "sem foto", "sem_foto", "null"}
+    for _, row in df.iterrows():
+        code = _norm_code(_row_value(row, code_col))
+        url = str(_row_value(row, url_col) or "").strip()
+        if not code or url.lower() in invalid:
+            continue
+        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+            continue
+        output.setdefault(code, url)
     return output
 
 
@@ -702,11 +729,12 @@ def _tipo_equipamento_base(categoria_armazenagem: str, degelo: str) -> str:
     return "prateleira"
 
 
-def _to_json_rows(df: pd.DataFrame, cols: list[str], limit: int = 25) -> list[dict[str, Any]]:
+def _to_json_rows(df: pd.DataFrame, cols: list[str], limit: int | None = None) -> list[dict[str, Any]]:
     if df.empty:
         return []
     rows: list[dict[str, Any]] = []
-    for _, row in df.head(limit).iterrows():
+    source = df if limit is None else df.head(limit)
+    for _, row in source.iterrows():
         rows.append({col: row.get(col) for col in cols})
     return rows
 
@@ -836,7 +864,7 @@ def _build_etl_warnings(
                 "type": "duplicados_mix",
                 "title": "Código duplicado no mix",
                 "count": len(dup_codes),
-                "examples": [{"product_code": code} for code in dup_codes[:25]],
+                "examples": [{"product_code": code} for code in dup_codes],
             }
         )
 
@@ -865,13 +893,25 @@ def refresh_single_etl_warning(
     if not warning_norm:
         return {"success": False, "error": "Informe o tipo do alerta para refresh."}
 
-    # Refresh needs to reflect the current master/mix sheets. Reading Base_Produtos
-    # directly can keep showing stale warnings after the user fixes the source tabs.
-    etl_result = run_etl_to_base_products(master_sheet_id, mix_sheet_id, target_sheet_id)
-    if not etl_result.get("success"):
-        return etl_result
+    mix = GSheetsClient(mix_sheet_id)
+    target = GSheetsClient(target_sheet_id)
+    master = GSheetsClient(master_sheet_id)
 
-    warnings = list(etl_result.get("warnings") or [])
+    duplicated_codes: list[str] = []
+    if warning_norm == "duplicados_mix":
+        mix_df = _build_mix_df(mix)
+        duplicated_codes = _extract_duplicated_codes(mix_df)
+
+    barcode_codes: set[str] | None = None
+    if warning_norm == "sem_barcode":
+        barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
+        df_barcode = _normalize_columns(_safe_df(master.read_values(barcode_name))) if barcode_name else pd.DataFrame()
+        barcode_codes = _extract_barcode_set(df_barcode)
+
+    target.ensure_sheet(SHEET_BASE_PRODUTOS)
+    target_values = target.read_values(SHEET_BASE_PRODUTOS)
+    df_target = _normalize_columns(_safe_df(target_values))
+    warnings = _build_etl_warnings(df_target, duplicated_codes=duplicated_codes, barcode_codes=barcode_codes)
 
     warning = next((item for item in warnings if _norm(item.get("type")) == warning_norm), None)
     if warning:
@@ -980,6 +1020,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     config_name = _find_sheet_name(master, ["Configuracoes_Operacionais"])
     dic_cat_name = _find_sheet_name(master, ["Dicionario_Categorias"], required=False)
     barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
+    fotos_name = _find_sheet_name(master, ["Fotos_Produtos", "Fotos Produtos"], required=False)
 
     df_degelo = _normalize_columns(_safe_df(master.read_values(degelo_name)))
     df_categoria_gpt = _normalize_columns(_safe_df(master.read_values(categoria_gpt_name)))
@@ -997,6 +1038,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     df_config = _normalize_columns(_safe_df(master.read_values(config_name)))
     df_dic_cat = _normalize_columns(_safe_df(master.read_values(dic_cat_name))) if dic_cat_name else pd.DataFrame()
     df_barcode = _normalize_columns(_safe_df(master.read_values(barcode_name))) if barcode_name else pd.DataFrame()
+    df_fotos = _normalize_columns(_safe_df(master.read_values(fotos_name))) if fotos_name else pd.DataFrame()
 
     map_degelo = _build_map_from_df(
         df_degelo,
@@ -1025,6 +1067,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     sales_by_code, sales_by_name = _extract_sales_map(vendas_df)
     caixaria_map = _extract_caixaria_map(df_caixaria, values_caixaria_nova)
     barcode_codes = _extract_barcode_set(df_barcode)
+    photo_map = _build_photo_map(df_fotos)
     limite_peso_kg = _extract_limite_peso(df_config)
     capacity_map = _extract_capacity_map(df_vol_eq)
     dic_cat_map = _extract_category_group_map(df_dic_cat)
@@ -1044,6 +1087,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
         gpt_data = map_categoria_gpt.get(code, {})
         subcat_data = map_subcat.get(code, {})
         vol_sec_data = map_vol_sec.get(code, {})
+        photo_url = photo_map.get(code, "")
 
         categoria_armz = str(gpt_data.get("Categoria_Correta") or "").strip()
         categoria_site = str(site_data.get("categoria") or "").strip()
@@ -1167,6 +1211,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
             "metodo": metodo,
             "caixa_volume_cm3_final": round(caixa_volume_cm3_final, 2) if caixa_volume_cm3_final > 0 else "",
             "caixas_necessarias": caixas_necessarias if caixas_necessarias > 0 else "",
+            "photo_url": photo_url,
         }
         records.append(record)
 

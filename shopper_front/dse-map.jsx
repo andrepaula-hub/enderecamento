@@ -1,6 +1,6 @@
 // DSE Map v3 — Shopper palette, swap contents, recolher rua, highlight + scroll
 const { useState, useCallback, useMemo, useRef, useEffect, memo } = React;
-const { DSEEscaninho, DSEProductTooltip } = window;
+const { DSEEscaninho, DSEProductTooltip, DSE_getFlags, DSEFlagBadge } = window;
 const { PRODUCT_MAP, SLOT_META } = window.DSEData;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
@@ -14,6 +14,11 @@ function parseBoardEntryCode(entryId) {
   const raw = String(entryId || '').trim();
   const match = raw.match(/^(?:unallocated|collected)::(.+?)::\d+$/);
   return match ? match[1] : raw;
+}
+
+function cssEscapeValue(value) {
+  if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(String(value || ''));
+  return String(value || '').replace(/["\\]/g, '\\$&');
 }
 
 function requiredBinsForProductCode(productCode) {
@@ -37,6 +42,19 @@ const EQUIP_CFG = {
 };
 
 const ALL_TYPES = Object.entries(EQUIP_CFG).map(([id,cfg])=>({id,...cfg}));
+
+function equipmentMatchesGlobalFilter(eq, filter) {
+  if (!filter || filter === 'all') return true;
+  const tipo = String(eq?.tipo || '').toLowerCase();
+  const tipoAnterior = String(eq?.tipoAnterior || '').toLowerCase();
+  const matches = (value) => {
+    if (filter === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
+    if (filter === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
+    if (filter === 'freezer') return value.includes('freezer');
+    return value === filter;
+  };
+  return matches(tipo) || matches(tipoAnterior);
+}
 
 function parseEscId(escaninhoId) {
   const parts = String(escaninhoId || '').split('-');
@@ -62,6 +80,77 @@ function getDominantCurva(eq, allocations) {
   return e.length ? e.sort((a,b)=>b[1]-a[1])[0][0] : null;
 }
 
+function getDominantGroup(eq, allocations) {
+  const counts = {};
+  let total = 0;
+  for (let n=1; n<=eq.niveis; n++) {
+    for (let s=1; s<=eq.escsPerNivel; s++) {
+      const alloc = allocations[`${eq.id}-${n}-${s}`] || {};
+      ['p1', 'p2'].forEach((slot) => {
+        const product = PRODUCT_MAP[alloc[slot]];
+        const group = product && product.grupo;
+        if (!group) return;
+        counts[group] = (counts[group] || 0) + 1;
+        total += 1;
+      });
+    }
+  }
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  if (!entries.length) return null;
+  return { group:entries[0][0], count:entries[0][1], total };
+}
+
+function getDegeloStats(eq, allocations) {
+  let count = 0;
+  let total = 0;
+  for (let n=1; n<=eq.niveis; n++) {
+    for (let s=1; s<=eq.escsPerNivel; s++) {
+      const alloc = allocations[`${eq.id}-${n}-${s}`] || {};
+      ['p1', 'p2'].forEach((slot) => {
+        const product = PRODUCT_MAP[alloc[slot]];
+        if (!product) return;
+        total += 1;
+        if (product.degelo === 'NÃO') count += 1;
+      });
+    }
+  }
+  return { count, total, majority: total > 0 && count / total >= 0.5 };
+}
+
+function productStorageKind(product) {
+  const arm = normalizeSearchText(product?.arm || product?.raw?.categoria_armazenagem || '');
+  if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
+  if (arm.includes('geladeira') || arm.includes('refriger')) return 'geladeira';
+  if (arm.includes('prateleira')) return 'prateleira';
+  return 'any';
+}
+
+function equipmentStorageKind(eq) {
+  const tipo = String(eq?.tipo || '').toLowerCase();
+  if (tipo.includes('freezer')) return 'freezer';
+  if (tipo.includes('geladeira')) return 'geladeira';
+  if (tipo.includes('prateleira') || tipo.includes('pamplona') || tipo.includes('lateral')) return 'prateleira';
+  return 'any';
+}
+
+function FillStreetIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ display:'block' }} aria-hidden="true">
+      <path d="M2 2h8M2 5h8M2 8h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M8 6.2v3.1m0 0 1.4-1.4M8 9.3 6.6 7.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function EyeIcon({ size=13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display:'block' }} aria-hidden="true">
+      <path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
 // ── Fill bar ──────────────────────────────────────────────────────────────────
 function FillBar({ filled, total }) {
   const pct = total>0 ? Math.round(filled/total*100) : 0;
@@ -72,6 +161,107 @@ function FillBar({ filled, total }) {
       <div style={{ width:30, height:3, background:'rgba(0,0,0,0.12)', borderRadius:2 }}>
         <div style={{ height:'100%', width:`${pct}%`, background:color, borderRadius:2, transition:'width 0.2s' }} />
       </div>
+    </div>
+  );
+}
+
+function productPhotoUrl(product) {
+  const raw = String(product?.photoUrl || product?.photo_url || product?.raw?.photo_url || '').trim();
+  if (!/^https?:\/\//i.test(raw)) return '';
+  if (['sem foto', 'n/a', 'na', 'none', 'null', 'nan'].includes(raw.toLowerCase())) return '';
+  return raw;
+}
+
+function getPlanogramSlotWidth(escW) {
+  return Math.max(96, Math.min(128, Math.round(escW * 1.85)));
+}
+
+function PlanogramProductFace({ product, compact }) {
+  if (!product) return null;
+  const photoUrl = productPhotoUrl(product);
+  const curvaColor = CURVA_COLOR[product.curva] || '#94A3B8';
+  const groupStyle = GROUP_STYLE[product.grupo] || GROUP_STYLE.Neutro;
+  const flags = typeof DSE_getFlags === 'function' ? DSE_getFlags(product) : [];
+  return (
+    <div style={{ minHeight:0, height:'100%', display:'flex', flexDirection:'column', alignItems:'stretch', gap:4 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:4, minHeight:14 }}>
+        <span style={{ fontSize:9, fontWeight:900, color:curvaColor, background:`${curvaColor}1F`, borderRadius:3, padding:'1px 4px', lineHeight:1.15 }}>{product.curva || '-'}</span>
+        <span style={{ minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:8, fontWeight:800, color:groupStyle.text }}>{product.grupo || ''}</span>
+        {flags.length > 0 && (
+          <span style={{ marginLeft:'auto', display:'inline-flex', alignItems:'center', gap:3, flexShrink:0 }}>
+            {flags.map(f => (
+              DSEFlagBadge
+                ? <DSEFlagBadge key={f} type={f} size={compact?9:11} />
+                : <span key={f} style={{ fontSize:compact?9:11, color:'#64748B', fontWeight:900 }}>!</span>
+            ))}
+          </span>
+        )}
+      </div>
+      <div style={{ flex:'1 1 auto', minHeight:0, display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', borderRadius:5, border:'1px solid rgba(15,23,42,0.08)', overflow:'hidden' }}>
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt={product.nome}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            style={{ width:'100%', height:'100%', objectFit:'contain', display:'block', padding:compact?2:4, boxSizing:'border-box' }}
+          />
+        ) : (
+          <span style={{ padding:6, textAlign:'center', color:'rgba(71,85,105,0.62)', fontSize:compact?8:9, fontWeight:800, lineHeight:1.15 }}>Sem foto</span>
+        )}
+      </div>
+      <div title={product.nome} style={{ minHeight:compact?22:30, color:'var(--map-text)', fontSize:compact?8:9, fontWeight:800, lineHeight:1.12, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:compact?2:3, WebkitBoxOrient:'vertical' }}>
+        {product.nome}
+      </div>
+    </div>
+  );
+}
+
+function PlanogramSlot({ slot, width, height, isHighlighted, matchSearch, subcatMatch, onEscClick, onHoverEsc, onHoverEnd }) {
+  const product = slot.p1 || slot.p2;
+  const groupStyle = GROUP_STYLE[product?.grupo] || GROUP_STYLE.Neutro;
+  const borderColor = product ? (groupStyle.text || '#94A3B8') : 'rgba(148,163,184,0.42)';
+  const dual = !!(slot.p1 && slot.p2);
+  const outline = isHighlighted ? '4px solid #DC2626' : matchSearch ? '2px solid #F59C00' : slot.sameSubcatLevelConflict ? '2px dashed #DC2626' : 'none';
+  return (
+    <div
+      data-location-id={slot.escsId}
+      data-pid={product?.id || undefined}
+      title={slot.sameSubcatLevelConflict ? 'Subcategoria repetida neste nível com outro SKU' : (product?.nome || slot.escsId)}
+      onClick={e=>onEscClick&&onEscClick(slot.escsId,slot.p1,slot.p2,e)}
+      onMouseEnter={()=>product&&onHoverEsc&&onHoverEsc(slot.escsId,slot.p1,slot.p2)}
+      onMouseLeave={()=>onHoverEnd&&onHoverEnd()}
+      style={{
+        width,
+        height,
+        flexShrink:0,
+        padding:5,
+        borderRadius:6,
+        border:`1px solid ${borderColor}66`,
+        background:product ? groupStyle.bg : 'rgba(248,250,252,0.45)',
+        outline,
+        outlineOffset:isHighlighted?'3px':'0px',
+        opacity:subcatMatch?1:0.25,
+        cursor:'pointer',
+        boxSizing:'border-box',
+        overflow:'hidden',
+        position:'relative',
+        zIndex:isHighlighted?20:'auto',
+        animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none',
+      }}
+    >
+      {!product ? (
+        <div style={{ height:'100%', border:'1px dashed rgba(148,163,184,0.38)', borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--map-text-muted)', fontSize:9, fontWeight:800 }}>
+          vazio
+        </div>
+      ) : dual ? (
+        <div style={{ height:'100%', display:'grid', gridTemplateColumns:'1fr 1fr', gap:4 }}>
+          <PlanogramProductFace product={slot.p1} compact />
+          <PlanogramProductFace product={slot.p2} compact />
+        </div>
+      ) : (
+        <PlanogramProductFace product={product} />
+      )}
     </div>
   );
 }
@@ -162,7 +352,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={} }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={}, planogramMode=false, onTogglePlanogram }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
@@ -191,10 +381,19 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
   },[eq,allocations]);
 
   const dominantCurva = useMemo(()=>getDominantCurva(eq,allocations),[eq,allocations]);
+  const dominantGroup = useMemo(()=>getDominantGroup(eq,allocations),[eq,allocations]);
+  const degeloStats = useMemo(()=>getDegeloStats(eq,allocations),[eq,allocations]);
+  const collapsedGroupStyle = useMemo(() => {
+    if (!isCollapsed || !dominantGroup) return null;
+    if (!['Químico', 'Perfumaria'].includes(dominantGroup.group)) return null;
+    return GROUP_STYLE[dominantGroup.group] || null;
+  }, [isCollapsed, dominantGroup]);
 
   const isSwapSource   = swapSource === eq.id;
   const isSwapTarget   = swapSource && swapSource !== eq.id;
-  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (isCard175 ? '#C41230' : cfg.borderColor));
+  const showDegeloBadge = isCollapsed && degeloStats.majority && String(eq.tipo || '').includes('geladeira');
+  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (showDegeloBadge ? '#38BDF8' : (collapsedGroupStyle ? collapsedGroupStyle.text : (isCard175 ? '#C41230' : cfg.borderColor))));
+  const effectiveHdrBg = showDegeloBadge ? 'rgba(56,189,248,0.13)' : (collapsedGroupStyle ? collapsedGroupStyle.bg : hdrBg);
 
   const labelW=24, gap=3; // escW is now passed as prop (standardized to geladeira 5-slot size)
 
@@ -205,7 +404,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 
   return (
     <div style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
-      <div style={{ background:hdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
+      <div style={{ background:effectiveHdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
         onClick={handleHeaderClick}
         onMouseEnter={()=>setHovHeader(true)}
         onMouseLeave={()=>{ if(!menuOpen) setHovHeader(false); }}>
@@ -229,6 +428,16 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
         {isCard175 && (
           <span title="Equipamento presente apenas no Card 788" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C788</span>
         )}
+        {collapsedGroupStyle && (
+          <span title={`${dominantGroup.group}: ${dominantGroup.count} de ${dominantGroup.total} produto(s) neste equipamento`} style={{ fontSize:8, fontWeight:900, color:collapsedGroupStyle.text, background:collapsedGroupStyle.bg, border:`1px solid ${collapsedGroupStyle.text}55`, padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.04em' }}>
+            {dominantGroup.group === 'Químico' ? 'QMC' : 'PRF'}
+          </span>
+        )}
+        {showDegeloBadge && (
+          <span title={`Degelo = NÃO: ${degeloStats.count} de ${degeloStats.total} produto(s) neste equipamento`} style={{ fontSize:10, fontWeight:900, color:'#0284C7', background:'rgba(56,189,248,0.16)', border:'1px solid rgba(56,189,248,0.42)', padding:'1px 5px', borderRadius:4, flexShrink:0, lineHeight:1.35 }}>
+            ❄
+          </span>
+        )}
 
         {/* Swap indicator */}
         {isSwapSource && <span style={{ fontSize:9, fontWeight:700, color:'#F59C00', marginLeft:2 }}>aguardando…</span>}
@@ -236,6 +445,33 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 
         <div style={{ flex:1 }} />
         <FillBar filled={stats.filled} total={stats.total} />
+        {!isCollapsed && (
+          <button
+            type="button"
+            title={planogramMode ? 'Voltar para visão operacional' : 'Ver planograma com fotos'}
+            onClick={e=>{ e.stopPropagation(); onTogglePlanogram&&onTogglePlanogram(eq.id); }}
+            style={{
+              width:22,
+              height:22,
+              flexShrink:0,
+              marginLeft:2,
+              background:planogramMode?`${cfg.borderColor}24`:'transparent',
+              border:`1px solid ${planogramMode?cfg.borderColor:'transparent'}`,
+              borderRadius:4,
+              cursor:'pointer',
+              color:planogramMode?cfg.color:'var(--map-text-muted)',
+              fontSize:12,
+              fontWeight:900,
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              fontFamily:'var(--font-sans)',
+              lineHeight:1,
+            }}
+          >
+            <EyeIcon />
+          </button>
+        )}
         <span style={{ fontSize:10, color:cfg.color, opacity:0.6, flexShrink:0, marginLeft:2 }}>{isCollapsed?'▶':'▼'}</span>
 
         {(hovHeader||menuOpen) && (
@@ -263,7 +499,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
       </div>
 
       {!isCollapsed && (
-        <div style={{ padding:'6px 8px', display:'flex', flexDirection:'column', gap:3 }}>
+        <div key={planogramMode?'planogram':'operational'} style={{ padding:'6px 8px', display:'flex', flexDirection:'column', gap:planogramMode?6:3, overflowX:'visible', overflowY:'visible' }}>
           {Array.from({length:eq.niveis},(_,ni)=>{
             const nivel=ni+1;
             // Build slot data for this row
@@ -274,6 +510,26 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
               const p2=alloc.p2?PRODUCT_MAP[alloc.p2]:null;
               return { pos, escsId, alloc, p1, p2, p1id:alloc.p1||null };
             });
+            const subcatCodes = {};
+            slots.forEach(slot => {
+              [slot.p1, slot.p2].forEach(product => {
+                const sub = normalizeSearchText(product?.sub);
+                const code = parseBoardEntryCode(product?.id);
+                if (!sub || !code) return;
+                if (!subcatCodes[sub]) subcatCodes[sub] = new Set();
+                subcatCodes[sub].add(code);
+              });
+            });
+            const repeatedSubcats = new Set(
+              Object.entries(subcatCodes)
+                .filter(([, codes]) => codes.size > 1)
+                .map(([sub]) => sub)
+            );
+            slots.forEach(slot => {
+              slot.sameSubcatLevelConflict = [slot.p1, slot.p2].some(product => (
+                product?.sub && repeatedSubcats.has(normalizeSearchText(product.sub))
+              ));
+            });
             // Group consecutive same-product slots (only filled)
             const runs=[];
             let cur=null;
@@ -282,6 +538,64 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
               else{ if(cur) runs.push(cur); cur={ p1id:slot.p1id, slots:[slot] }; }
             }
             if(cur) runs.push(cur);
+            if (planogramMode) {
+              const planW = getPlanogramSlotWidth(escW);
+              const planH = 132;
+              const normalizedQuery = normalizeSearchText(searchQuery);
+              const normalizedHighlight = parseBoardEntryCode(highlightProductId);
+              return (
+                <div key={nivel} style={{ display:'flex', alignItems:'stretch', gap, flexWrap:'nowrap', minWidth:labelW + eq.escsPerNivel * (planW + gap) }}>
+                  <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0, alignSelf:'center' }}>{nivel}</span>
+                  {runs.map((run,ri) => {
+                    const isGroup = !!run.p1id && (run.slots.length>1 || (productCounts[run.p1id] || 0)>1);
+                    const groupStyle = isGroup ? (GROUP_STYLE[run.slots[0].p1?.grupo] || GROUP_STYLE.Neutro) : null;
+                    const groupConflict = run.slots.some(slot => slot.sameSubcatLevelConflict);
+                    const groupSubcatActive = subcatFilters.length>0;
+                    const groupSubcatMatch=!groupSubcatActive||(run.slots[0].p1&&subcatFilters.includes(run.slots[0].p1.sub))||run.slots.some(slot => !slot.p1 && !slot.p2);
+                    const renderSlot = (slot) => {
+                      const matchSearch=searchQuery&&(normalizeSearchText(slot.p1?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p1?.id).includes(normalizedQuery)||normalizeSearchText(slot.p2?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p2?.id).includes(normalizedQuery));
+                      const isHighlighted=normalizedHighlight&&(slot.p1?.id===normalizedHighlight||slot.p2?.id===normalizedHighlight);
+                      const subcatActive = subcatFilters.length>0;
+                      const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
+                      return (
+                        <PlanogramSlot
+                          key={slot.pos}
+                          slot={slot}
+                          width={planW}
+                          height={planH}
+                          isHighlighted={isHighlighted}
+                          matchSearch={matchSearch}
+                          subcatMatch={subcatMatch}
+                          onEscClick={onEscClick}
+                          onHoverEsc={onHoverEsc}
+                          onHoverEnd={onHoverEnd}
+                        />
+                      );
+                    };
+                    if (!isGroup) return React.cloneElement(renderSlot(run.slots[0]), { key:`plan-slot-${run.slots[0].pos}` });
+                    return (
+                      <div
+                        key={`plan-run-${ri}`}
+                        title={groupConflict ? 'Subcategoria repetida neste nível com outro SKU' : run.slots[0].p1?.nome}
+                        style={{
+                          display:'flex',
+                          gap:3,
+                          padding:3,
+                          borderRadius:8,
+                          outline:groupConflict?'2px dashed #DC2626':`2px solid ${groupStyle.text || '#64748B'}`,
+                          background:groupConflict?'rgba(220,38,38,0.08)':`${groupStyle.text || '#64748B'}10`,
+                          flexShrink:0,
+                          opacity:groupSubcatMatch?1:0.25,
+                          transition:'opacity 0.15s',
+                        }}
+                      >
+                        {run.slots.map(renderSlot)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
             return (
               <div key={nivel} style={{ display:'flex', alignItems:'center', gap, flexWrap:'nowrap' }}>
                 <span style={{ width:labelW, fontSize:9, fontWeight:700, color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', textAlign:'right', paddingRight:4, flexShrink:0 }}>{nivel}</span>
@@ -293,10 +607,13 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                     const slot=run.slots[0];
                     const normalizedQuery = normalizeSearchText(searchQuery);
                     const matchSearch=searchQuery&&(normalizeSearchText(slot.p1?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p1?.id).includes(normalizedQuery)||normalizeSearchText(slot.p2?.nome).includes(normalizedQuery)||normalizeSearchText(slot.p2?.id).includes(normalizedQuery));
-                        const isHighlighted=highlightProductId&&(slot.p1?.id===highlightProductId||slot.p2?.id===highlightProductId);
+                        const normalizedHighlight = parseBoardEntryCode(highlightProductId);
+                        const isHighlighted=normalizedHighlight&&(slot.p1?.id===normalizedHighlight||slot.p2?.id===normalizedHighlight);
                         const subcatMatch=!subcatActive||(!slot.p1&&!slot.p2)||(slot.p1&&subcatFilters.includes(slot.p1.sub))||(slot.p2&&subcatFilters.includes(slot.p2.sub));
+                        const conflictOutline = slot.sameSubcatLevelConflict ? '2px dashed #DC2626' : 'none';
+                        const conflictTitle = slot.sameSubcatLevelConflict ? 'Subcategoria repetida neste nível com outro SKU' : undefined;
                         return (
-                          <div key={ri} style={{ width:escW, flexShrink:0, outline:isHighlighted?'3px solid #EF4444':matchSearch?'2px solid #F59C00':'none', outlineOffset:isHighlighted?'2px':'0px', borderRadius:5, animation:isHighlighted?'dse-highlight-pulse 0.7s ease-in-out 5':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?5:'auto' }}>
+                          <div key={ri} title={conflictTitle} style={{ width:escW, flexShrink:0, outline:isHighlighted?'4px solid #DC2626':matchSearch?'2px solid #F59C00':conflictOutline, outlineOffset:isHighlighted?'3px':'0px', borderRadius:6, animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?20:'auto', background:isHighlighted?'rgba(220,38,38,0.10)':slot.sameSubcatLevelConflict?'rgba(220,38,38,0.08)':'transparent' }}>
                             <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
                           isAllocating={hasAllocationSource&&(!slot.p1 || !slot.p2)} isHighlighted={isHighlighted}
                           equipCap={eq.cap}
@@ -309,12 +626,14 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                   }
                   // Grouped: same product across multiple consecutive slots
                   const groupSubcatMatch=!subcatActive||(run.slots[0].p1&&subcatFilters.includes(run.slots[0].p1.sub));
+                  const groupConflict = run.slots.some(slot => slot.sameSubcatLevelConflict);
                   return (
-                    <div key={ri} style={{ display:'flex', gap:1, outline:`2px solid ${groupColor}`, borderRadius:6, padding:2, background:`${groupColor}10`, flexShrink:0, position:'relative', opacity:groupSubcatMatch?1:0.25, transition:'opacity 0.15s' }}>
+                    <div key={ri} title={groupConflict ? 'Subcategoria repetida neste nível com outro SKU' : undefined} style={{ display:'flex', gap:1, outline:groupConflict?'2px dashed #DC2626':`2px solid ${groupColor}`, borderRadius:6, padding:2, background:groupConflict?'rgba(220,38,38,0.08)':`${groupColor}10`, flexShrink:0, position:'relative', opacity:groupSubcatMatch?1:0.25, transition:'opacity 0.15s' }}>
                       {run.slots.map(slot=>{
-                        const isHighlighted=highlightProductId&&slot.p1?.id===highlightProductId;
+                        const normalizedHighlight = parseBoardEntryCode(highlightProductId);
+                        const isHighlighted=normalizedHighlight&&(slot.p1?.id===normalizedHighlight||slot.p2?.id===normalizedHighlight);
                         return (
-                          <div key={slot.pos} style={{ width:escW, flexShrink:0 }}>
+                          <div key={slot.pos} style={{ width:escW, flexShrink:0, outline:isHighlighted?'4px solid #DC2626':'none', outlineOffset:isHighlighted?'3px':'0px', borderRadius:6, animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none', position:'relative', zIndex:isHighlighted?20:'auto', background:isHighlighted?'rgba(220,38,38,0.10)':'transparent' }}>
                             <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={false}
                               isAllocating={false} isHighlighted={isHighlighted}
                               equipCap={eq.cap}
@@ -338,13 +657,18 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 });
 
 // ── Street column ──────────────────────────────────────────────────────────────
-const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, subcatFilters=[], pendingEquipmentTypeChanges={} }) {
+const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, onFillStreet, globalEquipmentFilter='all', globalPlanogramMode=false, subcatFilters=[], pendingEquipmentTypeChanges={} }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [fillOpen, setFillOpen] = useState(false);
+  const [fillRunning, setFillRunning] = useState(false);
+  const [fillStatus, setFillStatus] = useState('');
+  const [fillProgress, setFillProgress] = useState(null);
   const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
   const [newEquipOpen, setNewEquipOpen] = useState(false);
   const [pairFilter, setPairFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [planogramEquipment, setPlanogramEquipment] = useState({});
   const stats = useMemo(()=>{
     let f=0,t=0;
     street.equipment.forEach(eq=>{ for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){ t++; if(allocations[`${eq.id}-${n}-${s}`]?.p1) f++; } });
@@ -354,7 +678,20 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
   const equipTypes = useMemo(()=>[...new Set(street.equipment.map(eq=>eq.tipo))],[street.equipment]);
 
   const visibleEquipment = useMemo(()=>{
+    const highlightedCode = parseBoardEntryCode(highlightProductId);
+    const equipmentHasHighlight = (eq) => {
+      if (!highlightedCode) return false;
+      for (let level = 1; level <= eq.niveis; level += 1) {
+        for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
+          const alloc = allocations[`${eq.id}-${level}-${pos}`] || {};
+          if (parseBoardEntryCode(alloc.p1) === highlightedCode || parseBoardEntryCode(alloc.p2) === highlightedCode) return true;
+        }
+      }
+      return false;
+    };
     return street.equipment.filter(eq=>{
+      if (equipmentHasHighlight(eq)) return true;
+      if (!equipmentMatchesGlobalFilter(eq, globalEquipmentFilter)) return false;
       if (pairFilter!=='all') {
         const num = parseInt(eq.id.split('-').pop()||'0');
         if (pairFilter==='even' && num%2!==0) return false;
@@ -363,19 +700,82 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
       if (typeFilter!=='all' && eq.tipo!==typeFilter && eq.tipoAnterior!==typeFilter) return false;
       return true;
     });
-  },[street.equipment,pairFilter,typeFilter]);
+  },[street.equipment,pairFilter,typeFilter,globalEquipmentFilter,highlightProductId,allocations]);
+
+  const visiblePlanogramIds = useMemo(() => {
+    const ids = {};
+    visibleEquipment.forEach(eq => { if (globalPlanogramMode || planogramEquipment[eq.id]) ids[eq.id] = true; });
+    return ids;
+  }, [visibleEquipment, planogramEquipment, globalPlanogramMode]);
+
+  const anyVisiblePlanogram = visibleEquipment.some(eq => !!visiblePlanogramIds[eq.id]);
+  const allVisiblePlanogram = visibleEquipment.length > 0 && visibleEquipment.every(eq => !!visiblePlanogramIds[eq.id]);
+
+  const toggleEquipmentPlanogram = useCallback((equipId) => {
+    setPlanogramEquipment(prev => Object.assign({}, prev, { [equipId]: !prev[equipId] }));
+  }, []);
+
+  const toggleStreetPlanogram = useCallback(() => {
+    setPlanogramEquipment(prev => {
+      const next = Object.assign({}, prev);
+      if (visibleEquipment.length && visibleEquipment.every(eq => !!prev[eq.id])) {
+        visibleEquipment.forEach(eq => { delete next[eq.id]; });
+      } else {
+        visibleEquipment.forEach(eq => { next[eq.id] = true; });
+      }
+      return next;
+    });
+  }, [visibleEquipment]);
+
+  const handleFillStreet = useCallback(async (levelMode) => {
+    if (typeof onFillStreet !== 'function' || fillRunning) return;
+    setFillRunning(true);
+    setFillStatus('Preenchendo…');
+    setFillProgress({ done:0, total:Math.max(visibleEquipment.length, 1), applied:0 });
+    try {
+      const result = await onFillStreet({
+        streetId: street.id,
+        equipmentIds: visibleEquipment.map((eq) => eq.id),
+        levelMode,
+        onProgress: (progress) => {
+          const total = Math.max(progress?.total || visibleEquipment.length || 1, 1);
+          const done = Math.max(0, Math.min(progress?.done || 0, total));
+          let pct = Math.max(0, Math.min(99, Math.round((done / total) * 25)));
+          if (progress?.phase === 'calculando') pct = 35;
+          if (progress?.phase === 'aplicando') pct = Math.max(40, Math.min(99, Math.round((done / total) * 100)));
+          if (progress?.phase === 'concluido') pct = 100;
+          const equipmentText = progress?.equipmentId ? ` • ${progress.equipmentId}` : '';
+          setFillProgress(Object.assign({}, progress, { done, total, pct }));
+          setFillStatus(`${pct}%${equipmentText} • ${progress?.applied || 0} alocado(s)`);
+        },
+      });
+      setFillProgress({ done:result.equipmentDone || visibleEquipment.length || 1, total:visibleEquipment.length || 1, pct:100, applied:result.applied || 0 });
+      setFillStatus(`100% • ${result.applied || 0} alocado(s)`);
+      window.setTimeout(() => {
+        setFillStatus('');
+        setFillProgress(null);
+      }, 1800);
+      setFillOpen(false);
+    } catch (error) {
+      setFillStatus(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setFillRunning(false);
+    }
+  }, [fillRunning, onFillStreet, street.id, visibleEquipment]);
 
   // ── Standardised escaninho size (all equips = geladeira 5-slot reference) ──
   const ESC_LABEL=24, ESC_PAD=8, ESC_GAP=3, REF_ESC=5;
   const escWFixed = Math.floor((colWidth - ESC_LABEL - ESC_PAD*2) / REF_ESC - ESC_GAP);
+  const planogramEscW = getPlanogramSlotWidth(escWFixed);
   const effectiveColWidth = useMemo(() => {
     const maxEscs = street.equipment.reduce((m,eq)=>Math.max(m,eq.escsPerNivel), REF_ESC);
-    return ESC_LABEL + ESC_PAD*2 + maxEscs*(escWFixed + ESC_GAP);
-  },[street.equipment, escWFixed]);
+    const activeEscW = anyVisiblePlanogram ? planogramEscW : escWFixed;
+    return ESC_LABEL + ESC_PAD*2 + maxEscs*(activeEscW + ESC_GAP) + (anyVisiblePlanogram ? 8 : 0);
+  },[street.equipment, escWFixed, planogramEscW, anyVisiblePlanogram]);
 
   return (
     <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
-      <div style={{ background:'var(--shopper-navy)', borderRadius:isCollapsed?'6px':'6px 6px 0 0', padding:isCollapsed?0:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5, overflow:(filterOpen||menuOpen||newEquipOpen)?'visible':'hidden' }}
+      <div style={{ background:'var(--shopper-navy)', borderRadius:isCollapsed?'6px':'6px 6px 0 0', padding:isCollapsed?0:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5, overflow:(filterOpen||fillOpen||menuOpen||newEquipOpen)?'visible':'hidden' }}
         onClick={()=>onToggleStreet()}>
         {isCollapsed ? (
           <div style={{ width:38, height:36, display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -390,6 +790,62 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
           <span style={{ fontSize:10, color:'rgba(255,255,255,0.78)', fontWeight:800, fontFamily:'var(--font-numeric)', minWidth:30, textAlign:'right' }}>{stats.pct}%</span>
           <div style={{ width:30, height:3, background:'rgba(255,255,255,0.24)', borderRadius:2 }}>
             <div style={{ height:'100%', width:`${stats.pct}%`, background:stats.pct>=75?'#0DAB77':stats.pct>=40?'#F59C00':'#EF4444', borderRadius:2 }} />
+          </div>
+
+          {/* Street planogram */}
+          <div style={{ position:'relative', flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+            <button onClick={globalPlanogramMode ? undefined : toggleStreetPlanogram} disabled={globalPlanogramMode} title={globalPlanogramMode ? 'Planograma da loja ativo' : allVisiblePlanogram ? 'Voltar rua para visão operacional' : 'Ver rua em planograma com fotos'}
+              style={{ width:20, height:20,
+                background:allVisiblePlanogram?'rgba(18,163,192,0.24)':anyVisiblePlanogram?'rgba(18,163,192,0.14)':'rgba(255,255,255,0.08)',
+                border:allVisiblePlanogram||anyVisiblePlanogram?'1px solid rgba(18,163,192,0.58)':'1px solid rgba(255,255,255,0.15)',
+                borderRadius:3,
+                cursor:globalPlanogramMode?'default':'pointer',
+                color:allVisiblePlanogram||anyVisiblePlanogram?'#67E8F9':'rgba(255,255,255,0.55)',
+                fontSize:11,
+                fontWeight:900,
+                display:'flex',
+                alignItems:'center',
+                justifyContent:'center',
+                fontFamily:'var(--font-sans)',
+                lineHeight:1 }}>
+              <EyeIcon size={12} />
+            </button>
+          </div>
+
+          {/* Fill visible products into this street */}
+          <div style={{ position:'relative', flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+            <button onClick={()=>setFillOpen(v=>!v)} title="Preencher esta rua com produtos visíveis da prancheta"
+              style={{ width:20, height:20,
+                background:fillOpen||fillRunning?'rgba(13,171,119,0.22)':'rgba(255,255,255,0.08)',
+                border:fillOpen||fillRunning?'1px solid rgba(13,171,119,0.5)':'1px solid rgba(255,255,255,0.15)',
+                borderRadius:3, cursor:fillRunning?'default':'pointer',
+                color:fillOpen||fillRunning?'#3DD4A6':'rgba(255,255,255,0.55)',
+                fontSize:12, display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <FillStreetIcon />
+            </button>
+            {fillOpen && (<>
+              <div onClick={()=>setFillOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />
+              <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:210, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:'8px', minWidth:220, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
+                <div style={{ padding:'2px 4px 6px', fontSize:9, fontWeight:800, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                  Preencher {street.id}
+                </div>
+                <div style={{ padding:'0 4px 7px', fontSize:10, color:'var(--map-text-muted)', lineHeight:1.35 }}>
+                  Usa produtos visíveis na prancheta e {visibleEquipment.length} equipamento(s) visível(is) desta rua.
+                </div>
+                <StreetMI label="Todos os níveis" icon="↧" onClick={()=>handleFillStreet('all')} />
+                <StreetMI label="Todos menos o mais alto" icon="↓" onClick={()=>handleFillStreet('without_top')} />
+                {fillStatus && (
+                  <div style={{ margin:'6px 4px 2px', padding:'5px 7px', borderRadius:5, background:'rgba(13,171,119,0.10)', color:'#3DD4A6', fontSize:10, lineHeight:1.35 }}>
+                    {fillStatus}
+                    {fillProgress && fillRunning && (
+                      <div style={{ marginTop:5, height:3, borderRadius:999, background:'rgba(255,255,255,0.16)', overflow:'hidden' }}>
+                        <div style={{ width:`${fillProgress.pct || 0}%`, height:'100%', borderRadius:999, background:'#3DD4A6', transition:'width 0.16s ease' }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>)}
           </div>
 
           {/* Filtro compacto */}
@@ -546,7 +1002,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               }})} style={{ marginTop:6, padding:'4px 10px', fontSize:10, fontWeight:700, background:'transparent', border:'1px dashed rgba(148,163,184,0.3)', borderRadius:4, cursor:'pointer', color:'var(--map-text-muted)', fontFamily:'var(--font-sans)' }}>+ Adicionar</button>
             </div>
           )}
-          {(pairFilter!=='all'||typeFilter!=='all') && visibleEquipment.length===0 && street.equipment.length>0 && (
+          {(pairFilter!=='all'||typeFilter!=='all'||globalEquipmentFilter!=='all') && visibleEquipment.length===0 && street.equipment.length>0 && (
             <div style={{ padding:'10px 8px', textAlign:'center', color:'var(--map-text-muted)', fontSize:10 }}>
               Nenhum equipamento com o filtro ativo.
             </div>
@@ -560,6 +1016,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
               highlightProductId={highlightProductId} subcatFilters={subcatFilters}
               escW={escWFixed} pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
+              planogramMode={!!visiblePlanogramIds[eq.id]} onTogglePlanogram={toggleEquipmentPlanogram}
             />
           ))}
         </div>
@@ -579,7 +1036,7 @@ function StreetMI({ label, icon, onClick, danger }) {
 }
 
 // ── Map Canvas ─────────────────────────────────────────────────────────────────
-function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, highlightProductId, subcatFilters=[], queueProductIds=[], pendingEquipmentTypeChanges={} }) {
+function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, onFillStreet, globalEquipmentFilter='all', globalPlanogramMode=false, highlightProductId, subcatFilters=[], queueProductIds=[], pendingEquipmentTypeChanges={} }) {
   const [tooltip, setTooltip] = useState(null);
   const [smartFillProgress, setSmartFillProgress] = useState(null);
   const containerRef = useRef(null);
@@ -650,7 +1107,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   }, [mapStructure]);
 
   // Score a slot for a specific product based on tipo_fisico rules from agent_scoring.py
-  const scoreSlotForProduct = useCallback((escaninhoId, productId) => {
+  const scoreSlotForProduct = useCallback((escaninhoId, productId, opts={}) => {
     const { level, equipId } = parseEscId(escaninhoId);
     const productCode = parseBoardEntryCode(productId);
     const product = PRODUCT_MAP[productCode];
@@ -660,18 +1117,23 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       for (const e of street.equipment) { if (e.id === equipId) { eq = e; break; } }
       if (eq) break;
     }
-    const isPrateleira = eq && (eq.tipo || '').includes('prateleira');
-    const isGeladeira = eq && (eq.tipo || '').includes('geladeira');
-    if (!isPrateleira && !isGeladeira) return -level * 2;
+    const equipKind = equipmentStorageKind(eq);
+    const productKind = productStorageKind(product);
+    if (productKind !== 'any' && equipKind !== productKind) return -99999;
+    const isPrateleira = equipKind === 'prateleira';
+    const isGeladeira = equipKind === 'geladeira';
+    const isFreezer = equipKind === 'freezer';
+    if (!isPrateleira && !isGeladeira && !isFreezer) return -level * 2;
     const niveis = eq ? eq.niveis : 5;
     let score = 0;
+    const allowClickedTop = !!opts.allowClickedTop && level === 1;
     // Pesado em prateleira: regra dura apenas contra nivel 1.
     if (product.pesado) {
       if (level === 1) return -99999;
     }
     // FLV em prateleira: bloqueia nível 1 e último nível
     if (isPrateleira && (product.grupo || '').toUpperCase() === 'FLV') {
-      if (level === 1 || level === niveis) return -99999;
+      if ((level === 1 && !allowClickedTop) || level === niveis) return -99999;
       score += 30;
     }
     if (isGeladeira && (product.grupo || '').toUpperCase() === 'FLV') {
@@ -681,7 +1143,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     }
     const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
     if (isEgg && (level < 2 || level > 4)) {
-      return -99999;
+      if (!allowClickedTop) return -99999;
     }
     // frágil/alto: prefere topo (nível 1)
     if (product.fragil || product.alto) {
@@ -695,12 +1157,43 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     return score;
   }, [mapStructure]);
 
+  const explainAllocationFailure = useCallback((clickedEscaninhoId) => {
+    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
+    const firstProductId = queue[0];
+    const product = PRODUCT_MAP[parseBoardEntryCode(firstProductId)];
+    const parsed = parseEscId(clickedEscaninhoId);
+    let eq = null;
+    for (const street of mapStructure) {
+      for (const candidate of street.equipment) {
+        if (candidate.id === parsed.equipId) { eq = candidate; break; }
+      }
+      if (eq) break;
+    }
+    if (!product || !eq) return 'Nenhum slot elegível para a seleção atual.';
+    const productKind = productStorageKind(product);
+    const equipKind = equipmentStorageKind(eq);
+    const kindLabel = { freezer:'Freezer', geladeira:'Geladeira', prateleira:'Prateleira', any:'equipamento compatível' };
+    if (productKind !== 'any' && equipKind !== productKind) {
+      return `${product.nome} exige ${kindLabel[productKind]}; ${eq.id} é ${kindLabel[equipKind] || eq.tipo}.`;
+    }
+    if ((product.pesado || product.grupo === 'FLV') && parsed.level === 1) {
+      return 'Esse nível não é elegível para o produto selecionado.';
+    }
+    return 'Nenhum slot elegível para a seleção atual.';
+  }, [capQueueByRequiredBins, mapStructure, queueProductIds, selectedProduct]);
+
   const buildAllocationBatch = useCallback((clickedEscaninhoId, opts) => {
     const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
     if (!queue.length) return [];
     const parsed = parseEscId(clickedEscaninhoId);
     const scope = opts.scope || 'single';
     const slot = opts.slot || 1;
+    const allowClickedTop = !!opts.allowClickedTop;
+    const firstSlotHasSameProduct = (escaninhoId, productId) => {
+      if (slot !== 2) return false;
+      const alloc = allocations[escaninhoId] || {};
+      return parseBoardEntryCode(alloc.p1) === parseBoardEntryCode(productId);
+    };
     const candidateIds = scope === 'equipment'
       ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
       : scope === 'level'
@@ -715,7 +1208,10 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     });
     // Single product: sort slots by score for this product
     if (selectedProduct) {
-      const sorted = [...targets].sort((a, b) => scoreSlotForProduct(b, selectedProduct) - scoreSlotForProduct(a, selectedProduct));
+      const sorted = [...targets]
+        .filter((escaninhoId) => !firstSlotHasSameProduct(escaninhoId, selectedProduct))
+        .filter((escaninhoId) => scoreSlotForProduct(escaninhoId, selectedProduct, { allowClickedTop }) > -99999)
+        .sort((a, b) => scoreSlotForProduct(b, selectedProduct, { allowClickedTop }) - scoreSlotForProduct(a, selectedProduct, { allowClickedTop }));
       return sorted.slice(0, 1).map((escaninhoId) => ({ escaninhoId, productId: selectedProduct, slot }));
     }
     // Queue: greedy match — each product picks its best available slot
@@ -726,16 +1222,23 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         if (result.length >= queue.length) break;
         const best = [...targets]
           .filter((s) => !used.has(s))
-          .sort((a, b) => scoreSlotForProduct(b, productId) - scoreSlotForProduct(a, productId))[0];
+          .filter((s) => !firstSlotHasSameProduct(s, productId))
+          .filter((s) => scoreSlotForProduct(s, productId, { allowClickedTop }) > -99999)
+          .sort((a, b) => scoreSlotForProduct(b, productId, { allowClickedTop }) - scoreSlotForProduct(a, productId, { allowClickedTop }))[0];
         if (best && productId) { used.add(best); result.push({ escaninhoId: best, productId, slot }); }
       }
       return result.filter((item) => !!item.productId);
     }
-    return targets.slice(0, queue.length).map((escaninhoId, index) => ({
-      escaninhoId,
-      productId: queue[index],
-      slot,
-    })).filter((item) => !!item.productId);
+    const result = [];
+    const used = new Set();
+    for (const productId of queue) {
+      const best = targets.find((escaninhoId) => !used.has(escaninhoId) && !firstSlotHasSameProduct(escaninhoId, productId) && scoreSlotForProduct(escaninhoId, productId, { allowClickedTop }) > -99999);
+      if (best && productId) {
+        used.add(best);
+        result.push({ escaninhoId: best, productId, slot });
+      }
+    }
+    return result.filter((item) => !!item.productId);
   }, [allocations, capQueueByRequiredBins, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
 
   const buildScopedBackendAllocations = useCallback((allowedTargetIds, opts={}) => {
@@ -767,6 +1270,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
   const handleSmartFill = useCallback(async (clickedEscaninhoId, scope, opts={}) => {
     const allowSecondSlot = !!opts.allowSecondSlot;
+    const allowClickedTopLevel = !!opts.allowClickedTopLevel;
     const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
     if (selectedProduct || queue.length <= 1) return null;
     const parsed = parseEscId(clickedEscaninhoId);
@@ -802,6 +1306,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         options: {
           allow_top_level: true,
           allow_second_slot: allowSecondSlot,
+          allow_clicked_top_level: allowClickedTopLevel,
         },
       }),
     });
@@ -846,29 +1351,46 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   // Scroll to highlighted product
   useEffect(()=>{
     if (!highlightProductId || !containerRef.current) return;
-    let streetIdx=-1, equipIdx=-1;
+    const normalizedHighlight = parseBoardEntryCode(highlightProductId);
+    let streetIdx=-1, equipIdx=-1, targetLocationId='';
     mapStructure.forEach((street,si)=>{
       if (streetIdx>=0) return;
       street.equipment.forEach((eq,ei)=>{
         if (streetIdx>=0) return;
         for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){
           const a=allocations[`${eq.id}-${n}-${s}`];
-          if(a?.p1===highlightProductId||a?.p2===highlightProductId){ streetIdx=si; equipIdx=ei; }
+          if(parseBoardEntryCode(a?.p1)===normalizedHighlight||parseBoardEntryCode(a?.p2)===normalizedHighlight){
+            streetIdx=si;
+            equipIdx=ei;
+            targetLocationId=`${eq.id}-${n}-${s}`;
+          }
         }
       });
     });
     if(streetIdx<0) return;
-    let scrollX=14;
-    for(let i=0;i<streetIdx;i++) scrollX += (streetCollapsed[mapStructure[i].id]?38:colWidth)+10;
-    let scrollY=0;
-    const street=mapStructure[streetIdx];
-    for(let i=0;i<equipIdx;i++){
-      const eq=street.equipment[i];
-      scrollY += equipCollapsed[eq.id] ? 40 : 40 + 14 + eq.niveis*54;
-    }
-    containerRef.current.scrollLeft = Math.max(0,scrollX-60);
-    containerRef.current.scrollTop  = Math.max(0,scrollY-40);
-  },[highlightProductId]);
+    const container = containerRef.current;
+    const scrollToTarget = () => {
+      const target = targetLocationId ? container.querySelector(`[data-location-id="${cssEscapeValue(targetLocationId)}"]`) : null;
+      if (target) {
+        const containerRect = container.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const nextLeft = container.scrollLeft + targetRect.left - containerRect.left - ((container.clientWidth - targetRect.width) / 2);
+        const nextTop = container.scrollTop + targetRect.top - containerRect.top - ((container.clientHeight - targetRect.height) / 2);
+        container.scrollTo({ left:Math.max(0, nextLeft), top:Math.max(0, nextTop), behavior:'smooth' });
+        return;
+      }
+      let scrollX=14;
+      for(let i=0;i<streetIdx;i++) scrollX += (streetCollapsed[mapStructure[i].id]?38:colWidth)+10;
+      let scrollY=0;
+      const street=mapStructure[streetIdx];
+      for(let i=0;i<equipIdx;i++){
+        const eq=street.equipment[i];
+        scrollY += equipCollapsed[eq.id] ? 40 : 40 + 14 + eq.niveis*54;
+      }
+      container.scrollTo({ left:Math.max(0,scrollX-60), top:Math.max(0,scrollY-40), behavior:'smooth' });
+    };
+    window.setTimeout(()=>window.requestAnimationFrame(scrollToTarget), 160);
+  },[highlightProductId, allocations, mapStructure, streetCollapsed, equipCollapsed, colWidth]);
 
   const handleEscClick = useCallback(async (escsId,p1,p2,e)=>{
     setTooltip(null);
@@ -876,6 +1398,8 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const hasShift = !!(e && e.shiftKey);
     const scope = hasCmd && hasShift ? 'street' : hasCmd ? 'equipment' : hasShift ? 'level' : 'single';
     const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
+    const clicked = parseEscId(escsId);
+    const allowClickedTopFill = clicked.level === 1 && (scope === 'equipment' || scope === 'street' || scope === 'level');
     if (p1 && !wantsSecondSlot) {
       const collectBatch = buildCollectBatch(escsId, scope);
       if (collectBatch.length > 1) {
@@ -891,7 +1415,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : 'equipamento';
           const levaLabel = wantsSecondSlot ? '2ª leva da ' : '';
           setSmartFillProgress({ label:`Calculando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:1, indeterminate:true });
-          const smartBatch = await handleSmartFill(escsId, scope, { allowSecondSlot:wantsSecondSlot });
+          const smartBatch = await handleSmartFill(escsId, scope, { allowSecondSlot:wantsSecondSlot, allowClickedTopLevel:allowClickedTopFill });
           if (smartBatch && smartBatch.length) {
             if (typeof onAllocateManyProgressive === 'function') {
               setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
@@ -905,24 +1429,28 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
             window.setTimeout(() => setSmartFillProgress(null), 700);
             return;
           }
-          setSmartFillProgress(null);
-          return;
+	          setSmartFillProgress({ label:explainAllocationFailure(escsId), done:0, total:1, indeterminate:false, error:true });
+	          window.setTimeout(() => setSmartFillProgress(null), 1800);
+	          return;
         } catch (error) {
           setSmartFillProgress(null);
           console.error('Smart fill backend error:', error);
         }
       }
-      const allocationBatch = buildAllocationBatch(escsId, { scope, slot:wantsSecondSlot ? 2 : 1 });
+      const allocationBatch = buildAllocationBatch(escsId, { scope, slot:wantsSecondSlot ? 2 : 1, allowClickedTop:allowClickedTopFill });
       if (allocationBatch.length > 1) {
         onAllocateMany(allocationBatch);
         return;
       }
-      if (allocationBatch.length === 1) {
-        const item = allocationBatch[0];
-        onAllocate(item.escaninhoId, item.productId, item.slot);
-        return;
-      }
-    }
+	      if (allocationBatch.length === 1) {
+	        const item = allocationBatch[0];
+	        onAllocate(item.escaninhoId, item.productId, item.slot);
+	        return;
+	      }
+	      setSmartFillProgress({ label:explainAllocationFailure(escsId), done:0, total:1, indeterminate:false, error:true });
+	      window.setTimeout(() => setSmartFillProgress(null), 1800);
+	      return;
+	    }
     if (p1 && !wantsSecondSlot) {
       const collectBatch = buildCollectBatch(escsId, scope);
       if (collectBatch.length > 1) {
@@ -934,11 +1462,11 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     }
     if(selectedProduct){
       if(!p1) onAllocate(escsId,selectedProduct,1);
-      else if(wantsSecondSlot&&!p2) onAllocate(escsId,selectedProduct,2);
+      else if(wantsSecondSlot&&!p2&&parseBoardEntryCode(p1.id)!==parseBoardEntryCode(selectedProduct)) onAllocate(escsId,selectedProduct,2);
     } else {
       if(p1) onCollect(escsId,p1);
     }
-  },[selectedProduct,queueProductIds,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,handleSmartFill,onAllocate,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
+  },[selectedProduct,queueProductIds,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,handleSmartFill,explainAllocationFailure,onAllocate,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -967,15 +1495,15 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   },[]);
 
   return (
-    <div ref={containerRef} style={{ flex:1, overflowX:'auto', overflowY:'hidden', padding:'12px 14px', display:'flex', gap:10, alignItems:'stretch', position:'relative', background:'var(--map-bg)' }}
+    <div ref={containerRef} style={{ flex:1, overflow:'auto', padding:'12px 14px', display:'flex', gap:10, alignItems:'stretch', position:'relative', background:'var(--map-bg)' }}
       onMouseMove={e=>{ if(tooltip&&!rafRef.current){ const cx=e.clientX,cy=e.clientY; rafRef.current=requestAnimationFrame(()=>{ setTooltip(prev=>prev?{...prev,x:cx+14,y:cy-24}:null); rafRef.current=null; }); } }}>
 
       {smartFillProgress && (
-        <div style={{ position:'fixed', top:60, left:'50%', transform:'translateX(-50%)', zIndex:110, minWidth:320, maxWidth:430, background:'rgba(16,26,21,0.96)', border:'1px solid rgba(61,212,166,0.28)', borderRadius:12, padding:'10px 12px', color:'#fff', boxShadow:'0 10px 28px rgba(0,0,0,0.28)', pointerEvents:'none' }}>
+        <div style={{ position:'fixed', top:60, left:'50%', transform:'translateX(-50%)', zIndex:110, minWidth:320, maxWidth:430, background:smartFillProgress.error?'rgba(69,10,10,0.96)':'rgba(16,26,21,0.96)', border:smartFillProgress.error?'1px solid rgba(239,68,68,0.38)':'1px solid rgba(61,212,166,0.28)', borderRadius:12, padding:'10px 12px', color:'#fff', boxShadow:'0 10px 28px rgba(0,0,0,0.28)', pointerEvents:'none' }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:6 }}>
             <div style={{ fontSize:11, fontWeight:700 }}>{smartFillProgress.label}</div>
             {!smartFillProgress.indeterminate && (
-              <div style={{ fontSize:11, fontWeight:900, color:'#3DD4A6', fontFamily:'var(--font-numeric)' }}>
+              <div style={{ fontSize:11, fontWeight:900, color:smartFillProgress.error?'#FCA5A5':'#3DD4A6', fontFamily:'var(--font-numeric)' }}>
                 {Math.round((smartFillProgress.done / Math.max(smartFillProgress.total, 1)) * 100)}%
               </div>
             )}
@@ -989,7 +1517,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
             <div style={{
               height:'100%',
               width: smartFillProgress.indeterminate ? '35%' : `${Math.max(4, Math.round((smartFillProgress.done / Math.max(smartFillProgress.total, 1)) * 100))}%`,
-              background:'linear-gradient(90deg, #0DAB77, #3DD4A6)',
+              background:smartFillProgress.error?'linear-gradient(90deg, #DC2626, #FCA5A5)':'linear-gradient(90deg, #0DAB77, #3DD4A6)',
               borderRadius:999,
               transition:'width 0.12s ease',
               animation: smartFillProgress.indeterminate ? 'dse-progress-slide 1.15s linear infinite' : 'none',
@@ -1013,7 +1541,9 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           isCollapsed={!!streetCollapsed[street.id]} onToggleStreet={()=>onToggleStreet(street.id)}
           colWidth={colWidth} searchQuery={searchQuery} dispatch={dispatch}
           swapSource={swapSource} onStartSwap={onStartSwap} onCompleteSwap={onCompleteSwap}
-          highlightProductId={highlightProductId} onRecolherRua={onRecolherRua} subcatFilters={subcatFilters}
+          highlightProductId={highlightProductId} onRecolherRua={onRecolherRua} onFillStreet={onFillStreet} subcatFilters={subcatFilters}
+          globalEquipmentFilter={globalEquipmentFilter}
+          globalPlanogramMode={globalPlanogramMode}
           pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
         />
       ))}

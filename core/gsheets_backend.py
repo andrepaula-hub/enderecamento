@@ -75,6 +75,24 @@ INITIAL_DATA_CACHE_TTL_SECONDS = 120.0
 _INITIAL_DATA_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 
+def clear_initial_data_cache(sheet_id: str | None = None, master_sheet_id: str | None = None) -> None:
+    if sheet_id is None and master_sheet_id is None:
+        _INITIAL_DATA_CACHE.clear()
+        return
+    target_key = (
+        normalize_string(sheet_id or ""),
+        normalize_string(master_sheet_id or ""),
+    )
+    for key in list(_INITIAL_DATA_CACHE.keys()):
+        if sheet_id is not None and master_sheet_id is not None:
+            if key == target_key:
+                _INITIAL_DATA_CACHE.pop(key, None)
+        elif sheet_id is not None and key[0] == target_key[0]:
+            _INITIAL_DATA_CACHE.pop(key, None)
+        elif master_sheet_id is not None and key[1] == target_key[1]:
+            _INITIAL_DATA_CACHE.pop(key, None)
+
+
 class GSheetSource:
     def __init__(self, client: GSheetsClient):
         self.client = client
@@ -357,6 +375,17 @@ def _safe_read_values(client: GSheetsClient, sheet_name: str) -> list[list[Any]]
         return []
 
 
+def _values_to_dicts(values: list[list[Any]]) -> list[dict[str, Any]]:
+    if not values:
+        return []
+    headers = [str(h).strip() if h is not None else "" for h in values[0]]
+    rows: list[dict[str, Any]] = []
+    for raw in values[1:]:
+        row = raw + [None] * (len(headers) - len(raw))
+        rows.append({header: row[idx] if idx < len(row) else None for idx, header in enumerate(headers) if header})
+    return rows
+
+
 def _normalize_depara_value(value: Any) -> str:
     text = normalize_string(value).upper().replace(" ", "")
     text = text.replace("NÃO", "NAO")
@@ -488,17 +517,17 @@ def generate_layout_atual_gsheet(
 ) -> dict[str, Any]:
     client = GSheetsClient(sheet_id)
 
-    depara_rows = client.read_sheet(depara_sheet)
+    depara_rows = _values_to_dicts(_safe_read_values(client, depara_sheet))
     mapping = _build_depara_map(depara_rows)
     if not mapping:
         return {"success": False, "error": f"Aba de/para inválida ou vazia: {depara_sheet}"}
 
-    cadastro_novo_rows = client.read_sheet(SHEET_CADASTRO_NOVO)
-    cadastro_antigo_rows = client.read_sheet(SHEET_CADASTRO_ANTIGO)
+    cadastro_novo_rows = _values_to_dicts(_safe_read_values(client, SHEET_CADASTRO_NOVO))
+    cadastro_antigo_rows = _values_to_dicts(_safe_read_values(client, SHEET_CADASTRO_ANTIGO))
     cadastro_novo_map = _build_cadastro_map(cadastro_novo_rows)
     cadastro_antigo_map = _build_cadastro_map(cadastro_antigo_rows)
 
-    values = client.read_values(SHEET_PLANO_FINAL)
+    values = _safe_read_values(client, SHEET_PLANO_FINAL)
     if not values:
         return {"success": False, "error": "Plano_Enderecamento_Final vazio ou não encontrado"}
 
@@ -601,6 +630,8 @@ def generate_layout_atual_gsheet(
     return {
         "success": True,
         "output_sheet": output_sheet,
+        "sheetName": output_sheet,
+        "url": client.get_sheet_url(output_sheet),
         "total_rows": len(output_rows),
         "mapped": mapped,
         "missing": missing,
@@ -608,6 +639,121 @@ def generate_layout_atual_gsheet(
         "tipo_diferente": tipo_diferente,
         "tipo_sem_cadastro_novo": tipo_sem_novo,
         "tipo_sem_cadastro_antigo": tipo_sem_antigo,
+    }
+
+
+def _parse_location_for_summary(location_id: Any) -> tuple[int, int] | None:
+    text = normalize_string(location_id).upper()
+    match = re.search(r"-R(\d+)-(\d+)-", text)
+    if not match:
+        match = re.search(r"R(\d+)-(?:E)?(\d+)", text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1)), int(match.group(2))
+    except ValueError:
+        return None
+
+
+def _summary_tipo_label(tipo: str, degelo_nao: int, alto_count: int, occupied: int) -> str:
+    tipo_norm = normalize_string(tipo).lower().replace("_", " ")
+    if "freezer" in tipo_norm:
+        return "freezer"
+    if "geladeira" in tipo_norm or "refriger" in tipo_norm:
+        if "alta" in tipo_norm:
+            return "geladeira alta"
+        if occupied and degelo_nao >= occupied / 2:
+            return "geladeira de gerador"
+        if occupied and alto_count > occupied / 2:
+            return "geladeira alta"
+        return "geladeira"
+    if "prateleira" in tipo_norm:
+        return "prateleira"
+    return (tipo or "N/A").lower()
+
+
+def _format_equipment_numbers(numbers: list[int]) -> str:
+    return ", ".join(str(int(number)).zfill(3) for number in sorted(numbers))
+
+
+def generate_equipment_summary_gsheet(sheet_id: str) -> dict[str, Any]:
+    client = GSheetsClient(sheet_id)
+    values = _safe_read_values(client, SHEET_PLANO_FINAL)
+    if not values:
+        return {"success": False, "error": "Plano_Enderecamento_Final vazio ou não encontrado."}
+
+    headers = [str(h).strip() if h is not None else "" for h in values[0]]
+    rows = [row + [None] * (len(headers) - len(row)) for row in values[1:]]
+
+    loc_idx = _find_header_index(headers, "location_id")
+    product_idx = _find_header_index(headers, "product_code", "produto_alocado_code")
+    tipo_idx = _find_header_index(headers, "tipo_equipamento_final", "tipo_equipamento")
+    degelo_idx = _find_header_index(headers, "degelo")
+    alto_idx = _find_header_index(headers, "is_alto")
+    if loc_idx == -1:
+        return {"success": False, "error": "Coluna location_id não encontrada no Plano_Enderecamento_Final."}
+
+    equipment: dict[tuple[int, int], dict[str, Any]] = {}
+    for row in rows:
+        parsed = _parse_location_for_summary(row[loc_idx] if loc_idx < len(row) else "")
+        if not parsed:
+            continue
+        item = equipment.setdefault(
+            parsed,
+            {
+                "rua": parsed[0],
+                "equipamento": parsed[1],
+                "tipo_counts": {},
+                "slots": 0,
+                "occupied": 0,
+                "products": set(),
+                "degelo_nao": 0,
+                "alto": 0,
+            },
+        )
+        item["slots"] += 1
+        tipo = normalize_string(row[tipo_idx] if tipo_idx != -1 and tipo_idx < len(row) else "")
+        if tipo:
+            item["tipo_counts"][tipo] = item["tipo_counts"].get(tipo, 0) + 1
+        product_code = normalize_string(row[product_idx] if product_idx != -1 and product_idx < len(row) else "")
+        if product_code and product_code != "Vazio":
+            item["occupied"] += 1
+            item["products"].add(product_code)
+            degelo = normalize_string(row[degelo_idx] if degelo_idx != -1 and degelo_idx < len(row) else "").upper().replace("NÃO", "NAO")
+            if degelo == "NAO":
+                item["degelo_nao"] += 1
+            if parse_bool_flag(row[alto_idx] if alto_idx != -1 and alto_idx < len(row) else ""):
+                item["alto"] += 1
+
+    by_street: dict[int, dict[str, list[int]]] = {}
+    for key in sorted(equipment):
+        item = equipment[key]
+        tipo_counts = item["tipo_counts"]
+        tipo_predominante = max(tipo_counts.items(), key=lambda kv: kv[1])[0] if tipo_counts else ""
+        occupied = int(item["occupied"])
+        degelo_nao = int(item["degelo_nao"])
+        alto_count = int(item["alto"])
+        resumo = _summary_tipo_label(tipo_predominante, degelo_nao, alto_count, occupied)
+        by_street.setdefault(int(item["rua"]), {}).setdefault(resumo, []).append(int(item["equipamento"]))
+
+    lines: list[str] = []
+    preferred_order = ["geladeira de gerador", "geladeira alta", "geladeira", "freezer", "prateleira"]
+    for street in sorted(by_street):
+        lines.append(f"R{street}:")
+        groups = by_street[street]
+        ordered_labels = [label for label in preferred_order if label in groups]
+        ordered_labels.extend(sorted(label for label in groups if label not in preferred_order))
+        for label in ordered_labels:
+            numbers = _format_equipment_numbers(groups[label])
+            verb = "são" if "," in numbers else "é"
+            lines.append(f"{numbers} {verb} {label}")
+        lines.append("")
+
+    summary_text = "\n".join(lines).strip()
+    return {
+        "success": True,
+        "summary_text": summary_text,
+        "total_equipment": len(equipment),
     }
 
 
@@ -1435,18 +1581,23 @@ def generate_kdabra_sheet_gsheet(sheet_id: str) -> dict[str, Any]:
         rows.append([product_code, galpao, rua, estante, escaninho])
 
     client.append_rows(sheet_name, rows)
-    return {"success": True, "url": "/api/download", "sheetName": sheet_name}
+    return {"success": True, "url": client.get_sheet_url(sheet_name), "sheetName": sheet_name, "total_rows": len(rows) - 1}
 
 
-def generate_kdabra_enderecar_sheet_gsheet(sheet_id: str) -> dict[str, Any]:
+def generate_kdabra_enderecar_sheet_gsheet(sheet_id: str, master_sheet_id: str | None = None) -> dict[str, Any]:
     from .data_prep import load_volumetria_map
     from .initial_data import ALFABETO
 
     client = GSheetsClient(sheet_id)
-    plano_data = client.read_sheet(SHEET_PLANO_FINAL)
-    cadastro_data = client.read_sheet(SHEET_CADASTRO_NOVO)
-    volumetria_data = client.read_sheet(SHEET_VOLUMETRIA)
-    volumetria_map = load_volumetria_map(volumetria_data)
+    plano_data = _values_to_dicts(_safe_read_values(client, SHEET_PLANO_FINAL))
+    if not plano_data:
+        return {"success": False, "error": "Plano_Enderecamento_Final vazio ou não encontrado."}
+    cadastro_data = _values_to_dicts(_safe_read_values(client, SHEET_CADASTRO_NOVO))
+    volumetria_values = _safe_read_values(client, SHEET_VOLUMETRIA)
+    if (not volumetria_values) and master_sheet_id:
+        volumetria_values = _safe_read_values(GSheetsClient(master_sheet_id), SHEET_VOLUMETRIA)
+    volumetria_map = load_volumetria_map(_values_to_dicts(volumetria_values))
+    missing_volumetria = not bool(volumetria_map)
 
     sheet_name = "kdabra enderecar"
     client.ensure_sheet(sheet_name)
@@ -1523,6 +1674,8 @@ def generate_kdabra_enderecar_sheet_gsheet(sheet_id: str) -> dict[str, Any]:
             continue
         if (rua_num, equip_num) in plan_equip_keys:
             continue
+        if missing_volumetria:
+            continue
         tipo = normalize_string(cad_row.get("tipo_equipamento") or cad_row.get("tipo")).lower()
         vol_cfg = volumetria_map.get(tipo, {})
         qtd_niveis = max(1, int(parse_number(vol_cfg.get("qtd_niveis")) or 1))
@@ -1550,7 +1703,10 @@ def generate_kdabra_enderecar_sheet_gsheet(sheet_id: str) -> dict[str, Any]:
 
     client.append_rows(sheet_name, rows)
     sheet_url = client.get_sheet_url(sheet_name)
-    return {"success": True, "url": sheet_url, "sheetName": sheet_name}
+    result = {"success": True, "url": sheet_url, "sheetName": sheet_name, "total_rows": len(rows) - 1}
+    if missing_volumetria:
+        result["warning"] = "Aba Volumetria_Equipamentos não encontrada; a aba foi gerada apenas com endereços existentes no Plano_Enderecamento_Final."
+    return result
 
 
 def generate_sku_report_custom_gsheet(
@@ -2427,6 +2583,7 @@ def generate_slots_from_cadastro_gsheet(
         plan_headers = DEFAULT_PLANO_HEADERS[:]
         client.clear_sheet(SHEET_PLANO_FINAL)
         client.append_rows(SHEET_PLANO_FINAL, [plan_headers])
+        plano_values = [plan_headers]
 
     cad_galpao = _find_header_index(cad_headers, "galpao_id", "galpao")
     cad_rua = _find_header_index(cad_headers, "rua_num", "rua")
@@ -2483,6 +2640,17 @@ def generate_slots_from_cadastro_gsheet(
     generated_rows: list[list[Any]] = []
     missing_types: set[str] = set()
     equipment_count = 0
+    candidate_slots = 0
+    equipment_with_new_slots: set[tuple[int, int]] = set()
+    existing_location_ids: set[str] = set()
+    if not clear_existing:
+        loc_idx = _find_header_index(plan_headers, "location_id")
+        if loc_idx >= 0:
+            for row in plano_values[1:]:
+                if loc_idx < len(row):
+                    location_id = normalize_string(row[loc_idx]).strip()
+                    if location_id:
+                        existing_location_ids.add(location_id)
 
     def _safe_to_int(value: Any) -> int:
         text = normalize_string(value).replace(",", ".")
@@ -2537,6 +2705,9 @@ def generate_slots_from_cadastro_gsheet(
                 pos_num = j + 1
                 pos_letra = alfabeto[j]
                 location_id = f"{galpao}-{rua_str}-{equip_str}-{altura_num}{pos_letra}"
+                candidate_slots += 1
+                if not clear_existing and location_id in existing_location_ids:
+                    continue
                 row_new = _empty_row_for_headers(plan_headers)
                 _set_slot_defaults(
                     row_new,
@@ -2554,8 +2725,9 @@ def generate_slots_from_cadastro_gsheet(
                     is_nivel_inferior=nivel_letra == nivel_inf,
                 )
                 generated_rows.append(row_new)
+                equipment_with_new_slots.add((rua_num, equip_num))
 
-    if not generated_rows:
+    if not candidate_slots:
         vol_types = sorted(vol_map.keys())
         cad_types = sorted({
             _normalize_text(row[cad_tipo] if cad_tipo < len(row) else "")
@@ -2571,6 +2743,20 @@ def generate_slots_from_cadastro_gsheet(
             ),
         }
 
+    if not generated_rows and not clear_existing:
+        result: dict[str, Any] = {
+            "success": True,
+            "equipments_processed": equipment_count,
+            "equipments_with_new_slots": 0,
+            "slots_generated": 0,
+            "slots_existing": len(existing_location_ids),
+            "plano_sheet_url": client.get_sheet_url(SHEET_PLANO_FINAL),
+            "message": "Nenhum escaninho novo para gerar; Plano_Enderecamento_Final já cobre o Cadastro_Equipamentos.",
+        }
+        if missing_types:
+            result["missing_types"] = sorted(missing_types)
+        return result
+
     if clear_existing:
         client.clear_sheet(SHEET_PLANO_FINAL)
         client.append_rows(SHEET_PLANO_FINAL, [plan_headers] + generated_rows)
@@ -2580,7 +2766,9 @@ def generate_slots_from_cadastro_gsheet(
     result: dict[str, Any] = {
         "success": True,
         "equipments_processed": equipment_count,
+        "equipments_with_new_slots": len(equipment_with_new_slots) if not clear_existing else equipment_count,
         "slots_generated": len(generated_rows),
+        "mode": "full" if clear_existing else "incremental",
         "plano_sheet_url": client.get_sheet_url(SHEET_PLANO_FINAL),
     }
     if missing_types:

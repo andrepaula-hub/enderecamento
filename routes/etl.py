@@ -18,7 +18,7 @@ from core.etl_warning_mappings import (
     send_missing_volumetria_with_default,
     send_warning_group_to_etl,
 )
-from core.gsheets_backend import generate_slots_from_cadastro_gsheet
+from core.gsheets_backend import clear_initial_data_cache, generate_slots_from_cadastro_gsheet
 from core.gsheets_client import GSheetsClient
 from core.metabase_sales import (
     build_vendas_alvo_from_metabase,
@@ -47,6 +47,7 @@ def _run_etl_legacy_job(job_service, job_id: str, target_sheet_id: str, master_s
             mix_sheet_id=mix_sheet_id,
             target_sheet_id=target_sheet_id,
         )
+        clear_initial_data_cache(target_sheet_id, master_sheet_id)
         if result.get("success"):
             result.setdefault("progress_pct", 82)
             result.setdefault("progress_label", "Base_Produtos atualizada. Validando plano…")
@@ -58,20 +59,29 @@ def _run_etl_legacy_job(job_service, job_id: str, target_sheet_id: str, master_s
                     if "Plano_Enderecamento_Final" in sheet_names
                     else []
                 )
-                if not plano_values or len(plano_values) < 2:
-                    slots = generate_slots_from_cadastro_gsheet(
-                        target_sheet_id, clear_existing=True, master_sheet_id=master_sheet_id
-                    )
-                    if slots.get("success"):
+                should_create_full_plan = not plano_values or len(plano_values) < 2
+                slots = generate_slots_from_cadastro_gsheet(
+                    target_sheet_id,
+                    clear_existing=should_create_full_plan,
+                    master_sheet_id=master_sheet_id,
+                )
+                if slots.get("success"):
+                    generated = int(slots.get("slots_generated") or 0)
+                    result["slots_generated"] = generated
+                    result["plano_sheet_url"] = slots.get("plano_sheet_url")
+                    if should_create_full_plan:
                         result["plano_auto_generated"] = True
-                        result["slots_generated"] = slots.get("slots_generated", 0)
-                        result["plano_sheet_url"] = slots.get("plano_sheet_url")
-                        result["progress_pct"] = 94
                         result["progress_label"] = "Plano_Enderecamento_Final gerado automaticamente."
                     else:
-                        result["plano_auto_warning"] = (
-                            slots.get("error") or "Não foi possível gerar Plano_Enderecamento_Final automaticamente."
-                        )
+                        result["plano_incremental_generated"] = generated > 0
+                        result["plano_incremental_slots_generated"] = generated
+                        if generated > 0:
+                            result["progress_label"] = f"{generated} escaninho(s) novo(s) adicionados ao plano."
+                    result["progress_pct"] = 94
+                else:
+                    result["plano_auto_warning"] = (
+                        slots.get("error") or "Não foi possível sincronizar Plano_Enderecamento_Final com Cadastro_Equipamentos."
+                    )
             except Exception as slot_exc:
                 result["plano_auto_warning"] = str(slot_exc)
             result["progress_pct"] = 100

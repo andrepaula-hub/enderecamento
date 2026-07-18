@@ -2001,6 +2001,7 @@ def _build_card175_mode_rows(
     plano_data: list[dict[str, Any]],
     cadastro_data: list[dict[str, Any]],
     volumetria_data: list[dict[str, Any]],
+    include_cadastro_only: bool = False,
 ) -> list[dict[str, Any]]:
     cadastro_map = _build_cadastro_equipment_map(cadastro_data)
     volumetria_map = load_volumetria_map(volumetria_data)
@@ -2024,37 +2025,38 @@ def _build_card175_mode_rows(
         if not galpao_default:
             galpao_default = normalize_string(row_copy.get("galpao_id")).strip()
 
-    for equip_key, cadastro_info in cadastro_map.items():
-        if equip_key in plan_keys:
-            continue
-        rua_num, equip_num = equip_key
-        tipo = normalize_string(cadastro_info.get("tipo_equipamento")).strip() or "desconhecido"
-        vol_cfg = volumetria_map.get(tipo.lower(), {})
-        qtd_niveis = max(1, int(parse_number(vol_cfg.get("qtd_niveis")) or 1))
-        qtd_esc = max(1, int(parse_number(vol_cfg.get("qtd_escaninhos_por_nivel")) or 1))
-        capacidade = parse_number(vol_cfg.get("l_por_escaninho")) or 0
-        galpao = cadastro_info.get("galpao_id") or galpao_default or "LJ000000"
-        for nivel in range(1, qtd_niveis + 1):
-            for pos in range(1, qtd_esc + 1):
-                rows_out.append(
-                    {
-                        "location_id": f"{galpao}-R{rua_num}-{equip_num:03d}-{nivel}{_position_label(pos)}",
-                        "galpao_id": galpao,
-                        "rua_num": rua_num,
-                        "equipamento_num": equip_num,
-                        "tipo_equipamento": tipo,
-                        "tipo_equipamento_final": tipo,
-                        "nivel": nivel,
-                        "escaninho_num_no_nivel": pos,
-                        "capacidade_l": capacidade,
-                        "product_code": "Vazio",
-                        "product_name": "",
-                        "slot_count": 0,
-                        "slot_duplo": "NAO",
-                        "card175_only_in_cadastro": True,
-                        "card175_only_in_plan": False,
-                    }
-                )
+    if include_cadastro_only:
+        for equip_key, cadastro_info in cadastro_map.items():
+            if equip_key in plan_keys:
+                continue
+            rua_num, equip_num = equip_key
+            tipo = normalize_string(cadastro_info.get("tipo_equipamento")).strip() or "desconhecido"
+            vol_cfg = volumetria_map.get(tipo.lower(), {})
+            qtd_niveis = max(1, int(parse_number(vol_cfg.get("qtd_niveis")) or 1))
+            qtd_esc = max(1, int(parse_number(vol_cfg.get("qtd_escaninhos_por_nivel")) or 1))
+            capacidade = parse_number(vol_cfg.get("l_por_escaninho")) or 0
+            galpao = cadastro_info.get("galpao_id") or galpao_default or "LJ000000"
+            for nivel in range(1, qtd_niveis + 1):
+                for pos in range(1, qtd_esc + 1):
+                    rows_out.append(
+                        {
+                            "location_id": f"{galpao}-R{rua_num}-{equip_num:03d}-{nivel}{_position_label(pos)}",
+                            "galpao_id": galpao,
+                            "rua_num": rua_num,
+                            "equipamento_num": equip_num,
+                            "tipo_equipamento": tipo,
+                            "tipo_equipamento_final": tipo,
+                            "nivel": nivel,
+                            "escaninho_num_no_nivel": pos,
+                            "capacidade_l": capacidade,
+                            "product_code": "Vazio",
+                            "product_name": "",
+                            "slot_count": 0,
+                            "slot_duplo": "NAO",
+                            "card175_only_in_cadastro": True,
+                            "card175_only_in_plan": False,
+                        }
+                    )
 
     rows_out.sort(
         key=lambda row: (
@@ -2180,6 +2182,7 @@ def _enrich_base_map_with_master_etl(
             "subcat": ["Subcategorias", "Subcategoria"],
             "categoria_site": ["Categoria Site", "Categoria_Site"],
             "volumetria": ["volumetria e fabricantes", "Volumetria e fabricantes", "Volumetria", "volumetria"],
+            "fotos": ["Fotos_Produtos", "Fotos Produtos"],
         },
     )
     degelo_rows = sheets["degelo"]
@@ -2187,6 +2190,7 @@ def _enrich_base_map_with_master_etl(
     subcat_rows = sheets["subcat"]
     categoria_site_rows = sheets["categoria_site"]
     volumetria_rows = sheets["volumetria"]
+    fotos_rows = sheets["fotos"]
     vendas_raw_values = _read_values_first_available_sheet(source, ["Vendas Alvo", "Vendas Pamplona"])
 
     map_degelo = _build_lookup_by_code(
@@ -2238,9 +2242,23 @@ def _enrich_base_map_with_master_etl(
             "volume_cm3": ["volume_cm3", "volumetria_cm3", "volume"],
         },
     )
+    map_fotos = _build_lookup_by_code(
+        fotos_rows,
+        ["product_code", "cod_produto", "codigo_produto", "sku"],
+        {"photo_url": ["photo_url", "url_foto", "URL Foto", "foto", "imagem"]},
+    )
     sales_by_code, sales_by_name = _extract_sales_maps_from_raw_values(vendas_raw_values)
 
-    if not map_degelo and not map_categoria_gpt and not map_subcat and not map_categoria_site and not map_vol and not sales_by_code and not sales_by_name:
+    if (
+        not map_degelo
+        and not map_categoria_gpt
+        and not map_subcat
+        and not map_categoria_site
+        and not map_vol
+        and not map_fotos
+        and not sales_by_code
+        and not sales_by_name
+    ):
         return base_produtos_map
 
     out: dict[str, dict[str, Any]] = {}
@@ -2251,6 +2269,7 @@ def _enrich_base_map_with_master_etl(
         sub = map_subcat.get(code, {})
         cat = map_categoria_site.get(code, {})
         vol = map_vol.get(code, {})
+        foto = map_fotos.get(code, {})
 
         if normalize_string(merged.get("categoria_armazenagem")) == "":
             merged["categoria_armazenagem"] = (
@@ -2282,6 +2301,10 @@ def _enrich_base_map_with_master_etl(
             merged["degelo"] = deg.get("degelo") or merged.get("degelo")
         if normalize_string(merged.get("prioridade_alocacao")) == "":
             merged["prioridade_alocacao"] = deg.get("prioridade_alocacao") or merged.get("prioridade_alocacao")
+        if normalize_string(merged.get("photo_url")) == "":
+            photo_url = normalize_string(foto.get("photo_url"))
+            if photo_url and photo_url.lower() not in {"sem foto", "n/a", "na", "none", "null", "nan"}:
+                merged["photo_url"] = photo_url
 
         if normalize_string(merged.get("vol_L_unitario")) == "" and normalize_string(merged.get("vol_l_unitario")) == "":
             deg_vol = parse_number(deg.get("vol_L_unitario") or deg.get("vol_l_unitario"))
@@ -2383,6 +2406,7 @@ def _enrich_base_map_with_plano_rows(
         "is_fragil",
         "degelo",
         "metodo",
+        "photo_url",
     ]
 
     out = dict(base_produtos_map)
@@ -2411,6 +2435,7 @@ def _enrich_base_map_with_plano_rows(
             "is_fragil": row.get("is_fragil"),
             "degelo": row.get("degelo"),
             "metodo": row.get("metodo") or row.get("metodo_enderecamento"),
+            "photo_url": row.get("photo_url"),
             "escaninhos_necessarios": 1,
         }
 
