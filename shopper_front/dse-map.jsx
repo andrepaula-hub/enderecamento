@@ -741,7 +741,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
           const total = Math.max(progress?.total || visibleEquipment.length || 1, 1);
           const done = Math.max(0, Math.min(progress?.done || 0, total));
           let pct = Math.max(0, Math.min(99, Math.round((done / total) * 25)));
-          if (progress?.phase === 'calculando') pct = Math.max(5, Math.min(30, pct || 5));
+          if (progress?.phase === 'calculando') pct = 0;
           if (progress?.phase === 'aplicando') pct = Math.max(40, Math.min(99, Math.round((done / total) * 100)));
           if (progress?.phase === 'concluido') pct = 100;
           const equipmentText = progress?.equipmentId ? ` • ${progress.equipmentId}` : '';
@@ -824,7 +824,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               <FillStreetIcon />
             </button>
             {fillOpen && (<>
-              <div onClick={()=>setFillOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />
+              {!fillRunning && <div onClick={()=>setFillOpen(false)} style={{ position:'fixed', inset:0, zIndex:150 }} />}
               <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:210, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:7, padding:'8px', minWidth:220, boxShadow:'0 10px 30px rgba(0,0,0,0.28)' }}>
                 <div style={{ padding:'2px 4px 6px', fontSize:9, fontWeight:800, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>
                   Preencher {street.id}
