@@ -57,6 +57,11 @@ def suggest_allocations(
         for eid in (options.get("chemical_equipment_ids") or [])
         if str(eid or "").strip()
     }
+    degelo_preferred_equips = {
+        _normalize_equip_id(eid)
+        for eid in (options.get("degelo_preferred_equipment_ids") or [])
+        if str(eid or "").strip()
+    }
     curve_zones = _normalize_curve_zones(options.get("curve_zones"))
     rules = AgentRules(allow_top_level=allow_top_level, allow_second_slot=allow_second_slot)
 
@@ -130,6 +135,7 @@ def suggest_allocations(
         candidates = _pick_slots_for_product(
             product, required, slots, rules, chemical_equips,
             reserved_locations, placement_index, product_placement_index, curve_zones,
+            degelo_preferred_equips,
         )
         if len(candidates) != required:
             unallocated_out.append(code)

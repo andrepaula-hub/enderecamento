@@ -59,3 +59,52 @@ def test_fill_street_whole_street_prefers_horizontal_run_in_another_equipment():
         {"escaninhoId": "R1-E2-2-2", "productCode": "DIABO", "slot": 1, "equipmentId": "R1-E2"},
     ]
     assert result["summary"]["mode"] == "whole_street"
+
+
+def test_fill_street_prefers_planned_degelo_equipment():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+                {"id": "R1-E2", "tipo": "geladeira", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        f"R1-E{equip}-{level}-1": {"p1": None, "p2": None}
+        for equip in (1, 2)
+        for level in range(1, 3)
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["MILK"],
+        products_data=[
+            _product(
+                "MILK",
+                nome="Leite refrigerado",
+                arm="Geladeira",
+                categoria_armazenagem="Geladeira",
+                degelo="NÃO",
+                escsNec=1,
+                peso=0.5,
+                pesado=False,
+            )
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-2-1"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-2-1"]},
+        ],
+        options={
+            "allow_top_level": True,
+            "whole_street": True,
+            "degelo_preferred_equipment_ids": ["R1-E2"],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E2-2-1", "productCode": "MILK", "slot": 1, "equipmentId": "R1-E2"},
+    ]

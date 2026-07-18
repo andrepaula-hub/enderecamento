@@ -290,6 +290,7 @@ def _pick_slots_for_product(
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
     product_placement_index: dict[str, list[dict[str, Any]]],
     curve_zone_map: dict[str, set[int]],
+    degelo_preferred_equips: set[str] | None = None,
 ) -> list[Slot]:
     required = max(1, int(required or 1))
     candidates: list[Slot] = []
@@ -309,12 +310,12 @@ def _pick_slots_for_product(
 
     existing_product_placements = product_placement_index.get(_product_code(product), [])
     if required == 1 and not existing_product_placements:
-        return [max(candidates, key=lambda slot: _score_slot(product, slot, placement_index, curve_zone_map))]
+        return [max(candidates, key=lambda slot: _score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips))]
 
     grouped_runs = _candidate_runs(product, candidates, required, rules, existing_product_placements)
     if not grouped_runs:
         return []
-    return max(grouped_runs, key=lambda run: _score_run(product, run, placement_index, curve_zone_map))
+    return max(grouped_runs, key=lambda run: _score_run(product, run, placement_index, curve_zone_map, degelo_preferred_equips))
 
 
 def _candidate_runs(
@@ -451,10 +452,16 @@ def _contiguous_slot_runs(slots: list[Slot]) -> list[list[Slot]]:
     return runs
 
 
-def _score_run(product: dict[str, Any], run: list[Slot], placement_index: dict[tuple[str, str], list[dict[str, Any]]], curve_zone_map: dict[str, set[int]]) -> float:
+def _score_run(
+    product: dict[str, Any],
+    run: list[Slot],
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+    curve_zone_map: dict[str, set[int]],
+    degelo_preferred_equips: set[str] | None = None,
+) -> float:
     if not run:
         return -1_000_000
-    score = sum(_score_slot(product, slot, placement_index, curve_zone_map) for slot in run)
+    score = sum(_score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips) for slot in run)
     levels = {slot.level for slot in run}
     equips = {slot.equip_id for slot in run}
     if len(levels) == 1:
@@ -483,7 +490,13 @@ def _score_run(product: dict[str, Any], run: list[Slot], placement_index: dict[t
     return score
 
 
-def _score_slot(product: dict[str, Any], slot: Slot, placement_index: dict[tuple[str, str], list[dict[str, Any]]], curve_zone_map: dict[str, set[int]]) -> float:
+def _score_slot(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+    curve_zone_map: dict[str, set[int]],
+    degelo_preferred_equips: set[str] | None = None,
+) -> float:
     score = 0.0
     group = _group(product)
     curve = normalize_string(product.get("curva")).upper()[:1]
@@ -511,6 +524,15 @@ def _score_slot(product: dict[str, Any], slot: Slot, placement_index: dict[tuple
             wall_positions.add(5)
         if slot.position not in wall_positions:
             score += 30
+    if (
+        degelo_preferred_equips
+        and _category_group(product) == "refrigerado"
+        and _normalize_text(product.get("degelo")).startswith("nao")
+    ):
+        if _normalize_equip_id(slot.equip_id) in degelo_preferred_equips:
+            score += 24
+        else:
+            score -= 8
     if slot.occupant_count == 0:
         score += 30
     else:

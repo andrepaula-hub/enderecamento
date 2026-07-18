@@ -131,8 +131,9 @@ function collectStreetFillTargets(state, options) {
   const streetId = options && options.streetId;
   const equipmentIds = new Set(options && options.equipmentIds || []);
   const levelMode = options && options.levelMode || 'all';
+  const mapStructure = (options && options.mapStructure) || state.mapStructure || [];
   const targets = [];
-  (state.mapStructure || []).forEach((street) => {
+  (mapStructure || []).forEach((street) => {
     if (streetId && street.id !== streetId) return;
     if (state.streetCollapsed[street.id]) return;
     (street.equipment || []).forEach((eq) => {
@@ -148,6 +149,135 @@ function collectStreetFillTargets(state, options) {
     });
   });
   return targets;
+}
+
+function fillProductColdClass(productCode) {
+  const product = PRODUCT_MAP[productCode];
+  if (!product) return 'other';
+  const arm = normalizeSearchText(product.arm || product.raw?.categoria_armazenagem || '');
+  const degelo = String(product.degelo || '').trim().toUpperCase();
+  if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
+  if (arm.includes('geladeira') || arm.includes('refriger')) {
+    if (degelo === 'PODE') return 'geladeira_alta';
+    if (degelo === 'NÃO' || degelo === 'NAO') return 'geladeira_degelo';
+    return 'geladeira';
+  }
+  return 'other';
+}
+
+function isColdEquipmentType(tipo) {
+  const text = normalizeSearchText(tipo || '');
+  return text.includes('geladeira') || text.includes('freezer') || text.includes('refriger');
+}
+
+function equipmentById(mapStructure, equipId) {
+  for (const street of mapStructure || []) {
+    const found = (street.equipment || []).find((eq) => eq.id === equipId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function mapWithEquipmentTypePlan(mapStructure, typePlan) {
+  if (!typePlan || !Object.keys(typePlan).length) return mapStructure;
+  return (mapStructure || []).map((street) => ({
+    ...street,
+    equipment:(street.equipment || []).map((eq) => {
+      const nextType = typePlan[eq.id];
+      if (!nextType || nextType === eq.tipo) return eq;
+      const shape = getEquipShapeForType(mapStructure, nextType, eq.id);
+      const originalType = getInitialEquipType(eq.id);
+      const changed = !!nextType && nextType !== originalType;
+      const nextEq = { ...eq, ...shape, tipo:nextType };
+      if (changed) nextEq.tipoAnterior = originalType || eq.tipo;
+      else delete nextEq.tipoAnterior;
+      return nextEq;
+    }),
+  }));
+}
+
+function equipmentCapacityForType(state, mapStructure, streetId, equipmentId, tipo, levelMode) {
+  const plannedMap = mapWithEquipmentTypePlan(mapStructure, { [equipmentId]:tipo });
+  return collectStreetFillTargets(state, { streetId, equipmentIds:[equipmentId], levelMode, mapStructure:plannedMap }).length;
+}
+
+function countEquipmentForSlots(state, mapStructure, streetId, equipmentIds, tipo, slotsNeeded, levelMode) {
+  let count = 0;
+  let capacity = 0;
+  for (const equipmentId of equipmentIds) {
+    if (capacity >= slotsNeeded) break;
+    capacity += equipmentCapacityForType(state, mapStructure, streetId, equipmentId, tipo, levelMode);
+    count += 1;
+  }
+  return count;
+}
+
+function buildClusteredColdTypePlan(coldEquipmentIds, freezerCount, degeloGeladeiraCount, altaCount) {
+  const plan = {};
+  const priority = [];
+  for (let i = 0; i < freezerCount; i += 1) priority.push('freezer');
+  for (let i = 0; i < degeloGeladeiraCount; i += 1) priority.push('geladeira');
+
+  let equipmentIndex = 0;
+  let priorityIndex = 0;
+  while (priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length) {
+    for (let clusterSize = 0; clusterSize < 3 && priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length; clusterSize += 1) {
+      plan[coldEquipmentIds[equipmentIndex]] = priority[priorityIndex];
+      equipmentIndex += 1;
+      priorityIndex += 1;
+    }
+    if (priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length) equipmentIndex += 1;
+  }
+
+  for (const equipmentId of coldEquipmentIds) {
+    if (plan[equipmentId]) continue;
+    if (altaCount > 0) {
+      plan[equipmentId] = 'geladeira_alta';
+      altaCount -= 1;
+    }
+  }
+  return plan;
+}
+
+function planStreetColdEquipmentTypes(state, { streetId, equipmentIds, remainingEntries, levelMode }) {
+  const counts = { freezer:0, geladeira_alta:0, geladeira_degelo:0, geladeira:0 };
+  (remainingEntries || []).forEach((entryId) => {
+    const code = resolveBoardEntryProductCode(entryId);
+    const cls = fillProductColdClass(code);
+    if (counts[cls] != null) counts[cls] += 1;
+  });
+  const coldDemand = counts.freezer + counts.geladeira_alta + counts.geladeira_degelo + counts.geladeira;
+  if (!coldDemand) return { mapStructure:state.mapStructure, typePlan:{}, degeloPreferredEquipmentIds:[] };
+
+  const coldEquipmentIds = (equipmentIds || []).filter((equipmentId) => {
+    const eq = equipmentById(state.mapStructure, equipmentId);
+    return eq && isColdEquipmentType(eq.tipo);
+  });
+  if (!coldEquipmentIds.length) return { mapStructure:state.mapStructure, typePlan:{}, degeloPreferredEquipmentIds:[] };
+
+  const freezerCount = counts.freezer > 0
+    ? countEquipmentForSlots(state, state.mapStructure, streetId, coldEquipmentIds, 'freezer', counts.freezer, levelMode)
+    : 0;
+  const availableAfterFreezer = coldEquipmentIds.slice(freezerCount);
+  const degeloGeladeiraCount = counts.geladeira_degelo > 0
+    ? countEquipmentForSlots(state, state.mapStructure, streetId, availableAfterFreezer, 'geladeira', counts.geladeira_degelo, levelMode)
+    : 0;
+  const availableAfterPriority = coldEquipmentIds.slice(Math.min(coldEquipmentIds.length, freezerCount + degeloGeladeiraCount));
+  const altaCount = counts.geladeira_alta > 0
+    ? countEquipmentForSlots(state, state.mapStructure, streetId, availableAfterPriority, 'geladeira_alta', counts.geladeira_alta, levelMode)
+    : 0;
+
+  const rawPlan = buildClusteredColdTypePlan(coldEquipmentIds, freezerCount, degeloGeladeiraCount, altaCount);
+  const typePlan = {};
+  coldEquipmentIds.forEach((equipmentId) => {
+    const plannedType = rawPlan[equipmentId] || 'geladeira';
+    const eq = equipmentById(state.mapStructure, equipmentId);
+    if (!eq || eq.tipo === plannedType) return;
+    typePlan[equipmentId] = plannedType;
+  });
+  const plannedMap = mapWithEquipmentTypePlan(state.mapStructure, typePlan);
+  const degeloPreferredEquipmentIds = coldEquipmentIds.filter((equipmentId) => rawPlan[equipmentId] === 'geladeira');
+  return { mapStructure:plannedMap, typePlan, degeloPreferredEquipmentIds };
 }
 
 function summarizeNumberList(numbers) {
@@ -902,6 +1032,27 @@ function reducer(state, action) {
         pendingEquipmentTypeChanges:pending,
       };
     }
+    case 'APPLY_EQUIP_TYPE_PLAN': {
+      const typePlan = action.typePlan || {};
+      const pending = { ...(state.pendingEquipmentTypeChanges || {}) };
+      const ms = state.mapStructure.map((street) => ({
+        ...street,
+        equipment:(street.equipment || []).map((eq) => {
+          const nextType = typePlan[eq.id];
+          if (!nextType || nextType === eq.tipo) return eq;
+          const shape = getEquipShapeForType(state.mapStructure, nextType, eq.id);
+          const originalType = getInitialEquipType(eq.id);
+          if (!nextType || nextType === originalType) delete pending[eq.id];
+          else pending[eq.id] = nextType;
+          const changed = !!nextType && nextType !== originalType;
+          const nextEq = { ...eq, ...shape, tipo:nextType };
+          if (changed) nextEq.tipoAnterior = originalType || eq.tipo;
+          else delete nextEq.tipoAnterior;
+          return nextEq;
+        }),
+      }));
+      return { ...state, mapStructure:ms, pendingEquipmentTypeChanges:pending };
+    }
     case 'CLEAR_PENDING_EQUIP_TYPE_CHANGES': {
       return {...state,pendingEquipmentTypeChanges:{}};
     }
@@ -1511,19 +1662,29 @@ function App() {
     const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];
     if (!orderedEquipmentIds.length) throw new Error('Nenhum equipamento visível nesta rua.');
     const requiredSlots = remainingEntries.length;
-    const equipmentTargetCandidates = orderedEquipmentIds.map((equipmentId) => ({
-      equipmentId,
-      targets:collectStreetFillTargets(state, { streetId, equipmentIds:[equipmentId], levelMode }),
-    })).filter((item) => item.targets.length > 0);
 
-    const selectedEquipmentTargets = [];
-    let selectedCapacity = 0;
-    for (const item of equipmentTargetCandidates) {
-      const needed = Math.max(0, requiredSlots - selectedCapacity);
-      if (!needed) break;
-      const targets = item.targets.length > needed ? item.targets.slice(0, needed) : item.targets;
-      selectedEquipmentTargets.push({ ...item, targets });
-      selectedCapacity += targets.length;
+    let selectedEquipmentIds = [];
+    let selectedEquipmentTargets = [];
+    let plannedMapStructure = state.mapStructure;
+    let plannedTypePlan = {};
+    let degeloPreferredEquipmentIds = [];
+    for (const equipmentId of orderedEquipmentIds) {
+      selectedEquipmentIds.push(equipmentId);
+      const plan = planStreetColdEquipmentTypes(state, { streetId, equipmentIds:selectedEquipmentIds, remainingEntries, levelMode });
+      plannedMapStructure = plan.mapStructure;
+      plannedTypePlan = plan.typePlan;
+      degeloPreferredEquipmentIds = plan.degeloPreferredEquipmentIds;
+      let selectedCapacity = 0;
+      selectedEquipmentTargets = selectedEquipmentIds.map((candidateId) => {
+        const targets = collectStreetFillTargets(state, {
+          streetId,
+          equipmentIds:[candidateId],
+          levelMode,
+          mapStructure:plannedMapStructure,
+        });
+        selectedCapacity += targets.length;
+        return { equipmentId:candidateId, targets };
+      }).filter((item) => item.targets.length > 0);
       if (selectedCapacity >= requiredSlots) break;
     }
     if (!selectedEquipmentTargets.length) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
@@ -1531,11 +1692,14 @@ function App() {
     const targetGroups = [];
     let totalTargets = 0;
     selectedEquipmentTargets.forEach(({ equipmentId, targets:equipmentTargets }, index) => {
-      totalTargets += equipmentTargets.length;
+      const needed = Math.max(0, requiredSlots - totalTargets);
+      if (!needed) return;
+      const plannedTargets = equipmentTargets.length > needed ? equipmentTargets.slice(0, needed) : equipmentTargets;
+      totalTargets += plannedTargets.length;
       if (typeof onProgress === 'function') {
         onProgress({ done:index + 1, total:selectedEquipmentTargets.length, equipmentId, applied:0, phase:'preparando' });
       }
-      if (equipmentTargets.length) targetGroups.push({ equipmentId, targets:equipmentTargets });
+      if (plannedTargets.length) targetGroups.push({ equipmentId, targets:plannedTargets });
     });
     if (!totalTargets) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
 
@@ -1560,13 +1724,14 @@ function App() {
       body:JSON.stringify({
         unallocated_codes:unallocatedCodes,
         products_data:Object.values(PRODUCT_MAP),
-        map_structure:state.mapStructure,
+        map_structure:plannedMapStructure,
         allocations:state.allocations,
         target_groups:targetGroups,
         options:{
           allow_top_level:true,
           allow_second_slot:false,
           whole_street:true,
+          degelo_preferred_equipment_ids:degeloPreferredEquipmentIds,
         },
       }),
     });
@@ -1589,6 +1754,10 @@ function App() {
     if (!allMoves.length) throw new Error('Nenhuma alocação possível para os filtros atuais.');
 
     const historyGroup = allMoves.length > 1 ? `fill-street:${streetId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;
+    if (plannedTypePlan && Object.keys(plannedTypePlan).length) {
+      dispatch({ type:'APPLY_EQUIP_TYPE_PLAN', typePlan:plannedTypePlan });
+      await yieldToBrowser();
+    }
     for (let index = 0; index < allMoves.length; index += 1) {
       const move = allMoves[index];
       dispatch({
