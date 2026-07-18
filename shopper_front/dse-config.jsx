@@ -135,7 +135,7 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
     mix: (workflow.mix && (workflow.mix.url || workflow.mix.sheet_id)) || '',
     mapaEq: (workflow.target && (workflow.target.url || workflow.target.sheet_id)) || '',
   });
-  const [loja, setLoja] = useState('');
+  const [loja, setLoja] = useState(selectedStore?.id || '');
   const [dates, setDates] = useState({
     ini: (METABASE_SALES && METABASE_SALES.data_inicial) || new Date().toISOString().slice(0,10),
     fim: (METABASE_SALES && METABASE_SALES.data_final)   || new Date().toISOString().slice(0,10),
@@ -183,6 +183,10 @@ function DSEConfigPanel({ onOpenMap, asOverlay, onClose, selectedStore, onStoreC
   useEffect(() => () => {
     if (runningProgressTimerRef.current) clearInterval(runningProgressTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (selectedStore?.id && selectedStore.id !== loja) setLoja(selectedStore.id);
+  }, [selectedStore?.id]);
 
   const stopRunningProgress = () => {
     if (runningProgressTimerRef.current) {

@@ -741,7 +741,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
           const total = Math.max(progress?.total || visibleEquipment.length || 1, 1);
           const done = Math.max(0, Math.min(progress?.done || 0, total));
           let pct = Math.max(0, Math.min(99, Math.round((done / total) * 25)));
-          if (progress?.phase === 'calculando') pct = 35;
+          if (progress?.phase === 'calculando') pct = Math.max(5, Math.min(30, pct || 5));
           if (progress?.phase === 'aplicando') pct = Math.max(40, Math.min(99, Math.round((done / total) * 100)));
           if (progress?.phase === 'concluido') pct = 100;
           const equipmentText = progress?.equipmentId ? ` • ${progress.equipmentId}` : '';

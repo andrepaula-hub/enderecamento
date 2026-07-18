@@ -15,6 +15,7 @@ const { useTweaks } = window;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 const normalizeSearchText = HELPERS.normalizeSearchText || ((value) => String(value || '').toLowerCase());
+const DSE_SELECTED_STORE_KEY = 'dse.selectedStore.v1';
 
 function resolveBoardEntryProductCode(entryId) {
   const raw = HELPERS.normalizeText ? HELPERS.normalizeText(entryId) : String(entryId || '').trim();
@@ -66,6 +67,13 @@ function parseEscaninhoId(escaninhoId) {
 
 function inferSelectedStoreFromBootstrap() {
   const stores = (window.DSEData && window.DSEData.STORES) || BOOTSTRAP.STORES || [];
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(DSE_SELECTED_STORE_KEY) || 'null');
+    if (saved && saved.id) {
+      const matchedSaved = stores.find((store) => String(store.id || '') === String(saved.id || ''));
+      return matchedSaved || saved;
+    }
+  } catch (error) {}
   const title = String(BOOTSTRAP.ACTIVE_SHEET?.title || BOOTSTRAP.WORKFLOW?.target?.title || '').trim();
   const cleanedTitle = title
     .replace(/endere[cç]amento/ig, ' ')
@@ -82,6 +90,13 @@ function inferSelectedStoreFromBootstrap() {
   if (matched) return matched;
   if (cleanedTitle) return { id:cleanedTitle, nome:cleanedTitle, codigo:'' };
   return null;
+}
+
+function persistSelectedStore(store) {
+  try {
+    if (store && store.id) window.localStorage.setItem(DSE_SELECTED_STORE_KEY, JSON.stringify(store));
+    else window.localStorage.removeItem(DSE_SELECTED_STORE_KEY);
+  } catch (error) {}
 }
 
 function requiredBinsForQueueCode(productCode) {
@@ -628,7 +643,9 @@ function reducer(state, action) {
   switch(action.type) {
     case 'OPEN_MAP':        return {...state, view:'map', configOpen:false};
     case 'TOGGLE_CONFIG':   return {...state, configOpen:!state.configOpen};
-    case 'SET_STORE':       return {...state, selectedStore:action.store};
+    case 'SET_STORE':
+      persistSelectedStore(action.store);
+      return {...state, selectedStore:action.store};
     case 'OPEN_PANEL':      return {...state, openPanel:action.panel};
     case 'CLOSE_PANEL':     return {...state, openPanel:null, configOpen:false};
     case 'TOGGLE_PRANCHETA':return {...state, pranchetaOpen:!state.pranchetaOpen};
@@ -1502,8 +1519,11 @@ function App() {
     const selectedEquipmentTargets = [];
     let selectedCapacity = 0;
     for (const item of equipmentTargetCandidates) {
-      selectedEquipmentTargets.push(item);
-      selectedCapacity += item.targets.length;
+      const needed = Math.max(0, requiredSlots - selectedCapacity);
+      if (!needed) break;
+      const targets = item.targets.length > needed ? item.targets.slice(0, needed) : item.targets;
+      selectedEquipmentTargets.push({ ...item, targets });
+      selectedCapacity += targets.length;
       if (selectedCapacity >= requiredSlots) break;
     }
     if (!selectedEquipmentTargets.length) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
