@@ -116,6 +116,10 @@ def _degelo_class(row: dict[str, Any]) -> str:
     return ""
 
 
+def _is_cold_high_product(row: dict[str, Any]) -> bool:
+    return _category_group(row) == "refrigerado" and parse_bool_flag(row.get("is_alto"))
+
+
 def _required_bins(row: dict[str, Any]) -> int:
     value = parse_number(row.get("escaninhos_necessarios"))
     if value is None:
@@ -579,6 +583,7 @@ def _score_slot(
         else:
             score -= 8
     score += _degelo_equipment_affinity_score(product, slot, placement_index)
+    score += _cold_high_equipment_affinity_score(product, slot, placement_index)
     if curve_priority_enabled:
         score += _curve_equipment_priority_score(product, slot, placement_index)
     if slot.occupant_count == 0:
@@ -660,6 +665,31 @@ def _curve_equipment_priority_score(
     return score
 
 
+def _cold_high_equipment_affinity_score(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> float:
+    if _category_group(product) != "refrigerado":
+        return 0.0
+
+    high_placements = placement_index.get(("__cold_high__", slot.equip_id), [])
+    product_is_high = _is_cold_high_product(product)
+    slot_is_high_equipment = _normalize_equip_type(slot.equip_type) == "geladeira_alta"
+
+    if product_is_high:
+        score = 650.0 if slot_is_high_equipment else -260.0
+        if high_placements:
+            score += 900.0 + 120.0 * len(high_placements)
+        return score
+
+    if high_placements:
+        return -520.0
+    if slot_is_high_equipment:
+        return -180.0
+    return 0.0
+
+
 def _normalize_curve_zones(curve_zones: dict[str, Any] | None) -> dict[str, set[int]]:
     output: dict[str, set[int]] = {}
     if not isinstance(curve_zones, dict):
@@ -722,6 +752,8 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
     curve = _curve_value(placement)
     if curve:
         index.setdefault(("__curve__", equip_id), []).append(placement)
+    if _is_cold_high_product(placement):
+        index.setdefault(("__cold_high__", equip_id), []).append(placement)
 
 
 def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
@@ -729,6 +761,7 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
         "product_code": _product_code(product),
         "subcategoria": _normalize_text(product.get("subcategoria")),
         "curva": _curve_value(product),
+        "is_alto": parse_bool_flag(product.get("is_alto")),
         "degelo": normalize_string(product.get("degelo")),
         "degelo_class": _degelo_class(product),
         "equip_id": slot.equip_id,

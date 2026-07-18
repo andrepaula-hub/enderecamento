@@ -158,7 +158,7 @@ function fillProductColdClass(productCode) {
   const degelo = String(product.degelo || '').trim().toUpperCase();
   if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
   if (arm.includes('geladeira') || arm.includes('refriger')) {
-    if (degelo === 'PODE') return 'geladeira_alta';
+    if (product.alto) return 'geladeira_alta';
     if (degelo === 'NÃO' || degelo === 'NAO') return 'geladeira_degelo';
     return 'geladeira';
   }
@@ -532,7 +532,7 @@ const DEFAULT_EQUIP_SHAPES = {
   prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
   prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
   geladeira:{niveis:5,escsPerNivel:5,cap:20},
-  geladeira_alta:{niveis:5,escsPerNivel:3,cap:20,card175Only:true},
+  geladeira_alta:{niveis:4,escsPerNivel:5,cap:20,card175Only:true},
   geladeira_gerador:{niveis:5,escsPerNivel:5,cap:20},
   freezer:{niveis:5,escsPerNivel:5,cap:16.384},
   quimico:{niveis:5,escsPerNivel:7,cap:30.24},

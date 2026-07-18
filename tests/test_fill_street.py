@@ -257,3 +257,79 @@ def test_fill_street_curve_priority_keeps_same_curve_in_same_equipment():
     assert result["moves"] == [
         {"escaninhoId": "R1-E2-2-1", "productCode": "NEXT_A", "slot": 1, "equipmentId": "R1-E2"},
     ]
+
+
+def test_fill_street_keeps_cold_high_products_in_same_high_equipment():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira_alta", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+                {"id": "R1-E2", "tipo": "geladeira_alta", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": None, "p2": None},
+        "R1-E1-2-1": {"p1": None, "p2": None},
+        "R1-E2-1-1": {"p1": "HIGH1", "p2": None},
+        "R1-E2-2-1": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["HIGH2"],
+        products_data=[
+            _product("HIGH1", arm="Geladeira", categoria_armazenagem="Geladeira", alto=True, escsNec=1, peso=0.5, pesado=False),
+            _product("HIGH2", arm="Geladeira", categoria_armazenagem="Geladeira", alto=True, escsNec=1, peso=0.5, pesado=False),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-2-1"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-2-1"]},
+        ],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E2-2-1", "productCode": "HIGH2", "slot": 1, "equipmentId": "R1-E2"},
+    ]
+
+
+def test_fill_street_keeps_regular_cold_product_out_of_high_equipment_when_possible():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+                {"id": "R1-E2", "tipo": "geladeira_alta", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": None, "p2": None},
+        "R1-E1-2-1": {"p1": None, "p2": None},
+        "R1-E2-1-1": {"p1": "HIGH1", "p2": None},
+        "R1-E2-2-1": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["REGULAR"],
+        products_data=[
+            _product("HIGH1", arm="Geladeira", categoria_armazenagem="Geladeira", alto=True, escsNec=1, peso=0.5, pesado=False),
+            _product("REGULAR", arm="Geladeira", categoria_armazenagem="Geladeira", alto=False, escsNec=1, peso=0.5, pesado=False),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-2-1"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-2-1"]},
+        ],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-2-1", "productCode": "REGULAR", "slot": 1, "equipmentId": "R1-E1"},
+    ]

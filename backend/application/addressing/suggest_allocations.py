@@ -188,6 +188,7 @@ def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
         "quantidade": int(p.get("qtd") or p.get("quantidade") or 1),
         "escaninhos_necessarios": int(p.get("escsNec") or p.get("escaninhos_necessarios") or 1),
         "is_pesado": bool(p.get("pesado") or p.get("is_pesado") or False),
+        "is_alto": bool(p.get("alto") or p.get("is_alto") or False),
         "is_fragil": bool(p.get("fragil") or p.get("is_fragil") or False),
         "categoria_armazenagem": str(p.get("arm") or p.get("categoria_armazenagem") or ""),
         "degelo": str(p.get("degelo") or ""),
