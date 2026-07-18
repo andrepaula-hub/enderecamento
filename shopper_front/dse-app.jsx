@@ -64,6 +64,26 @@ function parseEscaninhoId(escaninhoId) {
   };
 }
 
+function inferSelectedStoreFromBootstrap() {
+  const stores = (window.DSEData && window.DSEData.STORES) || BOOTSTRAP.STORES || [];
+  const title = String(BOOTSTRAP.ACTIVE_SHEET?.title || BOOTSTRAP.WORKFLOW?.target?.title || '').trim();
+  const cleanedTitle = title
+    .replace(/endere[cç]amento/ig, ' ')
+    .replace(/dark|store|loja|teste|confer[eê]ncia|produtos/ig, ' ')
+    .replace(/[-_[\]()]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedTitle = normalizeSearchText(cleanedTitle).replace(/\s+/g, '');
+  const matched = stores.find((store) => {
+    const label = normalizeSearchText(store.nome || store.label || '').replace(/\s+/g, '');
+    const id = normalizeSearchText(store.id || '').replace(/\s+/g, '');
+    return normalizedTitle && (normalizedTitle === label || normalizedTitle === id || normalizedTitle.includes(label) || label.includes(normalizedTitle));
+  });
+  if (matched) return matched;
+  if (cleanedTitle) return { id:cleanedTitle, nome:cleanedTitle, codigo:'' };
+  return null;
+}
+
 function requiredBinsForQueueCode(productCode) {
   const product = PRODUCT_MAP[productCode];
   const raw = product && (product.escsNec || product.escaninhos_necessarios);
@@ -400,7 +420,7 @@ function getEquipShapeForType(mapStructure, tipo, excludeEquipId) {
   return DEFAULT_EQUIP_SHAPES[targetType] || {};
 }
 const initState = {
-  view:'config', configOpen:false, selectedStore:null,
+  view:'config', configOpen:false, selectedStore:inferSelectedStoreFromBootstrap(),
   allocations:{ ...INITIAL_ALLOCATIONS },
   history:[{ allocations:{ ...INITIAL_ALLOCATIONS }, unallocated:[...INITIAL_UNALLOCATED], collected:[] }], histIdx:0,
   lastHistoryGroup:null,
@@ -1473,16 +1493,27 @@ function App() {
 
     const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];
     if (!orderedEquipmentIds.length) throw new Error('Nenhum equipamento visível nesta rua.');
+    const requiredSlots = remainingEntries.length;
+    const equipmentTargetCandidates = orderedEquipmentIds.map((equipmentId) => ({
+      equipmentId,
+      targets:collectStreetFillTargets(state, { streetId, equipmentIds:[equipmentId], levelMode }),
+    })).filter((item) => item.targets.length > 0);
+
+    const selectedEquipmentTargets = [];
+    let selectedCapacity = 0;
+    for (const item of equipmentTargetCandidates) {
+      selectedEquipmentTargets.push(item);
+      selectedCapacity += item.targets.length;
+      if (selectedCapacity >= requiredSlots) break;
+    }
+    if (!selectedEquipmentTargets.length) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
+
     const targetGroups = [];
     let totalTargets = 0;
-    orderedEquipmentIds.forEach((equipmentId, index) => {
-      const equipmentTargets = collectStreetFillTargets(
-        state,
-        { streetId, equipmentIds:[equipmentId], levelMode }
-      );
+    selectedEquipmentTargets.forEach(({ equipmentId, targets:equipmentTargets }, index) => {
       totalTargets += equipmentTargets.length;
       if (typeof onProgress === 'function') {
-        onProgress({ done:index + 1, total:orderedEquipmentIds.length, equipmentId, applied:0, phase:'preparando' });
+        onProgress({ done:index + 1, total:selectedEquipmentTargets.length, equipmentId, applied:0, phase:'preparando' });
       }
       if (equipmentTargets.length) targetGroups.push({ equipmentId, targets:equipmentTargets });
     });
@@ -1499,7 +1530,7 @@ function App() {
     if (!unallocatedCodes.length) throw new Error('Nenhum produto elegível na lista atual.');
 
     if (typeof onProgress === 'function') {
-      onProgress({ done:0, total:orderedEquipmentIds.length, equipmentId:streetId, applied:0, phase:'calculando' });
+      onProgress({ done:0, total:selectedEquipmentTargets.length, equipmentId:streetId, applied:0, phase:'calculando' });
     }
     await yieldToBrowser();
 
@@ -1562,7 +1593,7 @@ function App() {
       onProgress({ done:allMoves.length, total:allMoves.length, equipmentId:streetId, applied:allMoves.length, phase:'concluido' });
     }
     await yieldToBrowser();
-    return { applied:allMoves.length, targets:totalTargets, products:capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations).length, equipmentDone:orderedEquipmentIds.length };
+    return { applied:allMoves.length, targets:totalTargets, products:capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations).length, equipmentDone:selectedEquipmentTargets.length };
   }, [state, visibleQueue]);
 
   return (
