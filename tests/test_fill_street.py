@@ -186,3 +186,74 @@ def test_fill_street_keeps_degelo_pode_away_from_nao_equipment():
     assert result["moves"] == [
         {"escaninhoId": "R1-E1-2-1", "productCode": "PODE2", "slot": 1, "equipmentId": "R1-E1"},
     ]
+
+
+def test_fill_street_curve_priority_prefers_earlier_equipment():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 1, "cap": 100},
+                {"id": "R1-E2", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 1, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": None, "p2": None},
+        "R1-E2-1-1": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["CURVE_A"],
+        products_data=[_product("CURVE_A", curva="A", escsNec=1, peso=0.5, pesado=False)],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-1-1"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-1-1"]},
+        ],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-1-1", "productCode": "CURVE_A", "slot": 1, "equipmentId": "R1-E1"},
+    ]
+
+
+def test_fill_street_curve_priority_keeps_same_curve_in_same_equipment():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "prateleira", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+                {"id": "R1-E2", "tipo": "prateleira", "niveis": 2, "escsPerNivel": 1, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": None, "p2": None},
+        "R1-E1-2-1": {"p1": None, "p2": None},
+        "R1-E2-1-1": {"p1": "EXISTING_A", "p2": None},
+        "R1-E2-2-1": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["NEXT_A"],
+        products_data=[
+            _product("EXISTING_A", curva="A", escsNec=1, peso=0.5, pesado=False),
+            _product("NEXT_A", curva="A", escsNec=1, peso=0.5, pesado=False),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-2-1"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-2-1"]},
+        ],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E2-2-1", "productCode": "NEXT_A", "slot": 1, "equipmentId": "R1-E2"},
+    ]

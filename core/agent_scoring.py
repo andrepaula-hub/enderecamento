@@ -75,6 +75,14 @@ def _product_code(row: dict[str, Any]) -> str:
     return "" if not code or code == "Vazio" else code
 
 
+def _curve_value(row: dict[str, Any]) -> str:
+    return normalize_string(row.get("curva") or row.get("curva_alocada")).upper()[:1]
+
+
+def _curve_rank(curve: str) -> int:
+    return {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}.get(normalize_string(curve).upper()[:1], 9)
+
+
 def _group(row: dict[str, Any]) -> str:
     cached = row.get("_group_norm")
     if cached is not None:
@@ -300,6 +308,7 @@ def _pick_slots_for_product(
     product_placement_index: dict[str, list[dict[str, Any]]],
     curve_zone_map: dict[str, set[int]],
     degelo_preferred_equips: set[str] | None = None,
+    curve_priority_enabled: bool = False,
 ) -> list[Slot]:
     required = max(1, int(required or 1))
     candidates: list[Slot] = []
@@ -319,12 +328,34 @@ def _pick_slots_for_product(
 
     existing_product_placements = product_placement_index.get(_product_code(product), [])
     if required == 1 and not existing_product_placements:
-        return [max(candidates, key=lambda slot: _score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips))]
+        return [
+            max(
+                candidates,
+                key=lambda slot: _score_slot(
+                    product,
+                    slot,
+                    placement_index,
+                    curve_zone_map,
+                    degelo_preferred_equips,
+                    curve_priority_enabled,
+                ),
+            )
+        ]
 
     grouped_runs = _candidate_runs(product, candidates, required, rules, existing_product_placements)
     if not grouped_runs:
         return []
-    return max(grouped_runs, key=lambda run: _score_run(product, run, placement_index, curve_zone_map, degelo_preferred_equips))
+    return max(
+        grouped_runs,
+        key=lambda run: _score_run(
+            product,
+            run,
+            placement_index,
+            curve_zone_map,
+            degelo_preferred_equips,
+            curve_priority_enabled,
+        ),
+    )
 
 
 def _candidate_runs(
@@ -467,10 +498,14 @@ def _score_run(
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
     curve_zone_map: dict[str, set[int]],
     degelo_preferred_equips: set[str] | None = None,
+    curve_priority_enabled: bool = False,
 ) -> float:
     if not run:
         return -1_000_000
-    score = sum(_score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips) for slot in run)
+    score = sum(
+        _score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips, curve_priority_enabled)
+        for slot in run
+    )
     levels = {slot.level for slot in run}
     equips = {slot.equip_id for slot in run}
     if len(levels) == 1:
@@ -505,10 +540,11 @@ def _score_slot(
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
     curve_zone_map: dict[str, set[int]],
     degelo_preferred_equips: set[str] | None = None,
+    curve_priority_enabled: bool = False,
 ) -> float:
     score = 0.0
     group = _group(product)
-    curve = normalize_string(product.get("curva")).upper()[:1]
+    curve = _curve_value(product)
     max_level = slot.max_level or max(slot.level or 1, 1)
     if group == "quimico":
         score += 500
@@ -543,6 +579,8 @@ def _score_slot(
         else:
             score -= 8
     score += _degelo_equipment_affinity_score(product, slot, placement_index)
+    if curve_priority_enabled:
+        score += _curve_equipment_priority_score(product, slot, placement_index)
     if slot.occupant_count == 0:
         score += 30
     else:
@@ -596,6 +634,29 @@ def _degelo_equipment_affinity_score(product: dict[str, Any], slot: Slot, placem
     score = 120.0 if has_pode else 0.0
     if has_nao:
         score -= 420.0
+    return score
+
+
+def _curve_equipment_priority_score(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> float:
+    curve = _curve_value(product)
+    rank = _curve_rank(curve)
+    if rank >= 9:
+        return 0.0
+
+    equip_num = slot.equip_num if slot.equip_num is not None else 999
+    priority_weight = max(0.0, 6.0 - float(rank))
+    score = max(0.0, 80.0 - float(equip_num) * 5.0) * priority_weight
+
+    placements = placement_index.get(("__curve__", slot.equip_id), [])
+    if placements:
+        same_curve = sum(1 for placement in placements if placement.get("curva") == curve)
+        other_curve = sum(1 for placement in placements if placement.get("curva") and placement.get("curva") != curve)
+        score += same_curve * 180.0
+        score -= other_curve * 90.0
     return score
 
 
@@ -658,12 +719,16 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
     degelo_class = _degelo_class(placement)
     if degelo_class:
         index.setdefault(("__degelo__", equip_id), []).append(placement)
+    curve = _curve_value(placement)
+    if curve:
+        index.setdefault(("__curve__", equip_id), []).append(placement)
 
 
 def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
     return {
         "product_code": _product_code(product),
         "subcategoria": _normalize_text(product.get("subcategoria")),
+        "curva": _curve_value(product),
         "degelo": normalize_string(product.get("degelo")),
         "degelo_class": _degelo_class(product),
         "equip_id": slot.equip_id,

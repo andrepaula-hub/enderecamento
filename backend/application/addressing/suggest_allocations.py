@@ -63,6 +63,7 @@ def suggest_allocations(
         if str(eid or "").strip()
     }
     curve_zones = _normalize_curve_zones(options.get("curve_zones"))
+    curve_priority_enabled = bool(options.get("curve_priority_enabled") or options.get("whole_street"))
     rules = AgentRules(allow_top_level=allow_top_level, allow_second_slot=allow_second_slot)
 
     # Map React Product → scoring dict
@@ -135,7 +136,7 @@ def suggest_allocations(
         candidates = _pick_slots_for_product(
             product, required, slots, rules, chemical_equips,
             reserved_locations, placement_index, product_placement_index, curve_zones,
-            degelo_preferred_equips,
+            degelo_preferred_equips, curve_priority_enabled,
         )
         if len(candidates) != required:
             unallocated_out.append(code)
