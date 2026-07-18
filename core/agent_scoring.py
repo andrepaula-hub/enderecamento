@@ -99,6 +99,15 @@ def _category_group(row: dict[str, Any]) -> str:
     return "seco"
 
 
+def _degelo_class(row: dict[str, Any]) -> str:
+    value = _normalize_text(row.get("degelo"))
+    if value.startswith("nao"):
+        return "nao"
+    if value.startswith("pode"):
+        return "pode"
+    return ""
+
+
 def _required_bins(row: dict[str, Any]) -> int:
     value = parse_number(row.get("escaninhos_necessarios"))
     if value is None:
@@ -527,12 +536,13 @@ def _score_slot(
     if (
         degelo_preferred_equips
         and _category_group(product) == "refrigerado"
-        and _normalize_text(product.get("degelo")).startswith("nao")
+        and _degelo_class(product) == "nao"
     ):
         if _normalize_equip_id(slot.equip_id) in degelo_preferred_equips:
             score += 24
         else:
             score -= 8
+    score += _degelo_equipment_affinity_score(product, slot, placement_index)
     if slot.occupant_count == 0:
         score += 30
     else:
@@ -567,6 +577,26 @@ def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dic
         elif abs(int(other_level) - int(slot.level)) == 1:
             penalty += 25
     return penalty
+
+
+def _degelo_equipment_affinity_score(product: dict[str, Any], slot: Slot, placement_index: dict[tuple[str, str], list[dict[str, Any]]]) -> float:
+    current = _degelo_class(product)
+    if current not in {"nao", "pode"}:
+        return 0.0
+    placements = placement_index.get(("__degelo__", slot.equip_id), [])
+    if not placements:
+        return 0.0
+    has_nao = any(placement.get("degelo_class") == "nao" for placement in placements)
+    has_pode = any(placement.get("degelo_class") == "pode" for placement in placements)
+    if current == "nao":
+        score = 220.0 if has_nao else 0.0
+        if has_pode:
+            score -= 420.0
+        return score
+    score = 120.0 if has_pode else 0.0
+    if has_nao:
+        score -= 420.0
+    return score
 
 
 def _normalize_curve_zones(curve_zones: dict[str, Any] | None) -> dict[str, set[int]]:
@@ -621,15 +651,21 @@ def _build_placement_index(placements: list[dict[str, Any]]) -> dict[tuple[str, 
 def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], placement: dict[str, Any]) -> None:
     subcat = _normalize_text(placement.get("subcategoria"))
     equip_id = normalize_string(placement.get("equip_id"))
-    if not subcat or not equip_id:
+    if not equip_id:
         return
-    index.setdefault((subcat, equip_id), []).append(placement)
+    if subcat:
+        index.setdefault((subcat, equip_id), []).append(placement)
+    degelo_class = _degelo_class(placement)
+    if degelo_class:
+        index.setdefault(("__degelo__", equip_id), []).append(placement)
 
 
 def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
     return {
         "product_code": _product_code(product),
         "subcategoria": _normalize_text(product.get("subcategoria")),
+        "degelo": normalize_string(product.get("degelo")),
+        "degelo_class": _degelo_class(product),
         "equip_id": slot.equip_id,
         "level": slot.level,
         "position": slot.position,
