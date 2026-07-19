@@ -117,6 +117,40 @@ function getDegeloStats(eq, allocations) {
   return { count, total, majority: total > 0 && count / total >= 0.5 };
 }
 
+function isColdEquipment(eq) {
+  const tipo = String(eq?.tipo || '').toLowerCase();
+  return tipo.includes('geladeira') || tipo.includes('freezer') || tipo.includes('refriger');
+}
+
+function isPowerColdEquipment(eq, allocations) {
+  const tipo = String(eq?.tipo || '').toLowerCase();
+  if (tipo.includes('freezer')) return true;
+  return tipo.includes('geladeira') && getDegeloStats(eq, allocations).majority;
+}
+
+function getPowerGroupsByEquipment(equipment, allocations) {
+  const groups = {};
+  let groupIndex = 0;
+  let run = [];
+  const flush = () => {
+    for (let index = 0; index + 2 < run.length; index += 3) {
+      groupIndex += 1;
+      run.slice(index, index + 3).forEach((eq, position) => {
+        groups[eq.id] = { groupIndex, position:position + 1, size:3 };
+      });
+    }
+    run = [];
+  };
+
+  (equipment || []).forEach((eq) => {
+    if (!isColdEquipment(eq)) return;
+    if (isPowerColdEquipment(eq, allocations)) run.push(eq);
+    else flush();
+  });
+  flush();
+  return groups;
+}
+
 function productStorageKind(product) {
   const arm = normalizeSearchText(product?.arm || product?.raw?.categoria_armazenagem || '');
   if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
@@ -352,7 +386,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={}, planogramMode=false, onTogglePlanogram }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={}, planogramMode=false, onTogglePlanogram, powerGroup=null }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
@@ -426,7 +460,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
           <span title="Tipo alterado localmente. Será gravado ao salvar a versão." style={{ fontSize:8, fontWeight:800, color:'#B87200', background:'rgba(245,156,0,0.18)', border:'1px solid rgba(245,156,0,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.05em' }}>PENDENTE</span>
         )}
         {isCard175 && (
-          <span title="Equipamento presente apenas no Card 788" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.06em' }}>C788</span>
+          <span title="Equipamento presente apenas no Card 788" style={{ fontSize:7, fontWeight:800, color:'#C41230', background:'rgba(196,18,48,0.18)', border:'1px solid rgba(196,18,48,0.35)', padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.04em' }}>CARD 788</span>
         )}
         {collapsedGroupStyle && (
           <span title={`${dominantGroup.group}: ${dominantGroup.count} de ${dominantGroup.total} produto(s) neste equipamento`} style={{ fontSize:8, fontWeight:900, color:collapsedGroupStyle.text, background:collapsedGroupStyle.bg, border:`1px solid ${collapsedGroupStyle.text}55`, padding:'1px 5px', borderRadius:4, flexShrink:0, letterSpacing:'0.04em' }}>
@@ -436,6 +470,11 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
         {showDegeloBadge && (
           <span title={`Degelo = NÃO: ${degeloStats.count} de ${degeloStats.total} produto(s) neste equipamento`} style={{ fontSize:10, fontWeight:900, color:'#0284C7', background:'rgba(56,189,248,0.16)', border:'1px solid rgba(56,189,248,0.42)', padding:'1px 5px', borderRadius:4, flexShrink:0, lineHeight:1.35 }}>
             ❄
+          </span>
+        )}
+        {powerGroup && (
+          <span title={`Grupo de gerador formado: equipamento ${powerGroup.position} de ${powerGroup.size}`} style={{ fontSize:10, fontWeight:900, color:'#A15C00', background:'rgba(250,204,21,0.24)', border:'1px solid rgba(250,204,21,0.58)', padding:'1px 5px', borderRadius:4, flexShrink:0, lineHeight:1.35 }}>
+            ⚡3
           </span>
         )}
 
@@ -772,6 +811,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
     const activeEscW = anyVisiblePlanogram ? planogramEscW : escWFixed;
     return ESC_LABEL + ESC_PAD*2 + maxEscs*(activeEscW + ESC_GAP) + (anyVisiblePlanogram ? 8 : 0);
   },[street.equipment, escWFixed, planogramEscW, anyVisiblePlanogram]);
+  const powerGroupsByEquipment = useMemo(() => getPowerGroupsByEquipment(street.equipment, allocations), [street.equipment, allocations]);
 
   return (
     <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
@@ -1017,6 +1057,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               highlightProductId={highlightProductId} subcatFilters={subcatFilters}
               escW={escWFixed} pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
               planogramMode={!!visiblePlanogramIds[eq.id]} onTogglePlanogram={toggleEquipmentPlanogram}
+              powerGroup={powerGroupsByEquipment[eq.id] || null}
             />
           ))}
         </div>

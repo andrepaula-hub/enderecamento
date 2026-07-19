@@ -271,6 +271,21 @@ function isPowerColdPlannedType(type, equipmentId, powerEquipmentIds) {
   return type === 'freezer' || powerEquipmentIds.has(equipmentId);
 }
 
+function scorePowerColdClusters(coldEquipmentIds, plan, powerEquipmentIds) {
+  const runs = powerClusterRuns(
+    coldEquipmentIds,
+    new Set(coldEquipmentIds.filter((equipmentId) => isPowerColdPlannedType(plan[equipmentId], equipmentId, powerEquipmentIds))),
+  );
+  let score = 0;
+  runs.forEach((run) => {
+    if (run.length === 1) score += 20;
+    else if (run.length === 2) score += 260;
+    else if (run.length === 3) score += 1200;
+    else score += 1200 - (run.length - 3) * 260;
+  });
+  return score;
+}
+
 function compactPowerColdClusters(coldEquipmentIds, rawPlan, powerEquipmentIds, degeloPreferredEquipmentIds) {
   const plan = { ...rawPlan };
   const powerIds = new Set(powerEquipmentIds || []);
@@ -371,6 +386,31 @@ function compactPowerColdClusters(coldEquipmentIds, rawPlan, powerEquipmentIds, 
           break;
         }
       }
+    }
+  }
+  let improved = true;
+  let optimizeGuard = 0;
+  while (improved && optimizeGuard < coldEquipmentIds.length) {
+    improved = false;
+    optimizeGuard += 1;
+    let best = { score:scorePowerColdClusters(coldEquipmentIds, plan, powerIds), from:-1, to:-1 };
+    for (let from = 0; from < coldEquipmentIds.length; from += 1) {
+      const fromId = coldEquipmentIds[from];
+      const fromIsPower = isPowerColdPlannedType(plan[fromId], fromId, powerIds);
+      for (let to = 0; to < coldEquipmentIds.length; to += 1) {
+        if (from === to) continue;
+        const toId = coldEquipmentIds[to];
+        const toIsPower = isPowerColdPlannedType(plan[toId], toId, powerIds);
+        if (fromIsPower === toIsPower) continue;
+        swapEquipment(from, to);
+        const score = scorePowerColdClusters(coldEquipmentIds, plan, powerIds) - Math.abs(from - to);
+        swapEquipment(from, to);
+        if (score > best.score) best = { score, from, to };
+      }
+    }
+    if (best.from >= 0) {
+      swapEquipment(best.from, best.to);
+      improved = true;
     }
   }
   return { plan, powerEquipmentIds:powerIds, degeloPreferredEquipmentIds:degeloIds };
