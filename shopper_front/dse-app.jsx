@@ -228,38 +228,66 @@ function countEquipmentForSlots(state, mapStructure, streetId, equipmentIds, tip
   return count;
 }
 
-function chooseColdEquipmentForType(coldEquipmentIds, rawPlan, targetType) {
-  const isFreezer = targetType === 'freezer';
-  let fallbackIndex = -1;
+function chooseRegularColdEquipment(coldEquipmentIds, rawPlan) {
+  return coldEquipmentIds.findIndex((equipmentId) => !rawPlan[equipmentId]);
+}
+
+function powerClusterRuns(coldEquipmentIds, powerEquipmentIds) {
+  const runs = [];
+  let current = [];
+  coldEquipmentIds.forEach((equipmentId, index) => {
+    if (powerEquipmentIds.has(equipmentId)) {
+      current.push(index);
+    } else if (current.length) {
+      runs.push(current);
+      current = [];
+    }
+  });
+  if (current.length) runs.push(current);
+  return runs;
+}
+
+function choosePowerColdEquipment(coldEquipmentIds, rawPlan, powerEquipmentIds) {
+  const runs = powerClusterRuns(coldEquipmentIds, powerEquipmentIds);
+  for (const run of runs) {
+    if (run.length >= 3) continue;
+    const right = run[run.length - 1] + 1;
+    if (right < coldEquipmentIds.length && !rawPlan[coldEquipmentIds[right]]) return right;
+    const left = run[0] - 1;
+    if (left >= 0 && !rawPlan[coldEquipmentIds[left]]) return left;
+  }
+
   for (let index = 0; index < coldEquipmentIds.length; index += 1) {
     const equipmentId = coldEquipmentIds[index];
     if (rawPlan[equipmentId]) continue;
-    if (!isFreezer) return index;
-    if (fallbackIndex < 0) fallbackIndex = index;
-    const nearFreezer = coldEquipmentIds.some((otherId, otherIndex) => (
-      rawPlan[otherId] === 'freezer' && Math.abs(otherIndex - index) <= 2
-    ));
-    if (!nearFreezer) return index;
+    const touchesFullPowerCluster = runs.some((run) => run.length >= 3 && (index === run[0] - 1 || index === run[run.length - 1] + 1));
+    if (!touchesFullPowerCluster) return index;
   }
-  return fallbackIndex;
+
+  return coldEquipmentIds.findIndex((equipmentId) => !rawPlan[equipmentId]);
 }
 
 function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipmentIds, remainingEntries, levelMode) {
   const plan = {};
   const remainingByEquipment = {};
   const degeloPreferred = new Set();
+  const powerEquipmentIds = new Set();
 
   (remainingEntries || []).forEach((entryId) => {
     const code = resolveBoardEntryProductCode(entryId);
     const cls = fillProductColdClass(code);
     if (cls === 'other') return;
     const targetType = cls === 'freezer' ? 'freezer' : cls === 'geladeira_alta' ? 'geladeira_alta' : 'geladeira';
+    const isPowerCold = cls === 'freezer' || cls === 'geladeira_degelo';
 
     let equipmentId = coldEquipmentIds.find((candidateId) => (
       plan[candidateId] === targetType && (remainingByEquipment[candidateId] || 0) > 0
+      && (targetType !== 'geladeira' || powerEquipmentIds.has(candidateId) === isPowerCold)
     ));
     if (!equipmentId) {
-      const index = chooseColdEquipmentForType(coldEquipmentIds, plan, targetType);
+      const index = isPowerCold
+        ? choosePowerColdEquipment(coldEquipmentIds, plan, powerEquipmentIds)
+        : chooseRegularColdEquipment(coldEquipmentIds, plan);
       if (index < 0) return;
       equipmentId = coldEquipmentIds[index];
       plan[equipmentId] = targetType;
@@ -267,6 +295,7 @@ function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipm
     }
     if ((remainingByEquipment[equipmentId] || 0) <= 0) return;
     remainingByEquipment[equipmentId] -= 1;
+    if (isPowerCold) powerEquipmentIds.add(equipmentId);
     if (cls === 'geladeira_degelo') degeloPreferred.add(equipmentId);
   });
 
