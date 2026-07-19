@@ -6,6 +6,7 @@ evitar importação circular.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import unicodedata
@@ -26,6 +27,7 @@ COMPATIBILITY = {
 class AgentRules:
     allow_top_level: bool = False
     allow_second_slot: bool = False
+    allow_clicked_top_level: bool = False
     heavy_over_2kg_required_level: int = 4
     egg_min_level: int = 2
     egg_max_level: int = 4
@@ -51,6 +53,8 @@ class Slot:
     occupant_count: int = 0
     occupant_codes: list[str] | None = None
     occupant_subcategories: set[str] | None = None
+    occupant_families: set[str] | None = None
+    occupant_manufacturers: set[str] | None = None
     occupant_volume_l: float = 0.0
 
 
@@ -83,6 +87,14 @@ def _curve_rank(curve: str) -> int:
     return {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}.get(normalize_string(curve).upper()[:1], 9)
 
 
+def _manufacturer(row: dict[str, Any]) -> str:
+    value = row.get("nm_fabricante") or row.get("fabricante") or row.get("manufacturer") or row.get("marca")
+    normalized = _normalize_text(value)
+    if normalized in {"", "n/a", "na", "nao informado", "sem fabricante", "outros", "outro"}:
+        return ""
+    return normalized
+
+
 def _group(row: dict[str, Any]) -> str:
     cached = row.get("_group_norm")
     if cached is not None:
@@ -105,19 +117,6 @@ def _category_group(row: dict[str, Any]) -> str:
     if any(token in cat for token in ("geladeira", "refrigerado", "refrigerada")):
         return "refrigerado"
     return "seco"
-
-
-def _degelo_class(row: dict[str, Any]) -> str:
-    value = _normalize_text(row.get("degelo"))
-    if value.startswith("nao"):
-        return "nao"
-    if value.startswith("pode"):
-        return "pode"
-    return ""
-
-
-def _is_cold_high_product(row: dict[str, Any]) -> bool:
-    return _category_group(row) == "refrigerado" and parse_bool_flag(row.get("is_alto"))
 
 
 def _required_bins(row: dict[str, Any]) -> int:
@@ -144,6 +143,107 @@ def _required_volume_l(row: dict[str, Any]) -> float:
     unit = parse_number(row.get("vol_L_unitario") or row.get("vol_l_unitario")) or 0
     bins = max(1, _required_bins(row))
     return max(0.0, float(quantity) * float(unit) / bins)
+
+
+_FAMILY_STOPWORDS = {
+    "de", "da", "do", "das", "dos", "com", "sem", "para", "por", "em", "no", "na", "nos", "nas",
+    "un", "und", "unidade", "unidades", "pct", "pack", "leve", "pague", "tradicional", "original",
+    "sabor", "tipo", "zero", "light", "integral", "organico", "organica", "extra", "premium",
+}
+
+_FAMILY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("detergente", ("detergente", "lava loucas", "lava-loucas")),
+    ("amaciante", ("amaciante",)),
+    ("desinfetante", ("desinfetante",)),
+    ("limpador", ("limpador", "limpa pisos", "limpa vidro", "limpa vidros", "veja", "cif", "multiuso")),
+    ("tira_manchas", ("tira manchas", "removedor")),
+    ("sabao", ("sabao", "sabonete em barra")),
+    ("agua_sanitaria", ("agua sanitaria",)),
+    ("alcool", ("alcool",)),
+    ("odorizador", ("odorizador", "difusor", "aromatizador")),
+    ("sabonete", ("sabonete",)),
+    ("shampoo", ("shampoo",)),
+    ("condicionador", ("condicionador",)),
+    ("creme_dental", ("creme dental", "pasta dental")),
+    ("desodorante", ("desodorante",)),
+    ("absorvente", ("absorvente",)),
+    ("racao", ("racao",)),
+    ("areia_gato", ("areia",)),
+    ("leite", ("leite",)),
+    ("iogurte", ("iogurte",)),
+    ("refrigerante", ("refrigerante",)),
+    ("energetico", ("energetico",)),
+    ("isotonico", ("isotonico",)),
+    ("suco", ("suco",)),
+    ("cha", ("cha ", "cha-", "cha mate")),
+    ("cafe", ("cafe",)),
+    ("cerveja", ("cerveja",)),
+    ("vinho", ("vinho",)),
+    ("sorvete", ("sorvete",)),
+    ("picole", ("picole",)),
+    ("acai", ("acai",)),
+    ("pizza", ("pizza",)),
+    ("pipoca", ("pipoca",)),
+    ("biscoito", ("biscoito", "bolacha", "cookie")),
+    ("chocolate", ("chocolate",)),
+    ("barra_cereal", ("barra de cereal",)),
+    ("pao", ("pao",)),
+    ("queijo", ("queijo",)),
+    ("requeijao", ("requeijao",)),
+    ("arroz", ("arroz",)),
+    ("feijao", ("feijao",)),
+    ("macarrao", ("macarrao", "massa")),
+)
+
+
+def _name_family(row: dict[str, Any]) -> str:
+    """Família visual derivada do nome para separar SKUs parecidos próximos.
+
+    Não substitui subcategoria: é uma regra leve para evitar aglomerados como
+    detergentes em subcategorias artificiais diferentes.
+    """
+    name = _normalize_text(row.get("product_name") or row.get("nome"))
+    if not name:
+        return ""
+    padded = f" {name} "
+    for family, patterns in _FAMILY_PATTERNS:
+        if any(pattern in padded or pattern in name for pattern in patterns):
+            return family
+
+    tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", name)
+        if len(token) >= 4
+        and token not in _FAMILY_STOPWORDS
+        and not token.isdigit()
+        and not re.fullmatch(r"\d+(ml|l|g|kg|cm|un)?", token)
+    ]
+    return "_".join(tokens[:2]) if tokens else ""
+
+
+def _visual_family(row: dict[str, Any]) -> str:
+    family = row.get("_visual_family")
+    if family is not None:
+        return str(family)
+    name_family = _name_family(row)
+    if not name_family:
+        return ""
+    group = _group(row) or "neutro"
+    category = _category_group(row) or "seco"
+    return f"{category}|{group}|{name_family}"
+
+
+def _degelo_class(row: dict[str, Any]) -> str:
+    value = _normalize_text(row.get("degelo"))
+    if value.startswith("nao"):
+        return "nao"
+    if value.startswith("pode"):
+        return "pode"
+    return ""
+
+
+def _is_cold_high_product(row: dict[str, Any]) -> bool:
+    return _category_group(row) == "refrigerado" and parse_bool_flag(row.get("is_alto"))
 
 
 # ── construção de slots ───────────────────────────────────────────────────────
@@ -176,6 +276,8 @@ def _slot_from_row(
             level = _parse_int(match.group(1))
     occupied_codes: list[str] = []
     occupied_subcats: set[str] = set()
+    occupied_families: set[str] = set()
+    occupied_manufacturers: set[str] = set()
     occupied_volume = 0.0
     for occupied in occupied_rows or []:
         code = _product_code(occupied)
@@ -186,6 +288,12 @@ def _slot_from_row(
         subcat = _normalize_text(product.get("subcategoria") or occupied.get("subcategoria"))
         if subcat:
             occupied_subcats.add(subcat)
+        family = _visual_family(product)
+        if family:
+            occupied_families.add(family)
+        manufacturer = _manufacturer(product)
+        if manufacturer:
+            occupied_manufacturers.add(manufacturer)
         occupied_volume += _required_volume_l(product)
     return Slot(
         location_id=normalize_string(row.get("location_id")),
@@ -202,6 +310,8 @@ def _slot_from_row(
         occupant_count=occupant_count,
         occupant_codes=occupied_codes,
         occupant_subcategories=occupied_subcats,
+        occupant_families=occupied_families,
+        occupant_manufacturers=occupied_manufacturers,
         occupant_volume_l=occupied_volume,
     )
 
@@ -235,6 +345,8 @@ def _hard_rule_violations(
     compatible = COMPATIBILITY.get(category, set())
     if compatible and slot.equip_type not in compatible:
         reasons.append(f"Categoria {category} incompativel com equipamento {slot.equip_type}.")
+    if _is_cold_high_product(product) and _normalize_equip_type(slot.equip_type) != "geladeira_alta":
+        reasons.append("Produto refrigerado alto exige geladeira alta.")
 
     group = _group(product)
     if group == "quimico" and validate_chemical_zone and _normalize_equip_id(slot.equip_id) not in chemical_equips:
@@ -245,11 +357,13 @@ def _hard_rule_violations(
     if not rules.allow_top_level and slot.is_top_level:
         reasons.append("Uso de nivel mais alto nao liberado.")
 
-    if _is_egg(product) and slot.level is not None and (slot.level < rules.egg_min_level or slot.level > rules.egg_max_level):
+    clicked_top_override = rules.allow_clicked_top_level and slot.is_top_level
+
+    if _is_egg(product) and slot.level is not None and (slot.level < rules.egg_min_level or slot.level > rules.egg_max_level) and not clicked_top_override:
         reasons.append("Ovos fora dos niveis intermediarios permitidos.")
 
     if _is_prateleira(slot):
-        if group == "flv" and (slot.is_top_level or slot.is_bottom_level):
+        if group == "flv" and ((slot.is_top_level and not clicked_top_override) or slot.is_bottom_level):
             reasons.append("FLV em nivel proibido de prateleira.")
         peso = parse_number(product.get("peso_kg_unitario")) or 0
         if (peso > 2 or parse_bool_flag(product.get("is_pesado"))) and slot.is_top_level:
@@ -282,25 +396,18 @@ def _hard_rule_violations(
 # ── engine de pontuação ───────────────────────────────────────────────────────
 
 def _sort_products_for_allocation(products: list[dict[str, Any]], curve_priority_enabled: bool = False) -> list[dict[str, Any]]:
-    curve_order = {"A": 0, "B": 1, "C": 2}
-
-    def key(row: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
-        is_egg = 0 if _is_egg(row) else 1
-        is_flv = 0 if _group(row) == "flv" else 1
-        is_fragile_or_tall = 0 if (parse_bool_flag(row.get("is_fragil")) or parse_bool_flag(row.get("is_alto"))) else 1
-        curve = normalize_string(row.get("curva")).upper()[:1]
-        group_rank = 0 if _group(row) == "quimico" else 1
-        return (
-            group_rank,
-            is_egg,
-            is_flv,
-            is_fragile_or_tall,
-            f"{curve_order.get(curve, 9)}::{normalize_string(row.get('product_name'))}",
-        )
+    def key(row: dict[str, Any]) -> tuple[bytes, str]:
+        code = _product_code(row).upper()
+        # Stable dispersion prevents the source sheet's alphabetical order from
+        # turning each equipment into a contiguous product-name block.
+        digest = hashlib.sha256(code.encode("utf-8")).digest()
+        return digest, code
 
     if curve_priority_enabled:
-        def curve_key(row: dict[str, Any]) -> tuple[int, tuple[int, int, int, int, int, str]]:
-            return _curve_rank(_curve_value(row)), key(row)
+        def curve_key(row: dict[str, Any]) -> tuple[int, int, bytes, str]:
+            digest, code = key(row)
+            cold_high_rank = 0 if _is_cold_high_product(row) else 1
+            return cold_high_rank, _curve_rank(_curve_value(row)), digest, code
 
         return sorted(products, key=curve_key)
 
@@ -319,6 +426,7 @@ def _pick_slots_for_product(
     curve_zone_map: dict[str, set[int]],
     degelo_preferred_equips: set[str] | None = None,
     curve_priority_enabled: bool = False,
+    cold_high_units_remaining: int = 0,
 ) -> list[Slot]:
     required = max(1, int(required or 1))
     candidates: list[Slot] = []
@@ -333,6 +441,16 @@ def _pick_slots_for_product(
             continue
         candidates.append(slot)
 
+    if not candidates:
+        return []
+
+    candidates = _prefer_cold_candidate_tier(
+        product,
+        candidates,
+        placement_index,
+        degelo_preferred_equips,
+        cold_high_units_remaining,
+    )
     if not candidates:
         return []
 
@@ -366,6 +484,57 @@ def _pick_slots_for_product(
             curve_priority_enabled,
         ),
     )
+
+
+def _prefer_cold_candidate_tier(
+    product: dict[str, Any],
+    candidates: list[Slot],
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+    degelo_preferred_equips: set[str] | None = None,
+    cold_high_units_remaining: int = 0,
+) -> list[Slot]:
+    if _category_group(product) != "refrigerado":
+        return candidates
+
+    product_is_high = _is_cold_high_product(product)
+    if product_is_high:
+        high_candidates = [
+            slot for slot in candidates
+            if _normalize_equip_type(slot.equip_type) == "geladeira_alta"
+        ]
+        return high_candidates or candidates
+
+    regular_candidates = [slot for slot in candidates if _normalize_equip_type(slot.equip_type) != "geladeira_alta"]
+    if regular_candidates or cold_high_units_remaining > 0:
+        candidates = regular_candidates
+
+    current_degelo = _degelo_class(product)
+    if current_degelo not in {"nao", "pode"}:
+        return candidates
+
+    preferred_equips = degelo_preferred_equips or set()
+
+    def has_opposite(slot: Slot) -> bool:
+        placements = placement_index.get(("__degelo__", slot.equip_id), [])
+        opposite = "pode" if current_degelo == "nao" else "nao"
+        return any(placement.get("degelo_class") == opposite for placement in placements)
+
+    clean = [slot for slot in candidates if not has_opposite(slot)]
+    if not clean:
+        return candidates
+
+    if current_degelo == "nao":
+        planned_clean = [
+            slot for slot in clean
+            if _normalize_equip_id(slot.equip_id) in preferred_equips
+        ]
+        return planned_clean or clean
+
+    regular_clean = [
+        slot for slot in clean
+        if _normalize_equip_id(slot.equip_id) not in preferred_equips
+    ]
+    return regular_clean or clean
 
 
 def _candidate_runs(
@@ -603,28 +772,74 @@ def _score_slot(
     return score
 
 
+def _same_product(product: dict[str, Any], placement: dict[str, Any]) -> bool:
+    current_code = _product_code(product)
+    other_code = normalize_string(placement.get("product_code"))
+    return bool(current_code and other_code and current_code == other_code)
+
+
+def _placement_distance(slot: Slot, placement: dict[str, Any]) -> tuple[int | None, int | None]:
+    other_level = placement.get("level")
+    other_pos = placement.get("position")
+    if other_level is None or other_pos is None or slot.level is None or slot.position is None:
+        return None, None
+    try:
+        return abs(int(other_level) - int(slot.level)), abs(int(other_pos) - int(slot.position))
+    except (TypeError, ValueError):
+        return None, None
+
+
 def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dict[tuple[str, str], list[dict[str, Any]]]) -> float:
     subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
-    if not subcat:
-        return 0.0
     penalty = 0.0
-    for placement in placement_index.get((subcat, slot.equip_id), []):
-        other_level = placement.get("level")
-        other_pos = placement.get("position")
-        if other_level is None or other_pos is None or slot.level is None or slot.position is None:
-            continue
-        if other_level == slot.level and abs(int(other_pos) - int(slot.position)) == 1:
-            penalty += 700
-        elif other_level == slot.level:
-            distance = abs(int(other_pos) - int(slot.position))
-            if distance <= 3:
-                penalty += 180 / max(distance, 1)
-            else:
-                penalty += 15
-        elif other_pos == slot.position and abs(int(other_level) - int(slot.level)) == 1:
-            penalty += 80
-        elif abs(int(other_level) - int(slot.level)) == 1:
-            penalty += 25
+    if subcat:
+        for placement in placement_index.get((subcat, slot.equip_id), []):
+            if _same_product(product, placement):
+                continue
+            level_distance, pos_distance = _placement_distance(slot, placement)
+            if level_distance is None or pos_distance is None:
+                continue
+            if level_distance == 0 and pos_distance == 1:
+                penalty += 1200
+            elif level_distance == 0:
+                if pos_distance <= 3:
+                    penalty += 500 / max(pos_distance, 1)
+                else:
+                    penalty += 80
+            elif pos_distance == 0 and level_distance == 1:
+                penalty += 80
+            elif level_distance == 1:
+                penalty += 25
+
+    family = _visual_family(product)
+    if family:
+        for placement in placement_index.get(("__family__", family, slot.equip_id), []):
+            if _same_product(product, placement):
+                continue
+            level_distance, pos_distance = _placement_distance(slot, placement)
+            if level_distance is None or pos_distance is None:
+                continue
+            if level_distance == 0 and pos_distance == 1:
+                penalty += 800
+            elif level_distance == 0:
+                penalty += 300 / max(pos_distance, 1) if pos_distance <= 3 else 50
+            elif pos_distance == 0 and level_distance == 1:
+                penalty += 60
+            elif level_distance == 1:
+                penalty += 20
+
+    manufacturer = _manufacturer(product)
+    if manufacturer:
+        for placement in placement_index.get(("__manufacturer__", manufacturer, slot.equip_id), []):
+            if _same_product(product, placement):
+                continue
+            level_distance, pos_distance = _placement_distance(slot, placement)
+            if level_distance is None or pos_distance is None:
+                continue
+            if level_distance == 0 and pos_distance == 1:
+                penalty += 160
+            elif level_distance == 0 and pos_distance <= 2:
+                penalty += 80 / max(pos_distance, 1)
     return penalty
 
 
@@ -752,6 +967,12 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
         return
     if subcat:
         index.setdefault((subcat, equip_id), []).append(placement)
+    family = _visual_family(placement)
+    if family:
+        index.setdefault(("__family__", family, equip_id), []).append(placement)
+    manufacturer = _manufacturer(placement)
+    if manufacturer:
+        index.setdefault(("__manufacturer__", manufacturer, equip_id), []).append(placement)
     degelo_class = _degelo_class(placement)
     if degelo_class:
         index.setdefault(("__degelo__", equip_id), []).append(placement)
@@ -765,7 +986,10 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
 def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
     return {
         "product_code": _product_code(product),
+        "product_name": normalize_string(product.get("product_name") or product.get("nome")),
         "subcategoria": _normalize_text(product.get("subcategoria")),
+        "familia_visual": _visual_family(product),
+        "nm_fabricante": _manufacturer(product),
         "curva": _curve_value(product),
         "is_alto": parse_bool_flag(product.get("is_alto")),
         "degelo": normalize_string(product.get("degelo")),
@@ -785,6 +1009,14 @@ def _commit_product_to_slot(slot: Slot, product: dict[str, Any]) -> None:
     if subcat:
         slot.occupant_subcategories = set(slot.occupant_subcategories or set())
         slot.occupant_subcategories.add(subcat)
+    family = _visual_family(product)
+    if family:
+        slot.occupant_families = set(slot.occupant_families or set())
+        slot.occupant_families.add(family)
+    manufacturer = _manufacturer(product)
+    if manufacturer:
+        slot.occupant_manufacturers = set(slot.occupant_manufacturers or set())
+        slot.occupant_manufacturers.add(manufacturer)
     slot.occupant_volume_l += _required_volume_l(product)
 
 

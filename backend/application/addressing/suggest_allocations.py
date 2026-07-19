@@ -13,6 +13,7 @@ from core.agent_scoring import (
     _commit_product_to_slot,
     _group,
     _hard_rule_violations,
+    _is_cold_high_product,
     _normalize_curve_zones,
     _normalize_equip_id,
     _normalize_text,
@@ -20,6 +21,7 @@ from core.agent_scoring import (
     _placement_for_slot,
     _required_volume_l,
     _sort_products_for_allocation,
+    _visual_family,
 )
 from core.utils import normalize_string
 
@@ -52,6 +54,7 @@ def suggest_allocations(
     """
     allow_top_level = bool(options.get("allow_top_level", False))
     allow_second_slot = bool(options.get("allow_second_slot", False))
+    allow_clicked_top_level = bool(options.get("allow_clicked_top_level", False))
     chemical_equips = {
         _normalize_equip_id(eid)
         for eid in (options.get("chemical_equipment_ids") or [])
@@ -64,7 +67,11 @@ def suggest_allocations(
     }
     curve_zones = _normalize_curve_zones(options.get("curve_zones"))
     curve_priority_enabled = bool(options.get("curve_priority_enabled") or options.get("whole_street"))
-    rules = AgentRules(allow_top_level=allow_top_level, allow_second_slot=allow_second_slot)
+    rules = AgentRules(
+        allow_top_level=allow_top_level,
+        allow_second_slot=allow_second_slot,
+        allow_clicked_top_level=allow_clicked_top_level,
+    )
 
     # Map React Product → scoring dict
     products_by_code: dict[str, dict[str, Any]] = {}
@@ -130,14 +137,27 @@ def suggest_allocations(
     proposed: list[dict[str, Any]] = []
     unallocated_out: list[str] = []
 
-    for product in _sort_products_for_allocation(products_to_allocate, curve_priority_enabled=curve_priority_enabled):
+    sorted_products = _sort_products_for_allocation(products_to_allocate, curve_priority_enabled=curve_priority_enabled)
+    pending_cold_high_units = sum(
+        max(1, int(product.get("escaninhos_necessarios") or 1))
+        for product in sorted_products
+        if _is_cold_high_product(product)
+    )
+
+    for product in sorted_products:
         code = str(product.get("product_code") or "")
         required = max(1, int(product.get("escaninhos_necessarios") or 1))
+        product_is_cold_high = _is_cold_high_product(product)
+        high_units_remaining_after_current = pending_cold_high_units
+        if product_is_cold_high:
+            high_units_remaining_after_current = max(0, pending_cold_high_units - required)
         candidates = _pick_slots_for_product(
             product, required, slots, rules, chemical_equips,
             reserved_locations, placement_index, product_placement_index, curve_zones,
-            degelo_preferred_equips, curve_priority_enabled,
+            degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
         )
+        if product_is_cold_high:
+            pending_cold_high_units = max(0, pending_cold_high_units - required)
         if len(candidates) != required:
             unallocated_out.append(code)
             continue
@@ -183,6 +203,7 @@ def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
         "grupo": str(p.get("grupo") or ""),
         "curva": str(p.get("curva") or ""),
         "subcategoria": str(p.get("sub") or p.get("subcategoria") or ""),
+        "nm_fabricante": str(p.get("fabricante") or p.get("nm_fabricante") or ""),
         "peso_kg_unitario": float(p.get("peso") or p.get("peso_kg") or 0),
         "vol_L_unitario": float(p.get("vol") or p.get("vol_L_unitario") or 0),
         "quantidade": int(p.get("qtd") or p.get("quantidade") or 1),
@@ -237,6 +258,16 @@ def _slots_from_map(
                         for code in real_codes
                         if code in products_by_code and _normalize_text(products_by_code[code].get("subcategoria"))
                     }
+                    occupant_families = {
+                        _visual_family(products_by_code[code])
+                        for code in real_codes
+                        if code in products_by_code and _visual_family(products_by_code[code])
+                    }
+                    occupant_manufacturers = {
+                        _normalize_text(products_by_code[code].get("nm_fabricante"))
+                        for code in real_codes
+                        if code in products_by_code and _normalize_text(products_by_code[code].get("nm_fabricante"))
+                    }
                     occupant_volume_l = sum(
                         _required_volume_l(products_by_code[code])
                         for code in real_codes
@@ -258,6 +289,8 @@ def _slots_from_map(
                         occupant_count=occupant_count,
                         occupant_codes=real_codes,
                         occupant_subcategories=occupant_subcategories,
+                        occupant_families=occupant_families,
+                        occupant_manufacturers=occupant_manufacturers,
                         occupant_volume_l=occupant_volume_l,
                     ))
     return slots

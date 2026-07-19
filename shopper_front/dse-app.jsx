@@ -267,6 +267,67 @@ function choosePowerColdEquipment(coldEquipmentIds, rawPlan, powerEquipmentIds) 
   return coldEquipmentIds.findIndex((equipmentId) => !rawPlan[equipmentId]);
 }
 
+function isPowerColdPlannedType(type, equipmentId, powerEquipmentIds) {
+  return type === 'freezer' || powerEquipmentIds.has(equipmentId);
+}
+
+function compactPowerColdClusters(coldEquipmentIds, rawPlan, powerEquipmentIds, degeloPreferredEquipmentIds) {
+  const plan = { ...rawPlan };
+  const powerIds = new Set(powerEquipmentIds || []);
+  const degeloIds = new Set(degeloPreferredEquipmentIds || []);
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < coldEquipmentIds.length * 2) {
+    changed = false;
+    guard += 1;
+    for (let index = 1; index < coldEquipmentIds.length - 1; index += 1) {
+      const equipmentId = coldEquipmentIds[index];
+      const currentType = plan[equipmentId];
+      if (!currentType || isPowerColdPlannedType(currentType, equipmentId, powerIds)) continue;
+      const leftId = coldEquipmentIds[index - 1];
+      const rightId = coldEquipmentIds[index + 1];
+      const leftIsPower = isPowerColdPlannedType(plan[leftId], leftId, powerIds);
+      const rightIsPower = isPowerColdPlannedType(plan[rightId], rightId, powerIds);
+      if (!leftIsPower || !rightIsPower) continue;
+
+      const swapIndex = leftIsPower ? index - 1 : index + 1;
+      const swapId = coldEquipmentIds[swapIndex];
+      const swapType = plan[swapId];
+      if (!swapType) continue;
+
+      plan[swapId] = currentType;
+      plan[equipmentId] = swapType;
+      const currentWasPower = powerIds.has(equipmentId);
+      const swapWasPower = powerIds.has(swapId);
+      if (currentWasPower || swapWasPower) {
+        if (currentWasPower) {
+          powerIds.delete(equipmentId);
+          powerIds.add(swapId);
+        }
+        if (swapWasPower) {
+          powerIds.delete(swapId);
+          powerIds.add(equipmentId);
+        }
+      }
+      const currentWasDegelo = degeloIds.has(equipmentId);
+      const swapWasDegelo = degeloIds.has(swapId);
+      if (currentWasDegelo || swapWasDegelo) {
+        if (currentWasDegelo) {
+          degeloIds.delete(equipmentId);
+          degeloIds.add(swapId);
+        }
+        if (swapWasDegelo) {
+          degeloIds.delete(swapId);
+          degeloIds.add(equipmentId);
+        }
+      }
+      changed = true;
+      break;
+    }
+  }
+  return { plan, powerEquipmentIds:powerIds, degeloPreferredEquipmentIds:degeloIds };
+}
+
 function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipmentIds, remainingEntries, levelMode) {
   const plan = {};
   const remainingByEquipment = {};
@@ -299,7 +360,12 @@ function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipm
     if (cls === 'geladeira_degelo') degeloPreferred.add(equipmentId);
   });
 
-  return { plan, degeloPreferredEquipmentIds:[...degeloPreferred] };
+  const compacted = compactPowerColdClusters(coldEquipmentIds, plan, powerEquipmentIds, degeloPreferred);
+
+  return {
+    plan:compacted.plan,
+    degeloPreferredEquipmentIds:[...compacted.degeloPreferredEquipmentIds],
+  };
 }
 
 function planStreetColdEquipmentTypes(state, { streetId, equipmentIds, remainingEntries, levelMode }) {
