@@ -130,7 +130,7 @@ def suggest_allocations(
     proposed: list[dict[str, Any]] = []
     unallocated_out: list[str] = []
 
-    for product in _sort_products_for_allocation(products_to_allocate):
+    for product in _sort_products_for_allocation(products_to_allocate, curve_priority_enabled=curve_priority_enabled):
         code = str(product.get("product_code") or "")
         required = max(1, int(product.get("escaninhos_necessarios") or 1))
         candidates = _pick_slots_for_product(

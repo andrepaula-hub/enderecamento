@@ -281,7 +281,7 @@ def _hard_rule_violations(
 
 # ── engine de pontuação ───────────────────────────────────────────────────────
 
-def _sort_products_for_allocation(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _sort_products_for_allocation(products: list[dict[str, Any]], curve_priority_enabled: bool = False) -> list[dict[str, Any]]:
     curve_order = {"A": 0, "B": 1, "C": 2}
 
     def key(row: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
@@ -297,6 +297,12 @@ def _sort_products_for_allocation(products: list[dict[str, Any]]) -> list[dict[s
             is_fragile_or_tall,
             f"{curve_order.get(curve, 9)}::{normalize_string(row.get('product_name'))}",
         )
+
+    if curve_priority_enabled:
+        def curve_key(row: dict[str, Any]) -> tuple[int, tuple[int, int, int, int, int, str]]:
+            return _curve_rank(_curve_value(row)), key(row)
+
+        return sorted(products, key=curve_key)
 
     return sorted(products, key=key)
 

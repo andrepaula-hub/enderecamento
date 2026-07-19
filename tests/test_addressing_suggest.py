@@ -1,4 +1,5 @@
 from backend.application.addressing.suggest_allocations import suggest_allocations
+from core.agent_scoring import _sort_products_for_allocation
 
 
 def _map_structure(levels=5):
@@ -74,6 +75,19 @@ def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level
         {"escaninhoId": "R1-E1-1-1", "productCode": "LEVE", "slot": 1},
         {"escaninhoId": "R1-E1-2-1", "productCode": "PESADO", "slot": 1},
     ]
+
+
+def test_sort_products_for_street_fill_prioritizes_curve():
+    products = [
+        {"product_code": "SKU-B", "curva": "B"},
+        {"product_code": "SKU-D", "curva": "D"},
+        {"product_code": "SKU-A", "curva": "A"},
+        {"product_code": "SKU-C", "curva": "C"},
+    ]
+
+    result = _sort_products_for_allocation(products, curve_priority_enabled=True)
+
+    assert [row["curva"] for row in result] == ["A", "B", "C", "D"]
 
 
 def test_suggest_allocations_blocks_flv_on_top_and_bottom_dynamic_levels():

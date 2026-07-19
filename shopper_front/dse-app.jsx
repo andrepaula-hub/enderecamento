@@ -165,6 +165,22 @@ function fillProductColdClass(productCode) {
   return 'other';
 }
 
+function curvePriorityRank(productCode) {
+  const product = PRODUCT_MAP[productCode];
+  const curve = String(product?.curva || '').trim().toUpperCase().slice(0, 1);
+  return ({ A:1, B:2, C:3, D:4, E:5 })[curve] || 9;
+}
+
+function prioritizeStreetFillEntries(entries) {
+  return (entries || [])
+    .map((entryId, index) => ({ entryId, index, code:resolveBoardEntryProductCode(entryId) }))
+    .sort((a, b) => {
+      const rankDiff = curvePriorityRank(a.code) - curvePriorityRank(b.code);
+      return rankDiff || a.index - b.index;
+    })
+    .map((item) => item.entryId);
+}
+
 function isColdEquipmentType(tipo) {
   const text = normalizeSearchText(tipo || '');
   return text.includes('geladeira') || text.includes('freezer') || text.includes('refriger');
@@ -212,31 +228,49 @@ function countEquipmentForSlots(state, mapStructure, streetId, equipmentIds, tip
   return count;
 }
 
-function buildClusteredColdTypePlan(coldEquipmentIds, freezerCount, degeloGeladeiraCount, altaCount) {
+function chooseColdEquipmentForType(coldEquipmentIds, rawPlan, targetType) {
+  const isFreezer = targetType === 'freezer';
+  let fallbackIndex = -1;
+  for (let index = 0; index < coldEquipmentIds.length; index += 1) {
+    const equipmentId = coldEquipmentIds[index];
+    if (rawPlan[equipmentId]) continue;
+    if (!isFreezer) return index;
+    if (fallbackIndex < 0) fallbackIndex = index;
+    const nearFreezer = coldEquipmentIds.some((otherId, otherIndex) => (
+      rawPlan[otherId] === 'freezer' && Math.abs(otherIndex - index) <= 2
+    ));
+    if (!nearFreezer) return index;
+  }
+  return fallbackIndex;
+}
+
+function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipmentIds, remainingEntries, levelMode) {
   const plan = {};
-  const priority = [];
-  for (let i = 0; i < freezerCount; i += 1) priority.push('freezer');
-  for (let i = 0; i < degeloGeladeiraCount; i += 1) priority.push('geladeira');
+  const remainingByEquipment = {};
+  const degeloPreferred = new Set();
 
-  let equipmentIndex = 0;
-  let priorityIndex = 0;
-  while (priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length) {
-    for (let clusterSize = 0; clusterSize < 3 && priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length; clusterSize += 1) {
-      plan[coldEquipmentIds[equipmentIndex]] = priority[priorityIndex];
-      equipmentIndex += 1;
-      priorityIndex += 1;
-    }
-    if (priorityIndex < priority.length && equipmentIndex < coldEquipmentIds.length) equipmentIndex += 1;
-  }
+  (remainingEntries || []).forEach((entryId) => {
+    const code = resolveBoardEntryProductCode(entryId);
+    const cls = fillProductColdClass(code);
+    if (cls === 'other') return;
+    const targetType = cls === 'freezer' ? 'freezer' : cls === 'geladeira_alta' ? 'geladeira_alta' : 'geladeira';
 
-  for (const equipmentId of coldEquipmentIds) {
-    if (plan[equipmentId]) continue;
-    if (altaCount > 0) {
-      plan[equipmentId] = 'geladeira_alta';
-      altaCount -= 1;
+    let equipmentId = coldEquipmentIds.find((candidateId) => (
+      plan[candidateId] === targetType && (remainingByEquipment[candidateId] || 0) > 0
+    ));
+    if (!equipmentId) {
+      const index = chooseColdEquipmentForType(coldEquipmentIds, plan, targetType);
+      if (index < 0) return;
+      equipmentId = coldEquipmentIds[index];
+      plan[equipmentId] = targetType;
+      remainingByEquipment[equipmentId] = equipmentCapacityForType(state, mapStructure, streetId, equipmentId, targetType, levelMode);
     }
-  }
-  return plan;
+    if ((remainingByEquipment[equipmentId] || 0) <= 0) return;
+    remainingByEquipment[equipmentId] -= 1;
+    if (cls === 'geladeira_degelo') degeloPreferred.add(equipmentId);
+  });
+
+  return { plan, degeloPreferredEquipmentIds:[...degeloPreferred] };
 }
 
 function planStreetColdEquipmentTypes(state, { streetId, equipmentIds, remainingEntries, levelMode }) {
@@ -255,19 +289,14 @@ function planStreetColdEquipmentTypes(state, { streetId, equipmentIds, remaining
   });
   if (!coldEquipmentIds.length) return { mapStructure:state.mapStructure, typePlan:{}, degeloPreferredEquipmentIds:[] };
 
-  const freezerCount = counts.freezer > 0
-    ? countEquipmentForSlots(state, state.mapStructure, streetId, coldEquipmentIds, 'freezer', counts.freezer, levelMode)
-    : 0;
-  const availableAfterFreezer = coldEquipmentIds.slice(freezerCount);
-  const degeloGeladeiraCount = counts.geladeira_degelo > 0
-    ? countEquipmentForSlots(state, state.mapStructure, streetId, availableAfterFreezer, 'geladeira', counts.geladeira_degelo, levelMode)
-    : 0;
-  const availableAfterPriority = coldEquipmentIds.slice(Math.min(coldEquipmentIds.length, freezerCount + degeloGeladeiraCount));
-  const altaCount = counts.geladeira_alta > 0
-    ? countEquipmentForSlots(state, state.mapStructure, streetId, availableAfterPriority, 'geladeira_alta', counts.geladeira_alta, levelMode)
-    : 0;
-
-  const rawPlan = buildClusteredColdTypePlan(coldEquipmentIds, freezerCount, degeloGeladeiraCount, altaCount);
+  const { plan:rawPlan, degeloPreferredEquipmentIds } = buildColdTypePlanFromPriority(
+    state,
+    state.mapStructure,
+    streetId,
+    coldEquipmentIds,
+    prioritizeStreetFillEntries(remainingEntries),
+    levelMode,
+  );
   const typePlan = {};
   coldEquipmentIds.forEach((equipmentId) => {
     const plannedType = rawPlan[equipmentId] || 'geladeira';
@@ -276,7 +305,6 @@ function planStreetColdEquipmentTypes(state, { streetId, equipmentIds, remaining
     typePlan[equipmentId] = plannedType;
   });
   const plannedMap = mapWithEquipmentTypePlan(state.mapStructure, typePlan);
-  const degeloPreferredEquipmentIds = coldEquipmentIds.filter((equipmentId) => rawPlan[equipmentId] === 'geladeira');
   return { mapStructure:plannedMap, typePlan, degeloPreferredEquipmentIds };
 }
 
@@ -1656,7 +1684,7 @@ function App() {
   const yieldToBrowser = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 
   const handleFillStreet = useCallback(async ({ streetId, equipmentIds, levelMode, onProgress }) => {
-    const remainingEntries = capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations);
+    const remainingEntries = prioritizeStreetFillEntries(capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations));
     if (!remainingEntries.length) throw new Error('Nenhum produto elegível na lista atual.');
 
     const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];

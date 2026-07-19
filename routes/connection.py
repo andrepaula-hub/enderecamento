@@ -49,15 +49,16 @@ def index() -> HTMLResponse:
 
 @router.get("/api/download")
 def download() -> FileResponse:
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     active = _require_active_sheet()
     if not active:
         if DATA_XLSX_PATH and DATA_XLSX_PATH.exists():
-            return FileResponse(DATA_XLSX_PATH)
+            return FileResponse(DATA_XLSX_PATH, filename=DATA_XLSX_PATH.name, media_type=media_type)
         return JSONResponse({"success": False, "error": "Nenhuma planilha ativa para exportar."})
     client = GSheetsClient(active["sheet_id"])
     tmp_path = APP_ROOT / ".credentials" / "export.xlsx"
     client.export_xlsx(tmp_path)
-    return FileResponse(tmp_path)
+    return FileResponse(tmp_path, filename="enderecamento-atual.xlsx", media_type=media_type)
 
 
 @router.get("/api/file")
