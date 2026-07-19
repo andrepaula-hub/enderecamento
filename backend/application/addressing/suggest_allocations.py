@@ -156,8 +156,6 @@ def suggest_allocations(
             reserved_locations, placement_index, product_placement_index, curve_zones,
             degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
         )
-        if product_is_cold_high:
-            pending_cold_high_units = max(0, pending_cold_high_units - required)
         if len(candidates) != required:
             unallocated_out.append(code)
             continue
@@ -170,6 +168,9 @@ def suggest_allocations(
         if blocked:
             unallocated_out.append(code)
             continue
+
+        if product_is_cold_high:
+            pending_cold_high_units = max(0, pending_cold_high_units - required)
 
         for unit_idx, candidate in enumerate(candidates, start=1):
             target_slot = 2 if candidate.occupant_count == 1 else 1

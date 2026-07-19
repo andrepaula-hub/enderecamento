@@ -397,3 +397,41 @@ def test_fill_street_reserves_high_fridge_until_high_products_are_consumed():
         {"escaninhoId": "R1-E2-1-1", "productCode": "HIGH_B", "slot": 1, "equipmentId": "R1-E2"},
         {"escaninhoId": "R1-E1-1-1", "productCode": "REGULAR_A", "slot": 1, "equipmentId": "R1-E1"},
     ]
+
+
+def test_fill_street_relaxes_degelo_tier_when_strict_candidates_have_no_run():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 1, "escsPerNivel": 3, "cap": 100},
+                {"id": "R1-E2", "tipo": "geladeira", "niveis": 1, "escsPerNivel": 2, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": "PODE1", "p2": None},
+        "R1-E1-1-2": {"p1": None, "p2": None},
+        "R1-E1-1-3": {"p1": None, "p2": None},
+        "R1-E2-1-1": {"p1": "NAO1", "p2": None},
+        "R1-E2-1-2": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["NAO2", "NAO2"],
+        products_data=[
+            _product("PODE1", arm="Geladeira", categoria_armazenagem="Geladeira", degelo="PODE", escsNec=1, peso=0.5, pesado=False),
+            _product("NAO1", arm="Geladeira", categoria_armazenagem="Geladeira", degelo="NÃO", escsNec=1, peso=0.5, pesado=False),
+            _product("NAO2", arm="Geladeira", categoria_armazenagem="Geladeira", degelo="NÃO", escsNec=2, peso=0.5, pesado=False),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[
+            {"equipmentId": "R1-E1", "targets": ["R1-E1-1-2", "R1-E1-1-3"]},
+            {"equipmentId": "R1-E2", "targets": ["R1-E2-1-2"]},
+        ],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert len(result["moves"]) == 2

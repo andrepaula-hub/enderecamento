@@ -275,6 +275,41 @@ function compactPowerColdClusters(coldEquipmentIds, rawPlan, powerEquipmentIds, 
   const plan = { ...rawPlan };
   const powerIds = new Set(powerEquipmentIds || []);
   const degeloIds = new Set(degeloPreferredEquipmentIds || []);
+  const swapEquipment = (fromIndex, toIndex) => {
+    const fromId = coldEquipmentIds[fromIndex];
+    const toId = coldEquipmentIds[toIndex];
+    const fromType = plan[fromId];
+    plan[fromId] = plan[toId];
+    plan[toId] = fromType;
+
+    const fromPower = powerIds.has(fromId);
+    const toPower = powerIds.has(toId);
+    if (fromPower !== toPower) {
+      if (fromPower) {
+        powerIds.delete(fromId);
+        powerIds.add(toId);
+      } else {
+        powerIds.delete(toId);
+        powerIds.add(fromId);
+      }
+    }
+
+    const fromDegelo = degeloIds.has(fromId);
+    const toDegelo = degeloIds.has(toId);
+    if (fromDegelo !== toDegelo) {
+      if (fromDegelo) {
+        degeloIds.delete(fromId);
+        degeloIds.add(toId);
+      } else {
+        degeloIds.delete(toId);
+        degeloIds.add(fromId);
+      }
+    }
+  };
+  const currentPowerRuns = () => powerClusterRuns(
+    coldEquipmentIds,
+    new Set(coldEquipmentIds.filter((equipmentId) => isPowerColdPlannedType(plan[equipmentId], equipmentId, powerIds))),
+  );
   let changed = true;
   let guard = 0;
   while (changed && guard < coldEquipmentIds.length * 2) {
@@ -295,34 +330,47 @@ function compactPowerColdClusters(coldEquipmentIds, rawPlan, powerEquipmentIds, 
       const swapType = plan[swapId];
       if (!swapType) continue;
 
-      plan[swapId] = currentType;
-      plan[equipmentId] = swapType;
-      const currentWasPower = powerIds.has(equipmentId);
-      const swapWasPower = powerIds.has(swapId);
-      if (currentWasPower || swapWasPower) {
-        if (currentWasPower) {
-          powerIds.delete(equipmentId);
-          powerIds.add(swapId);
-        }
-        if (swapWasPower) {
-          powerIds.delete(swapId);
-          powerIds.add(equipmentId);
-        }
-      }
-      const currentWasDegelo = degeloIds.has(equipmentId);
-      const swapWasDegelo = degeloIds.has(swapId);
-      if (currentWasDegelo || swapWasDegelo) {
-        if (currentWasDegelo) {
-          degeloIds.delete(equipmentId);
-          degeloIds.add(swapId);
-        }
-        if (swapWasDegelo) {
-          degeloIds.delete(swapId);
-          degeloIds.add(equipmentId);
-        }
-      }
+      swapEquipment(index, swapIndex);
       changed = true;
       break;
+    }
+    if (changed) continue;
+
+    const runs = currentPowerRuns();
+    for (const run of runs) {
+      if (run.length >= 3) continue;
+      const right = run[run.length - 1] + 1;
+      if (right < coldEquipmentIds.length && !isPowerColdPlannedType(plan[coldEquipmentIds[right]], coldEquipmentIds[right], powerIds)) {
+        const donor = coldEquipmentIds.findIndex((equipmentId, donorIndex) => (
+          donorIndex > right
+          && isPowerColdPlannedType(plan[equipmentId], equipmentId, powerIds)
+          && !runs.some((candidateRun) => candidateRun.includes(donorIndex) && candidateRun.length >= 3)
+        ));
+        if (donor >= 0) {
+          swapEquipment(donor, right);
+          changed = true;
+          break;
+        }
+      }
+      const left = run[0] - 1;
+      if (left >= 0 && !isPowerColdPlannedType(plan[coldEquipmentIds[left]], coldEquipmentIds[left], powerIds)) {
+        let donor = -1;
+        for (let donorIndex = left - 1; donorIndex >= 0; donorIndex -= 1) {
+          const donorId = coldEquipmentIds[donorIndex];
+          if (
+            isPowerColdPlannedType(plan[donorId], donorId, powerIds)
+            && !runs.some((candidateRun) => candidateRun.includes(donorIndex) && candidateRun.length >= 3)
+          ) {
+            donor = donorIndex;
+            break;
+          }
+        }
+        if (donor >= 0) {
+          swapEquipment(donor, left);
+          changed = true;
+          break;
+        }
+      }
     }
   }
   return { plan, powerEquipmentIds:powerIds, degeloPreferredEquipmentIds:degeloIds };
@@ -960,6 +1008,27 @@ function reducer(state, action) {
       const nextUnallocated = state.unallocated.filter(id=>id!==productId);
       return {
         ...commitAllocs(state,newA,historyGroup,{ collected:nextCollected, unallocated:nextUnallocated }),
+        selectedProduct:null,
+      };
+    }
+    case 'ALLOCATE_BATCH': {
+      const moves = Array.isArray(action.moves) ? action.moves : [];
+      if (!moves.length) return state;
+      const newA = { ...state.allocations };
+      const usedProductIds = new Set();
+      moves.forEach((move) => {
+        const productCode = resolveBoardEntryProductCode(move.productId);
+        if (!productCode || !move.escaninhoId) return;
+        const prev = newA[move.escaninhoId] || { p1:null, p2:null };
+        newA[move.escaninhoId] = Number(move.slot) === 2
+          ? { p1:prev.p1, p2:productCode }
+          : { p1:productCode, p2:prev.p2 };
+        usedProductIds.add(move.productId);
+      });
+      const nextCollected = state.collected.filter((id) => !usedProductIds.has(id));
+      const nextUnallocated = state.unallocated.filter((id) => !usedProductIds.has(id));
+      return {
+        ...commitAllocs(state, newA, action.historyGroup, { collected:nextCollected, unallocated:nextUnallocated }),
         selectedProduct:null,
       };
     }
@@ -1881,25 +1950,21 @@ function App() {
       dispatch({ type:'APPLY_EQUIP_TYPE_PLAN', typePlan:plannedTypePlan });
       await yieldToBrowser();
     }
-    for (let index = 0; index < allMoves.length; index += 1) {
-      const move = allMoves[index];
-      dispatch({
-        type:'ALLOCATE',
-        escaninhoId:move.escaninhoId,
-        productId:move.productId,
-        slot:move.slot,
-        historyGroup,
-      });
+    const batchSize = 80;
+    for (let index = 0; index < allMoves.length; index += batchSize) {
+      const batch = allMoves.slice(index, index + batchSize);
+      dispatch({ type:'ALLOCATE_BATCH', moves:batch, historyGroup });
+      const applied = Math.min(allMoves.length, index + batch.length);
       if (typeof onProgress === 'function') {
         onProgress({
-          done:index + 1,
+          done:applied,
           total:allMoves.length,
-          equipmentId:String(move.escaninhoId || '').split('-').slice(0, 2).join('-') || streetId,
-          applied:index + 1,
+          equipmentId:String(batch[batch.length - 1]?.escaninhoId || '').split('-').slice(0, 2).join('-') || streetId,
+          applied,
           phase:'aplicando',
         });
       }
-      if (index < allMoves.length - 1) await new Promise((resolve) => window.setTimeout(resolve, 18));
+      if (index + batchSize < allMoves.length) await yieldToBrowser();
     }
     if (typeof onProgress === 'function') {
       onProgress({ done:allMoves.length, total:allMoves.length, equipmentId:streetId, applied:allMoves.length, phase:'concluido' });

@@ -444,57 +444,57 @@ def _pick_slots_for_product(
     if not candidates:
         return []
 
-    candidates = _prefer_cold_candidate_tier(
+    existing_product_placements = product_placement_index.get(_product_code(product), [])
+    for candidate_tier in _cold_candidate_tiers(
         product,
         candidates,
         placement_index,
         degelo_preferred_equips,
         cold_high_units_remaining,
-    )
-    if not candidates:
-        return []
+    ):
+        if not candidate_tier:
+            continue
+        if required == 1 and not existing_product_placements:
+            return [
+                max(
+                    candidate_tier,
+                    key=lambda slot: _score_slot(
+                        product,
+                        slot,
+                        placement_index,
+                        curve_zone_map,
+                        degelo_preferred_equips,
+                        curve_priority_enabled,
+                    ),
+                )
+            ]
 
-    existing_product_placements = product_placement_index.get(_product_code(product), [])
-    if required == 1 and not existing_product_placements:
-        return [
-            max(
-                candidates,
-                key=lambda slot: _score_slot(
-                    product,
-                    slot,
-                    placement_index,
-                    curve_zone_map,
-                    degelo_preferred_equips,
-                    curve_priority_enabled,
-                ),
-            )
-        ]
-
-    grouped_runs = _candidate_runs(product, candidates, required, rules, existing_product_placements)
-    if not grouped_runs:
-        return []
-    return max(
-        grouped_runs,
-        key=lambda run: _score_run(
-            product,
-            run,
-            placement_index,
-            curve_zone_map,
-            degelo_preferred_equips,
-            curve_priority_enabled,
-        ),
-    )
+        grouped_runs = _candidate_runs(product, candidate_tier, required, rules, existing_product_placements)
+        if not grouped_runs:
+            continue
+        return max(
+            grouped_runs,
+            key=lambda run: _score_run(
+                product,
+                run,
+                placement_index,
+                curve_zone_map,
+                degelo_preferred_equips,
+                curve_priority_enabled,
+            ),
+        )
+    return []
 
 
-def _prefer_cold_candidate_tier(
+def _cold_candidate_tiers(
     product: dict[str, Any],
     candidates: list[Slot],
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
     degelo_preferred_equips: set[str] | None = None,
     cold_high_units_remaining: int = 0,
-) -> list[Slot]:
+) -> list[list[Slot]]:
     if _category_group(product) != "refrigerado":
-        return candidates
+        return [candidates]
 
     product_is_high = _is_cold_high_product(product)
     if product_is_high:
@@ -502,15 +502,19 @@ def _prefer_cold_candidate_tier(
             slot for slot in candidates
             if _normalize_equip_type(slot.equip_type) == "geladeira_alta"
         ]
-        return high_candidates or candidates
+        return [high_candidates]
 
     regular_candidates = [slot for slot in candidates if _normalize_equip_type(slot.equip_type) != "geladeira_alta"]
-    if regular_candidates or cold_high_units_remaining > 0:
-        candidates = regular_candidates
+    if regular_candidates:
+        base_candidates = regular_candidates
+    elif cold_high_units_remaining > 0:
+        return []
+    else:
+        base_candidates = candidates
 
     current_degelo = _degelo_class(product)
     if current_degelo not in {"nao", "pode"}:
-        return candidates
+        return [base_candidates]
 
     preferred_equips = degelo_preferred_equips or set()
 
@@ -519,22 +523,34 @@ def _prefer_cold_candidate_tier(
         opposite = "pode" if current_degelo == "nao" else "nao"
         return any(placement.get("degelo_class") == opposite for placement in placements)
 
-    clean = [slot for slot in candidates if not has_opposite(slot)]
+    clean = [slot for slot in base_candidates if not has_opposite(slot)]
     if not clean:
-        return candidates
+        return [base_candidates]
 
     if current_degelo == "nao":
         planned_clean = [
             slot for slot in clean
             if _normalize_equip_id(slot.equip_id) in preferred_equips
         ]
-        return planned_clean or clean
+        return _unique_slot_tiers([planned_clean, clean, base_candidates])
 
     regular_clean = [
         slot for slot in clean
         if _normalize_equip_id(slot.equip_id) not in preferred_equips
     ]
-    return regular_clean or clean
+    return _unique_slot_tiers([regular_clean, clean, base_candidates])
+
+
+def _unique_slot_tiers(tiers: list[list[Slot]]) -> list[list[Slot]]:
+    seen: set[tuple[str, ...]] = set()
+    unique: list[list[Slot]] = []
+    for tier in tiers:
+        key = tuple(slot.location_id for slot in tier)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(tier)
+    return unique
 
 
 def _candidate_runs(
