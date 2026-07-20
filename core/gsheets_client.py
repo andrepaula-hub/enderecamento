@@ -345,7 +345,7 @@ class GSheetsClient:
         end_col = col_to_letter(header_len - 1)
         data = []
         for row_num, values in row_updates.items():
-            padded = values + [None] * (header_len - len(values))
+            padded = values[:header_len] + [None] * max(0, header_len - len(values))
             padded = ["" if v is None else v for v in padded]
             range_ = f"{name}!A{row_num}:{end_col}{row_num}"
             data.append({"range": range_, "values": [padded]})
