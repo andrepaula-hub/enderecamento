@@ -569,10 +569,12 @@ function scoreGeneratorColdGroups(equipment, allocations) {
   let score = 0;
   let run = 0;
   const flush = () => {
-    if (run === 1) score += 20;
-    else if (run === 2) score += 260;
-    else if (run === 3) score += 1200;
-    else if (run > 3) score += 1200 - (run - 3) * 260;
+    const fullGroups = Math.floor(run / 3);
+    const remainder = run % 3;
+    score += fullGroups * 10000;
+    if (remainder === 1) score += 40;
+    if (remainder === 2) score += 800;
+    if (run > 3 && remainder !== 0) score -= remainder * 180;
     run = 0;
   };
   (equipment || []).forEach((eq) => {
@@ -606,23 +608,129 @@ function canSwapNormalFridgeContents(eqA, eqB) {
     && Number(eqA?.escsPerNivel || 0) === Number(eqB?.escsPerNivel || 0);
 }
 
-function repairStreetFillPowerGroups(state, mapStructure, equipmentIds, moves) {
-  let repairedMoves = moves || [];
+function equipmentSlotIds(eq) {
+  const ids = [];
+  for (let level = 1; level <= Number(eq?.niveis || 0); level += 1) {
+    for (let pos = 1; pos <= Number(eq?.escsPerNivel || 0); pos += 1) {
+      ids.push(`${eq.id}-${level}-${pos}`);
+    }
+  }
+  return ids;
+}
+
+function productCanMoveToSlot(productId, eq, escaninhoId) {
+  const product = PRODUCT_MAP[resolveBoardEntryProductCode(productId)];
+  if (!product || !eq) return false;
+  const tipo = normalizeSearchText(eq.tipo || '');
+  const cls = fillProductColdClass(resolveBoardEntryProductCode(productId));
+  if (cls === 'freezer') return tipo.includes('freezer');
+  if (cls === 'geladeira_alta') return tipo.includes('geladeira') && tipo.includes('alta');
+  if (cls === 'geladeira' || cls === 'geladeira_degelo') {
+    if (!tipo.includes('geladeira') || tipo.includes('alta')) return false;
+    const parsed = parseEscaninhoId(escaninhoId);
+    const group = String(product.grupo || '').trim().toUpperCase();
+    if (group === 'FLV' && (Number(parsed.pos) === 1 || Number(parsed.pos) === Number(eq.escsPerNivel || 0))) {
+      return false;
+    }
+    return true;
+  }
+  return normalizeSearchText(product.arm || product.raw?.categoria_armazenagem || '').includes(tipo);
+}
+
+function equipmentHasCompatibleShapeAndType(eqA, eqB) {
+  return normalizeSearchText(eqA?.tipo || '') === normalizeSearchText(eqB?.tipo || '')
+    && Number(eqA?.niveis || 0) === Number(eqB?.niveis || 0)
+    && Number(eqA?.escsPerNivel || 0) === Number(eqB?.escsPerNivel || 0);
+}
+
+function compactStreetFillHoles(state, mapStructure, equipmentIds, moves) {
+  const compactedMoves = (moves || []).map((move) => ({ ...move }));
   const equipmentByIdMap = {};
   (mapStructure || []).forEach((street) => {
     (street.equipment || []).forEach((eq) => { equipmentByIdMap[eq.id] = eq; });
   });
   const equipment = (equipmentIds || []).map((id) => equipmentByIdMap[id]).filter(Boolean);
-  if (equipment.length < 3 || !repairedMoves.length) return repairedMoves;
+  if (equipment.length < 2 || !compactedMoves.length) return compactedMoves;
 
-  let projected = applyMovesToAllocations(state.allocations, repairedMoves);
+  const slotsById = new Map();
+  equipment.forEach((eq, equipmentIndex) => {
+    equipmentSlotIds(eq).forEach((slotId, slotIndex) => {
+      slotsById.set(slotId, { eq, equipmentIndex, slotIndex });
+    });
+  });
+
+  const buckets = new Map();
+  equipment.forEach((eq, equipmentIndex) => {
+    const key = [
+      normalizeSearchText(eq.tipo || ''),
+      Number(eq.niveis || 0),
+      Number(eq.escsPerNivel || 0),
+    ].join('|');
+    if (!buckets.has(key)) buckets.set(key, { equipment:[], moves:[] });
+    buckets.get(key).equipment.push({ eq, equipmentIndex });
+  });
+
+  compactedMoves.forEach((move, index) => {
+    const slotInfo = slotsById.get(String(move.escaninhoId || ''));
+    if (!slotInfo) return;
+    const key = [
+      normalizeSearchText(slotInfo.eq.tipo || ''),
+      Number(slotInfo.eq.niveis || 0),
+      Number(slotInfo.eq.escsPerNivel || 0),
+    ].join('|');
+    const bucket = buckets.get(key);
+    if (bucket) bucket.moves.push({ move, index });
+  });
+
+  buckets.forEach((bucket) => {
+    if (!bucket.moves.length || bucket.equipment.length < 2) return;
+    const orderedSlots = bucket.equipment
+      .sort((a, b) => a.equipmentIndex - b.equipmentIndex)
+      .flatMap(({ eq }) => equipmentSlotIds(eq).map((slotId) => ({ eq, slotId })))
+      .filter(({ slotId }) => {
+        const slot = state.allocations[slotId] || {};
+        return !slot.p1;
+      });
+    const usedSlots = new Set();
+
+    bucket.moves
+      .sort((a, b) => a.index - b.index)
+      .forEach(({ move }) => {
+        const currentSlot = String(move.escaninhoId || '');
+        let target = null;
+        for (const candidate of orderedSlots) {
+          if (usedSlots.has(candidate.slotId)) continue;
+          if (!productCanMoveToSlot(move.productId, candidate.eq, candidate.slotId)) continue;
+          target = candidate.slotId;
+          break;
+        }
+        if (!target && currentSlot && !usedSlots.has(currentSlot)) target = currentSlot;
+        if (!target) return;
+        move.escaninhoId = target;
+        usedSlots.add(target);
+      });
+  });
+
+  return compactedMoves.filter((move) => move.productId && move.escaninhoId);
+}
+
+function planStreetPowerGroupSwaps(state, mapStructure, equipmentIds, moves) {
+  const swaps = [];
+  const equipmentByIdMap = {};
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => { equipmentByIdMap[eq.id] = eq; });
+  });
+  const equipment = (equipmentIds || []).map((id) => equipmentByIdMap[id]).filter(Boolean);
+  if (equipment.length < 3 || !(moves || []).length) return swaps;
+
+  let projected = applyMovesToAllocations(state.allocations, moves);
   let currentScore = scoreGeneratorColdGroups(equipment, projected);
   let improved = true;
   let guard = 0;
   while (improved && guard < equipment.length) {
     improved = false;
     guard += 1;
-    let best = { score:currentScore, from:-1, to:-1, moves:repairedMoves };
+    let best = { score:currentScore, distance:Infinity, from:-1, to:-1 };
     for (let from = 0; from < equipment.length; from += 1) {
       for (let to = 0; to < equipment.length; to += 1) {
         if (from === to) continue;
@@ -632,20 +740,45 @@ function repairStreetFillPowerGroups(state, mapStructure, equipmentIds, moves) {
         const aPower = isGeneratorColdEquipmentByContents(eqA, projected);
         const bPower = isGeneratorColdEquipmentByContents(eqB, projected);
         if (aPower === bPower) continue;
-        const candidateMoves = remapMoveTargetsForEquipmentSwap(repairedMoves, eqA, eqB);
-        const candidateProjected = applyMovesToAllocations(state.allocations, candidateMoves);
-        const score = scoreGeneratorColdGroups(equipment, candidateProjected) - Math.abs(from - to);
-        if (score > best.score) best = { score, from, to, moves:candidateMoves };
+        const candidateProjected = swapEquipmentAllocations(projected, eqA, eqB);
+        const score = scoreGeneratorColdGroups(equipment, candidateProjected);
+        const distance = Math.abs(from - to);
+        if (score > best.score || (score === best.score && distance < best.distance)) {
+          best = { score, distance, from, to };
+        }
       }
     }
     if (best.from >= 0) {
-      repairedMoves = best.moves;
-      projected = applyMovesToAllocations(state.allocations, repairedMoves);
+      const eqA = equipment[best.from];
+      const eqB = equipment[best.to];
+      swaps.push({ equipA:eqA.id, equipB:eqB.id });
+      projected = swapEquipmentAllocations(projected, eqA, eqB);
       currentScore = scoreGeneratorColdGroups(equipment, projected);
       improved = true;
     }
   }
-  return repairedMoves;
+  return swaps;
+}
+
+function swapEquipmentAllocations(allocations, eqA, eqB) {
+  const next = { ...(allocations || {}) };
+  const aPrefix = `${eqA.id}-`;
+  const bPrefix = `${eqB.id}-`;
+  const aSnap = {};
+  const bSnap = {};
+  equipmentSlotIds(eqA).forEach((slotId) => {
+    const suffix = slotId.slice(aPrefix.length);
+    if (next[slotId]) aSnap[suffix] = next[slotId];
+    delete next[slotId];
+  });
+  equipmentSlotIds(eqB).forEach((slotId) => {
+    const suffix = slotId.slice(bPrefix.length);
+    if (next[slotId]) bSnap[suffix] = next[slotId];
+    delete next[slotId];
+  });
+  Object.entries(aSnap).forEach(([suffix, value]) => { next[`${eqB.id}-${suffix}`] = value; });
+  Object.entries(bSnap).forEach(([suffix, value]) => { next[`${eqA.id}-${suffix}`] = value; });
+  return next;
 }
 
 function buildEquipmentSummaryText(state) {
@@ -2100,7 +2233,8 @@ function App() {
       };
     }).filter((item) => item.productId && allTargetIds.has(item.escaninhoId));
 
-    const allMoves = repairStreetFillPowerGroups(state, plannedMapStructure, selectedEquipmentIds, moves);
+    const allMoves = compactStreetFillHoles(state, plannedMapStructure, selectedEquipmentIds, moves);
+    const postFillSwaps = planStreetPowerGroupSwaps(state, plannedMapStructure, selectedEquipmentIds, allMoves);
     if (!allMoves.length) throw new Error('Nenhuma alocação possível para os filtros atuais.');
 
     const historyGroup = allMoves.length > 1 ? `fill-street:${streetId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;
@@ -2123,6 +2257,10 @@ function App() {
         });
       }
       if (index + batchSize < allMoves.length) await yieldToBrowser();
+    }
+    for (const swap of postFillSwaps) {
+      dispatch({ type:'SWAP_EQUIP_CONTENTS', equipA:swap.equipA, equipB:swap.equipB });
+      await yieldToBrowser();
     }
     if (typeof onProgress === 'function') {
       onProgress({ done:allMoves.length, total:allMoves.length, equipmentId:streetId, applied:allMoves.length, phase:'concluido' });
