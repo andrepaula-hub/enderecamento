@@ -124,6 +124,7 @@ function isColdEquipment(eq) {
 
 function isPowerColdEquipment(eq, allocations) {
   const tipo = String(eq?.tipo || '').toLowerCase();
+  if (tipo.includes('alta')) return false;
   if (tipo.includes('freezer')) return true;
   return tipo.includes('geladeira') && getDegeloStats(eq, allocations).majority;
 }

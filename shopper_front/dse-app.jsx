@@ -268,7 +268,8 @@ function choosePowerColdEquipment(coldEquipmentIds, rawPlan, powerEquipmentIds) 
 }
 
 function isPowerColdPlannedType(type, equipmentId, powerEquipmentIds) {
-  return type === 'freezer' || powerEquipmentIds.has(equipmentId);
+  if (type === 'geladeira_alta') return false;
+  return type === 'freezer' || (type === 'geladeira' && powerEquipmentIds.has(equipmentId));
 }
 
 function scorePowerColdClusters(coldEquipmentIds, plan, powerEquipmentIds) {
@@ -1245,6 +1246,8 @@ function reducer(state, action) {
       const originalType = getInitialEquipType(action.equipId);
       if (!action.tipo || action.tipo === originalType) delete pending[action.equipId];
       else pending[action.equipId] = action.tipo;
+      const nextNiveis = Number(shape.niveis || 0);
+      const nextEscsPerNivel = Number(shape.escsPerNivel || 0);
       const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.map(eq=>{
         if(eq.id!==action.equipId) return eq;
         const changed = !!action.tipo && action.tipo !== originalType;
@@ -1254,7 +1257,12 @@ function reducer(state, action) {
         else delete nextEq.tipoAnterior;
         return nextEq;
       })}));
-      const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
+      const result = collectAllocationKeys(state, key=>{
+        if (!key.startsWith(action.equipId + '-')) return false;
+        const parsed = parseEscaninhoId(key);
+        if (!nextNiveis || !nextEscsPerNivel) return false;
+        return Number(parsed.level || 0) > nextNiveis || Number(parsed.pos || 0) > nextEscsPerNivel;
+      });
       return {
         ...state,
         mapStructure:ms,
