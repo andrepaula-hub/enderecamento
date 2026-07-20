@@ -512,7 +512,7 @@ function equipmentSummaryLabel(eq, allocations) {
         const product = PRODUCT_MAP[code];
         if (!product) return;
         occupied += 1;
-        if (product.degelo === 'NÃO') degeloNao += 1;
+        if (degeloNaoValue(product.degelo)) degeloNao += 1;
       });
     }
   }
@@ -523,6 +523,129 @@ function equipmentSummaryLabel(eq, allocations) {
   if (isGeladeira) return 'geladeira';
   if (tipo.includes('prateleira') || tipo.includes('pamplona') || tipo.includes('lateral')) return 'prateleira';
   return eq?.tipo || 'equipamento';
+}
+
+function degeloNaoValue(value) {
+  const text = String(value || '').trim().toUpperCase();
+  return text === 'NÃO' || text === 'NAO';
+}
+
+function applyMovesToAllocations(baseAllocations, moves) {
+  const next = { ...(baseAllocations || {}) };
+  (moves || []).forEach((move) => {
+    const code = resolveBoardEntryProductCode(move.productId);
+    if (!code || !move.escaninhoId) return;
+    const prev = next[move.escaninhoId] || { p1:null, p2:null };
+    next[move.escaninhoId] = Number(move.slot || 1) === 2
+      ? { p1:prev.p1, p2:code }
+      : { p1:code, p2:prev.p2 };
+  });
+  return next;
+}
+
+function isGeneratorColdEquipmentByContents(eq, allocations) {
+  const tipo = normalizeSearchText(eq?.tipo || '');
+  if (tipo.includes('alta')) return false;
+  if (tipo.includes('freezer')) return true;
+  if (!tipo.includes('geladeira') && !tipo.includes('refriger')) return false;
+  let occupied = 0;
+  let degeloNao = 0;
+  for (let level = 1; level <= Number(eq?.niveis || 0); level += 1) {
+    for (let pos = 1; pos <= Number(eq?.escsPerNivel || 0); pos += 1) {
+      const alloc = allocations[`${eq.id}-${level}-${pos}`] || {};
+      ['p1', 'p2'].forEach((slot) => {
+        const code = resolveBoardEntryProductCode(alloc[slot]);
+        const product = PRODUCT_MAP[code];
+        if (!product) return;
+        occupied += 1;
+        if (degeloNaoValue(product.degelo)) degeloNao += 1;
+      });
+    }
+  }
+  return occupied > 0 && degeloNao / occupied >= 0.5;
+}
+
+function scoreGeneratorColdGroups(equipment, allocations) {
+  let score = 0;
+  let run = 0;
+  const flush = () => {
+    if (run === 1) score += 20;
+    else if (run === 2) score += 260;
+    else if (run === 3) score += 1200;
+    else if (run > 3) score += 1200 - (run - 3) * 260;
+    run = 0;
+  };
+  (equipment || []).forEach((eq) => {
+    if (isGeneratorColdEquipmentByContents(eq, allocations)) run += 1;
+    else flush();
+  });
+  flush();
+  return score;
+}
+
+function remapMoveTargetsForEquipmentSwap(moves, eqA, eqB) {
+  const aPrefix = `${eqA.id}-`;
+  const bPrefix = `${eqB.id}-`;
+  return (moves || []).map((move) => {
+    const escaninhoId = String(move.escaninhoId || '');
+    if (escaninhoId.startsWith(aPrefix)) {
+      return { ...move, escaninhoId:`${eqB.id}-${escaninhoId.slice(aPrefix.length)}` };
+    }
+    if (escaninhoId.startsWith(bPrefix)) {
+      return { ...move, escaninhoId:`${eqA.id}-${escaninhoId.slice(bPrefix.length)}` };
+    }
+    return move;
+  });
+}
+
+function canSwapNormalFridgeContents(eqA, eqB) {
+  const typeA = normalizeSearchText(eqA?.tipo || '');
+  const typeB = normalizeSearchText(eqB?.tipo || '');
+  if (typeA !== 'geladeira' || typeB !== 'geladeira') return false;
+  return Number(eqA?.niveis || 0) === Number(eqB?.niveis || 0)
+    && Number(eqA?.escsPerNivel || 0) === Number(eqB?.escsPerNivel || 0);
+}
+
+function repairStreetFillPowerGroups(state, mapStructure, equipmentIds, moves) {
+  let repairedMoves = moves || [];
+  const equipmentByIdMap = {};
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => { equipmentByIdMap[eq.id] = eq; });
+  });
+  const equipment = (equipmentIds || []).map((id) => equipmentByIdMap[id]).filter(Boolean);
+  if (equipment.length < 3 || !repairedMoves.length) return repairedMoves;
+
+  let projected = applyMovesToAllocations(state.allocations, repairedMoves);
+  let currentScore = scoreGeneratorColdGroups(equipment, projected);
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < equipment.length) {
+    improved = false;
+    guard += 1;
+    let best = { score:currentScore, from:-1, to:-1, moves:repairedMoves };
+    for (let from = 0; from < equipment.length; from += 1) {
+      for (let to = 0; to < equipment.length; to += 1) {
+        if (from === to) continue;
+        const eqA = equipment[from];
+        const eqB = equipment[to];
+        if (!canSwapNormalFridgeContents(eqA, eqB)) continue;
+        const aPower = isGeneratorColdEquipmentByContents(eqA, projected);
+        const bPower = isGeneratorColdEquipmentByContents(eqB, projected);
+        if (aPower === bPower) continue;
+        const candidateMoves = remapMoveTargetsForEquipmentSwap(repairedMoves, eqA, eqB);
+        const candidateProjected = applyMovesToAllocations(state.allocations, candidateMoves);
+        const score = scoreGeneratorColdGroups(equipment, candidateProjected) - Math.abs(from - to);
+        if (score > best.score) best = { score, from, to, moves:candidateMoves };
+      }
+    }
+    if (best.from >= 0) {
+      repairedMoves = best.moves;
+      projected = applyMovesToAllocations(state.allocations, repairedMoves);
+      currentScore = scoreGeneratorColdGroups(equipment, projected);
+      improved = true;
+    }
+  }
+  return repairedMoves;
 }
 
 function buildEquipmentSummaryText(state) {
@@ -1977,7 +2100,7 @@ function App() {
       };
     }).filter((item) => item.productId && allTargetIds.has(item.escaninhoId));
 
-    const allMoves = moves;
+    const allMoves = repairStreetFillPowerGroups(state, plannedMapStructure, selectedEquipmentIds, moves);
     if (!allMoves.length) throw new Error('Nenhuma alocação possível para os filtros atuais.');
 
     const historyGroup = allMoves.length > 1 ? `fill-street:${streetId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;

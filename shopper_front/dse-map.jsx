@@ -109,8 +109,9 @@ function getDegeloStats(eq, allocations) {
       ['p1', 'p2'].forEach((slot) => {
         const product = PRODUCT_MAP[alloc[slot]];
         if (!product) return;
+        const degelo = String(product.degelo || '').trim().toUpperCase();
         total += 1;
-        if (product.degelo === 'NÃO') count += 1;
+        if (degelo === 'NÃO' || degelo === 'NAO') count += 1;
       });
     }
   }
@@ -812,7 +813,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
     const activeEscW = anyVisiblePlanogram ? planogramEscW : escWFixed;
     return ESC_LABEL + ESC_PAD*2 + maxEscs*(activeEscW + ESC_GAP) + (anyVisiblePlanogram ? 8 : 0);
   },[street.equipment, escWFixed, planogramEscW, anyVisiblePlanogram]);
-  const powerGroupsByEquipment = useMemo(() => getPowerGroupsByEquipment(street.equipment, allocations), [street.equipment, allocations]);
+  const powerGroupsByEquipment = useMemo(() => getPowerGroupsByEquipment(visibleEquipment, allocations), [visibleEquipment, allocations]);
 
   return (
     <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
