@@ -743,7 +743,7 @@ const DEFAULT_EQUIP_SHAPES = {
   prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
   prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
   geladeira:{niveis:5,escsPerNivel:5,cap:20},
-  geladeira_alta:{niveis:4,escsPerNivel:5,cap:20,card175Only:true},
+  geladeira_alta:{niveis:4,escsPerNivel:5,cap:20},
   geladeira_gerador:{niveis:5,escsPerNivel:5,cap:20},
   freezer:{niveis:5,escsPerNivel:5,cap:16.384},
   quimico:{niveis:5,escsPerNivel:7,cap:30.24},
@@ -767,7 +767,6 @@ function getEquipShapeForType(mapStructure, tipo, excludeEquipId) {
             niveis:equip.niveis,
             escsPerNivel:equip.escsPerNivel,
             cap:equip.cap,
-            card175Only:!!equip.card175Only,
           };
         }
       }
@@ -1250,6 +1249,7 @@ function reducer(state, action) {
         if(eq.id!==action.equipId) return eq;
         const changed = !!action.tipo && action.tipo !== originalType;
         const nextEq = {...eq,...shape,tipo:action.tipo};
+        if (!eq.card175Only && nextEq.card175Only) delete nextEq.card175Only;
         if(changed) nextEq.tipoAnterior = originalType || eq.tipo;
         else delete nextEq.tipoAnterior;
         return nextEq;
@@ -1278,6 +1278,7 @@ function reducer(state, action) {
           else pending[eq.id] = nextType;
           const changed = !!nextType && nextType !== originalType;
           const nextEq = { ...eq, ...shape, tipo:nextType };
+          if (!eq.card175Only && nextEq.card175Only) delete nextEq.card175Only;
           if (changed) nextEq.tipoAnterior = originalType || eq.tipo;
           else delete nextEq.tipoAnterior;
           return nextEq;
@@ -1852,19 +1853,19 @@ function App() {
 
   const handleSaveVersion = useCallback(async (name, setProgress, setStatus) => {
     const equipmentTypeChanges = Object.entries(state.pendingEquipmentTypeChanges || {});
+    const pendingTypeChangesForSave = { ...(state.pendingEquipmentTypeChanges || {}) };
+    const moves = diffMoves(state.allocations, state.mapStructure, pendingTypeChangesForSave);
     if (equipmentTypeChanges.length > 0) {
       for (let index = 0; index < equipmentTypeChanges.length; index += 1) {
         const [equipId, newType] = equipmentTypeChanges[index];
         if (setStatus) setStatus(`Atualizando tipo de ${equipId} na planilha…`);
         setProgress(20 + Math.round(((index + 1) / equipmentTypeChanges.length) * 25));
-        const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, true);
+        const typeResponse = await API.changeEquipmentTypeAsync(equipId, newType, false);
         if (!typeResponse || !typeResponse.success) {
           throw new Error((typeResponse && typeResponse.error) || `Não foi possível alterar o tipo de ${equipId}.`);
         }
       }
-      dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
     }
-    const moves = diffMoves(state.allocations, state.mapStructure, state.pendingEquipmentTypeChanges);
     if (moves.length > 0) {
       if (setStatus) setStatus('Salvando movimentos pendentes…');
       setProgress(equipmentTypeChanges.length ? 58 : 45);
@@ -1879,6 +1880,7 @@ function App() {
     if (!versionResponse || !versionResponse.success) {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
+    if (equipmentTypeChanges.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
     savedFingerprintRef.current = pendingFingerprint;
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
@@ -1893,45 +1895,30 @@ function App() {
 
     const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];
     if (!orderedEquipmentIds.length) throw new Error('Nenhum equipamento visível nesta rua.');
-    const requiredSlots = remainingEntries.length;
-
-    let selectedEquipmentIds = [];
-    let selectedEquipmentTargets = [];
-    let plannedMapStructure = state.mapStructure;
-    let plannedTypePlan = {};
-    let degeloPreferredEquipmentIds = [];
-    for (const equipmentId of orderedEquipmentIds) {
-      selectedEquipmentIds.push(equipmentId);
-      const plan = planStreetColdEquipmentTypes(state, { streetId, equipmentIds:selectedEquipmentIds, remainingEntries, levelMode });
-      plannedMapStructure = plan.mapStructure;
-      plannedTypePlan = plan.typePlan;
-      degeloPreferredEquipmentIds = plan.degeloPreferredEquipmentIds;
-      let selectedCapacity = 0;
-      selectedEquipmentTargets = selectedEquipmentIds.map((candidateId) => {
-        const targets = collectStreetFillTargets(state, {
-          streetId,
-          equipmentIds:[candidateId],
-          levelMode,
-          mapStructure:plannedMapStructure,
-        });
-        selectedCapacity += targets.length;
-        return { equipmentId:candidateId, targets };
-      }).filter((item) => item.targets.length > 0);
-      if (selectedCapacity >= requiredSlots) break;
-    }
+    const selectedEquipmentIds = orderedEquipmentIds;
+    const plan = planStreetColdEquipmentTypes(state, { streetId, equipmentIds:selectedEquipmentIds, remainingEntries, levelMode });
+    const plannedMapStructure = plan.mapStructure;
+    const plannedTypePlan = plan.typePlan;
+    const degeloPreferredEquipmentIds = plan.degeloPreferredEquipmentIds;
+    const selectedEquipmentTargets = selectedEquipmentIds.map((candidateId) => {
+      const targets = collectStreetFillTargets(state, {
+        streetId,
+        equipmentIds:[candidateId],
+        levelMode,
+        mapStructure:plannedMapStructure,
+      });
+      return { equipmentId:candidateId, targets };
+    }).filter((item) => item.targets.length > 0);
     if (!selectedEquipmentTargets.length) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
 
     const targetGroups = [];
     let totalTargets = 0;
     selectedEquipmentTargets.forEach(({ equipmentId, targets:equipmentTargets }, index) => {
-      const needed = Math.max(0, requiredSlots - totalTargets);
-      if (!needed) return;
-      const plannedTargets = equipmentTargets.length > needed ? equipmentTargets.slice(0, needed) : equipmentTargets;
-      totalTargets += plannedTargets.length;
+      totalTargets += equipmentTargets.length;
       if (typeof onProgress === 'function') {
         onProgress({ done:index + 1, total:selectedEquipmentTargets.length, equipmentId, applied:0, phase:'preparando' });
       }
-      if (plannedTargets.length) targetGroups.push({ equipmentId, targets:plannedTargets });
+      if (equipmentTargets.length) targetGroups.push({ equipmentId, targets:equipmentTargets });
     });
     if (!totalTargets) throw new Error('Nenhum slot elegível nos equipamentos visíveis.');
 

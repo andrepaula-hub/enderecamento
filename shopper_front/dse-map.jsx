@@ -987,7 +987,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
                     prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
                     prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
                     geladeira:{niveis:4,escsPerNivel:5,cap:20.00},
-                    geladeira_alta:{niveis:4,escsPerNivel:5,cap:20.00,card175Only:true},
+                    geladeira_alta:{niveis:4,escsPerNivel:5,cap:20.00},
                     geladeira_gerador:{niveis:4,escsPerNivel:5,cap:20.00},
                     freezer:{niveis:3,escsPerNivel:4,cap:15.00},
                     quimico:{niveis:4,escsPerNivel:7,cap:30.24},
