@@ -234,6 +234,16 @@ function countEquipmentForSlots(state, mapStructure, streetId, equipmentIds, tip
   return count;
 }
 
+function countAllocatedSlotsForEquipment(allocations, equipmentId) {
+  let count = 0;
+  Object.entries(allocations || {}).forEach(([slotId, alloc]) => {
+    if (!slotId.startsWith(`${equipmentId}-`) || !alloc) return;
+    if (alloc.p1) count += 1;
+    if (alloc.p2) count += 1;
+  });
+  return count;
+}
+
 function chooseRegularColdEquipment(coldEquipmentIds, rawPlan) {
   return coldEquipmentIds.findIndex((equipmentId) => !rawPlan[equipmentId]);
 }
@@ -428,6 +438,38 @@ function buildColdTypePlanFromPriority(state, mapStructure, streetId, coldEquipm
   const remainingByEquipment = {};
   const degeloPreferred = new Set();
   const powerEquipmentIds = new Set();
+
+  coldEquipmentIds.forEach((equipmentId) => {
+    const eq = equipmentById(mapStructure, equipmentId);
+    if (!eq) return;
+    let occupiedClass = null;
+    let hasDegeloNao = false;
+    for (let level = 1; level <= (eq.niveis || 0); level += 1) {
+      for (let pos = 1; pos <= (eq.escsPerNivel || 0); pos += 1) {
+        const alloc = state.allocations[`${equipmentId}-${level}-${pos}`] || {};
+        ['p1', 'p2'].forEach((slot) => {
+          const code = resolveBoardEntryProductCode(alloc[slot]);
+          if (!code) return;
+          const cls = fillProductColdClass(code);
+          if (cls === 'other') return;
+          if (cls === 'freezer') occupiedClass = 'freezer';
+          else if (cls === 'geladeira_alta' && occupiedClass !== 'freezer') occupiedClass = 'geladeira_alta';
+          else if (!occupiedClass) occupiedClass = 'geladeira';
+          if (cls === 'geladeira_degelo') hasDegeloNao = true;
+        });
+      }
+    }
+    if (!occupiedClass) return;
+    const targetType = occupiedClass === 'freezer' ? 'freezer' : occupiedClass === 'geladeira_alta' ? 'geladeira_alta' : 'geladeira';
+    plan[equipmentId] = targetType;
+    remainingByEquipment[equipmentId] = Math.max(
+      0,
+      equipmentCapacityForType(state, mapStructure, streetId, equipmentId, targetType, levelMode)
+      - countAllocatedSlotsForEquipment(state.allocations, equipmentId),
+    );
+    if (occupiedClass === 'freezer' || hasDegeloNao) powerEquipmentIds.add(equipmentId);
+    if (hasDegeloNao) degeloPreferred.add(equipmentId);
+  });
 
   (remainingEntries || []).forEach((entryId) => {
     const code = resolveBoardEntryProductCode(entryId);

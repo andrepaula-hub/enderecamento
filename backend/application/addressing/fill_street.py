@@ -165,7 +165,11 @@ def _fill_whole_street(
         moves.extend(iteration_moves)
         _apply_moves(working_allocations, iteration_moves)
         used_codes = [move["productCode"] for move in iteration_moves]
-        remaining_codes = _remove_used_codes(remaining_codes, used_codes + iteration_unallocated)
+        # Rejections from one pass are not consumed. The candidate set changes
+        # as products are placed, so permanently dropping every unallocated
+        # code here can leave holes while the user's prancheta still has
+        # eligible fallback curves.
+        remaining_codes = _remove_used_codes(remaining_codes, used_codes)
         rejected_codes.extend(iteration_unallocated)
 
     proposed_by_equipment = Counter(move["equipmentId"] for move in moves if move.get("equipmentId"))

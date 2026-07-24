@@ -536,6 +536,39 @@ def test_fill_street_never_places_cold_high_product_in_regular_fridge():
     assert result["summary"]["remaining_codes"] == 1
 
 
+def test_fill_street_keeps_rejected_codes_remaining_after_partial_progress():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 1, "escsPerNivel": 2, "cap": 100},
+            ],
+        }
+    ]
+    allocations = {
+        "R1-E1-1-1": {"p1": None, "p2": None},
+        "R1-E1-1-2": {"p1": None, "p2": None},
+    }
+
+    result = fill_street_allocations(
+        unallocated_codes=["HIGH", "REGULAR"],
+        products_data=[
+            _product("HIGH", arm="Geladeira", categoria_armazenagem="Geladeira", alto=True, escsNec=1, peso=0.5, pesado=False),
+            _product("REGULAR", arm="Geladeira", categoria_armazenagem="Geladeira", alto=False, escsNec=1, peso=0.5, pesado=False),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        target_groups=[{"equipmentId": "R1-E1", "targets": ["R1-E1-1-1", "R1-E1-1-2"]}],
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == [
+        {"escaninhoId": "R1-E1-1-1", "productCode": "REGULAR", "slot": 1, "equipmentId": "R1-E1"},
+    ]
+    assert result["summary"]["remaining_codes"] == 1
+
+
 def test_fill_street_reserves_high_fridge_until_high_products_are_consumed():
     map_structure = [
         {
