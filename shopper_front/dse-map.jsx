@@ -161,6 +161,14 @@ function productStorageKind(product) {
   return 'any';
 }
 
+function productRequiresHighFridge(product) {
+  return productStorageKind(product) === 'geladeira' && !!product?.alto;
+}
+
+function isHighFridgeEquipment(eq) {
+  return normalizeSearchText(eq?.tipo || '').includes('geladeira_alta');
+}
+
 function equipmentStorageKind(eq) {
   const tipo = String(eq?.tipo || '').toLowerCase();
   if (tipo.includes('freezer')) return 'freezer';
@@ -439,7 +447,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
   };
 
   return (
-    <div style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
+    <div data-equipment-id={eq.id} style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
       <div style={{ background:effectiveHdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
         onClick={handleHeaderClick}
         onMouseEnter={()=>setHovHeader(true)}
@@ -816,7 +824,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
   const powerGroupsByEquipment = useMemo(() => getPowerGroupsByEquipment(visibleEquipment, allocations), [visibleEquipment, allocations]);
 
   return (
-    <div style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
+    <div data-street-id={street.id} style={{ flexShrink:0, minWidth:0, width:isCollapsed?38:effectiveColWidth, maxWidth:isCollapsed?38:effectiveColWidth, height:'100%', overflow:'visible', display:'flex', flexDirection:'column', transition:'width 0.12s, max-width 0.12s' }}>
       <div style={{ background:'var(--shopper-navy)', borderRadius:isCollapsed?'6px':'6px 6px 0 0', padding:isCollapsed?0:'7px 10px', display:'flex', alignItems:'center', flexDirection:'row', gap:5, cursor:'pointer', userSelect:'none', position:'sticky', top:0, zIndex:5, overflow:(filterOpen||fillOpen||menuOpen||newEquipOpen)?'visible':'hidden' }}
         onClick={()=>onToggleStreet()}>
         {isCollapsed ? (
@@ -1032,7 +1040,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
       </div>
 
       {!isCollapsed && (
-        <div style={{ flex:1, minHeight:0, overflowY:'auto', overflowX:'hidden', paddingTop:6, paddingBottom:12 }}>
+        <div data-street-body-id={street.id} style={{ flex:1, minHeight:0, overflowY:'auto', overflowX:'hidden', paddingTop:6, paddingBottom:12 }}>
           {street.equipment.length===0 && (
             <div style={{ padding:'14px 8px', textAlign:'center', color:'var(--map-text-muted)', fontSize:10 }}>
               Nenhum equipamento.<br />
@@ -1166,17 +1174,19 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const isPrateleira = equipKind === 'prateleira';
     const isGeladeira = equipKind === 'geladeira';
     const isFreezer = equipKind === 'freezer';
+    if (productRequiresHighFridge(product) && !isHighFridgeEquipment(eq)) return -99999;
     if (!isPrateleira && !isGeladeira && !isFreezer) return -level * 2;
     const niveis = eq ? eq.niveis : 5;
     let score = 0;
-    const allowClickedTop = !!opts.allowClickedTop && level === 1;
+    const isTopLevel = level === 1;
+    const isBottomLevel = level === niveis;
     // Pesado em prateleira: regra dura apenas contra nivel 1.
     if (product.pesado) {
-      if (level === 1) return -99999;
+      if (isTopLevel) return -99999;
     }
     // FLV em prateleira: bloqueia nível 1 e último nível
     if (isPrateleira && (product.grupo || '').toUpperCase() === 'FLV') {
-      if ((level === 1 && !allowClickedTop) || level === niveis) return -99999;
+      if (isTopLevel || isBottomLevel) return -99999;
       score += 30;
     }
     if (isGeladeira && (product.grupo || '').toUpperCase() === 'FLV') {
@@ -1186,7 +1196,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     }
     const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
     if (isEgg && (level < 2 || level > 4)) {
-      if (!allowClickedTop) return -99999;
+      return -99999;
     }
     // frágil/alto: prefere topo (nível 1)
     if (product.fragil || product.alto) {
@@ -1219,7 +1229,14 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     if (productKind !== 'any' && equipKind !== productKind) {
       return `${product.nome} exige ${kindLabel[productKind]}; ${eq.id} é ${kindLabel[equipKind] || eq.tipo}.`;
     }
-    if ((product.pesado || product.grupo === 'FLV') && parsed.level === 1) {
+    if (productRequiresHighFridge(product) && !isHighFridgeEquipment(eq)) {
+      return 'Produto refrigerado alto exige geladeira alta.';
+    }
+    const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
+    const isBottomLevel = Number(eq.niveis || 0) > 0 && parsed.level === Number(eq.niveis || 0);
+    if ((product.pesado && parsed.level === 1)
+      || (product.grupo === 'FLV' && (parsed.level === 1 || isBottomLevel))
+      || (isEgg && (parsed.level < 2 || parsed.level > 4))) {
       return 'Esse nível não é elegível para o produto selecionado.';
     }
     return 'Nenhum slot elegível para a seleção atual.';
@@ -1395,7 +1412,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
   useEffect(()=>{
     if (!highlightProductId || !containerRef.current) return;
     const normalizedHighlight = parseBoardEntryCode(highlightProductId);
-    let streetIdx=-1, equipIdx=-1, targetLocationId='';
+    let streetIdx=-1, equipIdx=-1, targetLocationId='', targetStreetId='', targetEquipId='';
     mapStructure.forEach((street,si)=>{
       if (streetIdx>=0) return;
       street.equipment.forEach((eq,ei)=>{
@@ -1406,21 +1423,45 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
             streetIdx=si;
             equipIdx=ei;
             targetLocationId=`${eq.id}-${n}-${s}`;
+            targetStreetId=street.id;
+            targetEquipId=eq.id;
           }
         }
       });
     });
     if(streetIdx<0) return;
     const container = containerRef.current;
+    const centerIn = (scrollEl, target, axis='both') => {
+      if (!scrollEl || !target) return;
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const next = {};
+      if (axis === 'both' || axis === 'x') {
+        next.left = Math.max(0, scrollEl.scrollLeft + targetRect.left - scrollRect.left - ((scrollEl.clientWidth - targetRect.width) / 2));
+      }
+      if (axis === 'both' || axis === 'y') {
+        next.top = Math.max(0, scrollEl.scrollTop + targetRect.top - scrollRect.top - ((scrollEl.clientHeight - targetRect.height) / 2));
+      }
+      scrollEl.scrollTo(Object.assign({ behavior:'smooth' }, next));
+    };
     const scrollToTarget = () => {
       const target = targetLocationId ? container.querySelector(`[data-location-id="${cssEscapeValue(targetLocationId)}"]`) : null;
+      const streetBody = targetStreetId ? container.querySelector(`[data-street-body-id="${cssEscapeValue(targetStreetId)}"]`) : null;
       if (target) {
-        const containerRect = container.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const nextLeft = container.scrollLeft + targetRect.left - containerRect.left - ((container.clientWidth - targetRect.width) / 2);
-        const nextTop = container.scrollTop + targetRect.top - containerRect.top - ((container.clientHeight - targetRect.height) / 2);
-        container.scrollTo({ left:Math.max(0, nextLeft), top:Math.max(0, nextTop), behavior:'smooth' });
-        return;
+        centerIn(streetBody, target, 'y');
+        centerIn(container, target, 'x');
+        return true;
+      }
+      const equipment = targetEquipId ? container.querySelector(`[data-equipment-id="${cssEscapeValue(targetEquipId)}"]`) : null;
+      if (equipment) {
+        centerIn(streetBody, equipment, 'y');
+        centerIn(container, equipment, 'x');
+        return false;
+      }
+      const streetEl = targetStreetId ? container.querySelector(`[data-street-id="${cssEscapeValue(targetStreetId)}"]`) : null;
+      if (streetEl) {
+        centerIn(container, streetEl, 'x');
+        return false;
       }
       let scrollX=14;
       for(let i=0;i<streetIdx;i++) scrollX += (streetCollapsed[mapStructure[i].id]?38:colWidth)+10;
@@ -1431,8 +1472,12 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         scrollY += equipCollapsed[eq.id] ? 40 : 40 + 14 + eq.niveis*54;
       }
       container.scrollTo({ left:Math.max(0,scrollX-60), top:Math.max(0,scrollY-40), behavior:'smooth' });
+      return false;
     };
-    window.setTimeout(()=>window.requestAnimationFrame(scrollToTarget), 160);
+    const timers = [0,80,180,360,700,1100].map(delay => window.setTimeout(() => {
+      window.requestAnimationFrame(scrollToTarget);
+    }, delay));
+    return () => timers.forEach(timer => window.clearTimeout(timer));
   },[highlightProductId, allocations, mapStructure, streetCollapsed, equipCollapsed, colWidth]);
 
   const handleEscClick = useCallback(async (escsId,p1,p2,e)=>{

@@ -77,6 +77,61 @@ def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level
     assert moves_by_product["PESADO"]["escaninhoId"] == "R1-E1-2-1"
 
 
+def test_suggest_allocations_requires_geladeira_alta_for_tall_refrigerated_products():
+    product = _product("ALTO", nome="Bebida refrigerada alta", arm="Geladeira", alto=True)
+    regular_only = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 4, "escsPerNivel": 5, "cap": 100},
+            ],
+        }
+    ]
+    regular_allocations = {
+        f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+        for level in range(1, 5)
+        for pos in range(1, 6)
+    }
+
+    blocked = suggest_allocations(
+        unallocated_codes=["ALTO"],
+        products_data=[product],
+        map_structure=regular_only,
+        allocations=regular_allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert blocked["moves"] == []
+    assert blocked["unallocated"] == ["ALTO"]
+
+    with_high_fridge = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "geladeira", "niveis": 4, "escsPerNivel": 5, "cap": 100},
+                {"id": "R1-E2", "tipo": "geladeira_alta", "niveis": 4, "escsPerNivel": 5, "cap": 100},
+            ],
+        }
+    ]
+    allocations = dict(regular_allocations)
+    allocations.update({
+        f"R1-E2-{level}-{pos}": {"p1": None, "p2": None}
+        for level in range(1, 5)
+        for pos in range(1, 6)
+    })
+
+    placed = suggest_allocations(
+        unallocated_codes=["ALTO"],
+        products_data=[product],
+        map_structure=with_high_fridge,
+        allocations=allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert placed["moves"]
+    assert placed["moves"][0]["escaninhoId"].startswith("R1-E2-")
+
+
 def test_suggest_allocations_keeps_heavy_blocked_on_top_even_when_click_started_on_top():
     base_payload = {
         "unallocated_codes": ["PESADO"],

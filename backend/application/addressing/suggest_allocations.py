@@ -17,6 +17,7 @@ from core.agent_scoring import (
     _is_cold_high_product,
     _normalize_curve_zones,
     _normalize_equip_id,
+    _normalize_equip_type,
     _normalize_text,
     _pick_slots_for_product,
     _placement_for_slot,
@@ -278,6 +279,18 @@ def _drop_invalid_plan_moves(
         for move in proposed:
             if _equipment_id_from_location_id(move.get("escaninhoId")) in mixed_degelo_equips:
                 invalid_codes.add(_entry_product_code(move.get("productCode")))
+
+    equip_type_by_id = {
+        str(equip.get("id") or ""): str(equip.get("tipo") or "")
+        for street in (map_structure or [])
+        for equip in (street.get("equipment", []) or [])
+    }
+    for move in proposed:
+        code = _entry_product_code(move.get("productCode"))
+        product = products_by_code.get(code)
+        equip_id = _equipment_id_from_location_id(move.get("escaninhoId"))
+        if product and _is_cold_high_product(product) and _normalize_equip_type(equip_type_by_id.get(equip_id)) != "geladeira_alta":
+            invalid_codes.add(code)
 
     if not invalid_codes:
         return proposed, []

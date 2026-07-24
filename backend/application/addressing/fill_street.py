@@ -123,30 +123,53 @@ def _fill_whole_street(
             },
         }
 
-    scoped_allocations = _build_scoped_allocations(map_structure, working_allocations, all_targets)
-    result = suggest_allocations(
-        unallocated_codes=remaining_codes,
-        products_data=products_data,
-        map_structure=map_structure,
-        allocations=scoped_allocations,
-        options=options,
-    )
-    if not result.get("success"):
-        return result
+    moves: list[dict[str, Any]] = []
+    rejected_codes: list[str] = []
+    guard = 0
+    while remaining_codes and guard < max(len(all_targets), 1):
+        guard += 1
+        open_targets = _open_target_ids(working_allocations, all_targets)
+        if not open_targets:
+            break
 
-    moves = [
-        {
-            "escaninhoId": move.get("escaninhoId"),
-            "productCode": move.get("productCode"),
-            "slot": move.get("slot") or 1,
-            "equipmentId": _equipment_id_from_location(move.get("escaninhoId")),
-        }
-        for move in result.get("moves", [])
-        if move.get("escaninhoId") in all_targets and move.get("productCode")
-    ]
+        scoped_allocations = _build_scoped_allocations(map_structure, working_allocations, open_targets)
+        result = suggest_allocations(
+            unallocated_codes=remaining_codes,
+            products_data=products_data,
+            map_structure=map_structure,
+            allocations=scoped_allocations,
+            options=options,
+        )
+        if not result.get("success"):
+            return result
+
+        iteration_moves = [
+            {
+                "escaninhoId": move.get("escaninhoId"),
+                "productCode": move.get("productCode"),
+                "slot": move.get("slot") or 1,
+                "equipmentId": _equipment_id_from_location(move.get("escaninhoId")),
+            }
+            for move in result.get("moves", [])
+            if move.get("escaninhoId") in open_targets and move.get("productCode")
+        ]
+        iteration_unallocated = [
+            _entry_product_code(code)
+            for code in (result.get("unallocated") or [])
+            if _entry_product_code(code)
+        ]
+        if not iteration_moves:
+            rejected_codes.extend(iteration_unallocated)
+            break
+
+        moves.extend(iteration_moves)
+        _apply_moves(working_allocations, iteration_moves)
+        used_codes = [move["productCode"] for move in iteration_moves]
+        remaining_codes = _remove_used_codes(remaining_codes, used_codes + iteration_unallocated)
+        rejected_codes.extend(iteration_unallocated)
+
     proposed_by_equipment = Counter(move["equipmentId"] for move in moves if move.get("equipmentId"))
-    used_codes = [move["productCode"] for move in moves]
-    remaining_after = _remove_used_codes(remaining_codes, used_codes)
+    remaining_after = remaining_codes
     return {
         "success": True,
         "moves": moves,
@@ -155,6 +178,7 @@ def _fill_whole_street(
             "targets": len(all_targets),
             "proposed": len(moves),
             "remaining_codes": len(remaining_after),
+            "rejected_codes": len(rejected_codes),
             "groups": [
                 {
                     "equipmentId": equipment_id,
@@ -188,6 +212,18 @@ def _build_scoped_allocations(
                     else:
                         scoped[location_id] = {"p1": BLOCKED_SLOT_CODE, "p2": None}
     return scoped
+
+
+def _open_target_ids(
+    allocations: dict[str, dict[str, str | None]],
+    target_ids: set[str],
+) -> set[str]:
+    open_targets: set[str] = set()
+    for location_id in target_ids:
+        current = allocations.get(location_id) or {}
+        if not current.get("p1"):
+            open_targets.add(location_id)
+    return open_targets
 
 
 def _apply_moves(allocations: dict[str, dict[str, str | None]], moves: list[dict[str, Any]]) -> None:
