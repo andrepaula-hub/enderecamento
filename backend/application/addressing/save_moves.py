@@ -10,6 +10,7 @@ def save_moves(
     moves: list[dict[str, Any]],
     skip_full: bool,
     gateway: SheetGateway,  # noqa: ARG001 — reservado para futura substituição
+    allow_second_slot: bool = False,
 ) -> dict[str, Any]:
     """Persiste um lote de movimentações na planilha de endereçamento.
 
@@ -25,4 +26,4 @@ def save_moves(
         Dicionário com resultado da operação (success, moved, etc.).
     """
     from core.gsheets_backend import save_batch_moves_gsheet
-    return save_batch_moves_gsheet(sheet_id, moves, skip_full=skip_full)
+    return save_batch_moves_gsheet(sheet_id, moves, skip_full=skip_full, allow_second_slot=allow_second_slot)

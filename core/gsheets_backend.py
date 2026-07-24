@@ -757,7 +757,13 @@ def generate_equipment_summary_gsheet(sheet_id: str) -> dict[str, Any]:
     }
 
 
-def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: str = "local", skip_full: bool = False) -> dict[str, Any]:
+def save_batch_moves_gsheet(
+    sheet_id: str,
+    moves: list[dict[str, Any]],
+    user: str = "local",
+    skip_full: bool = False,
+    allow_second_slot: bool = False,
+) -> dict[str, Any]:
     client = GSheetsClient(sheet_id)
     client.ensure_sheet(SHEET_PLANO_FINAL)
     values = client.read_values(SHEET_PLANO_FINAL)
@@ -827,7 +833,15 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
                 return row_num
         return None
 
-    def _find_dest_row(location_id: str | None) -> tuple[int | None, str | None]:
+    def _location_has_product(location_id: str | None, product_code: str) -> bool:
+        if not location_id or not product_code:
+            return False
+        for row_num in location_map.get(location_id) or []:
+            if _row_code(row_num) == product_code:
+                return True
+        return False
+
+    def _find_dest_row(location_id: str | None, move_allows_second_slot: bool = False) -> tuple[int | None, str | None]:
         if not location_id:
             return None, "missing"
         loc_rows = location_map.get(location_id) or []
@@ -838,6 +852,8 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
                 return row_num, None
         occupied_count = sum(0 if _is_row_empty(rn) else 1 for rn in loc_rows)
         if occupied_count >= 2:
+            return None, "full"
+        if not (allow_second_slot or move_allows_second_slot):
             return None, "full"
         new_row_num = _clone_row_for_location(location_id)
         if not new_row_num:
@@ -863,6 +879,7 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
     missing_targets: list[str] = []
     full_targets: list[str] = []
     skipped_missing_sources: list[str] = []
+    skipped_duplicate_targets: list[str] = []
     data, hora = _get_log_datetime()
     prepared_moves: list[dict[str, Any]] = []
 
@@ -883,6 +900,15 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
         clean_anterior = loc_anterior.replace("bin-", "") if loc_anterior else None
         clean_novo = loc_novo.replace("bin-", "") if loc_novo else None
         expects_target_row = bool(loc_novo and loc_novo not in {UNALLOCATED_ID, PRANCHETA_ID})
+        move_allows_second_slot = bool(
+            move.get("allowSecondSlot")
+            or move.get("allow_second_slot")
+            or (move.get("slot") in {2, "2", "p2", "P2"})
+        )
+
+        if expects_target_row and _location_has_product(clean_novo, product_code):
+            skipped_duplicate_targets.append(f"{clean_novo}:{product_code}")
+            continue
 
         src_row_num = None
         if clean_anterior and loc_anterior not in {PRANCHETA_ID, UNALLOCATED_ID}:
@@ -903,6 +929,7 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
                 "clean_novo": clean_novo,
                 "expects_target_row": expects_target_row,
                 "src_row_num": src_row_num,
+                "allow_second_slot": move_allows_second_slot,
             }
         )
 
@@ -920,6 +947,7 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
         clean_anterior = item["clean_anterior"]
         clean_novo = item["clean_novo"]
         expects_target_row = item["expects_target_row"]
+        move_allows_second_slot = item["allow_second_slot"]
 
         if loc_novo == UNALLOCATED_ID:
             log_anterior_label = LOG_UNALLOCATED_LABEL if loc_anterior == UNALLOCATED_ID else clean_anterior
@@ -941,7 +969,7 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
 
         dest_row_num = None
         if expects_target_row:
-            dest_row_num, dest_err = _find_dest_row(clean_novo)
+            dest_row_num, dest_err = _find_dest_row(clean_novo, move_allows_second_slot)
             if dest_err == "missing":
                 if clean_novo:
                     missing_targets.append(clean_novo)
@@ -1047,6 +1075,8 @@ def save_batch_moves_gsheet(sheet_id: str, moves: list[dict[str, Any]], user: st
         result["skippedFullTargets"] = sorted(set(full_targets))
     if skipped_missing_sources:
         result["skippedMissingSources"] = sorted(set(skipped_missing_sources))
+    if skipped_duplicate_targets:
+        result["skippedDuplicateTargets"] = sorted(set(skipped_duplicate_targets))
     return result
 
 

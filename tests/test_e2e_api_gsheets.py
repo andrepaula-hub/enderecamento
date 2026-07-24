@@ -65,6 +65,16 @@ class TestSaveBatchMovesComSheet:
             client.post("/api/saveBatchMoves", json={"args": [[]]})
         assert mock_fn.call_args[1].get("skip_full") is False
 
+    def test_opcao_allow_second_slot_false_por_padrao(self):
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK) as mock_fn:
+            client.post("/api/saveBatchMoves", json={"args": [[]]})
+        assert mock_fn.call_args[1].get("allow_second_slot") is False
+
+    def test_opcao_allow_second_slot_repassada_como_true(self):
+        with _sheet(), patch("routes.moves.save_batch_moves_gsheet", return_value=OK) as mock_fn:
+            client.post("/api/saveBatchMoves", json={"args": [[], {"allowSecondSlot": True}]})
+        assert mock_fn.call_args[1].get("allow_second_slot") is True
+
     def test_sem_sheet_retorna_success_false(self):
         p1, p2 = _no_sheet()
         with p1, p2:

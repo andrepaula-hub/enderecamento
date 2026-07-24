@@ -773,6 +773,31 @@ function getInitialEquipType(equipId) {
   }
   return null;
 }
+function collectEquipmentTypeChangesForSave(mapStructure) {
+  const changes = {};
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => {
+      const currentType = String(eq.tipo || '').trim();
+      const originalType = String(getInitialEquipType(eq.id) || '').trim();
+      if (currentType && currentType !== originalType) changes[eq.id] = currentType;
+    });
+  });
+  return changes;
+}
+function markInitialEquipTypesSaved(mapStructure) {
+  (mapStructure || []).forEach((street) => {
+    const initStreet = (initMapStructure || []).find((item) => item.id === street.id);
+    if (!initStreet) return;
+    (street.equipment || []).forEach((eq) => {
+      const initEq = (initStreet.equipment || []).find((item) => item.id === eq.id);
+      if (!initEq) return;
+      initEq.tipo = eq.tipo;
+      initEq.niveis = eq.niveis;
+      initEq.escsPerNivel = eq.escsPerNivel;
+      initEq.cap = eq.cap;
+    });
+  });
+}
 function getEquipShapeForType(mapStructure, tipo, excludeEquipId) {
   const targetType = String(tipo || '').trim();
   if (!targetType) return {};
@@ -1877,8 +1902,12 @@ function App() {
   },[]);
 
   const handleSaveVersion = useCallback(async (name, setProgress, setStatus) => {
-    const equipmentTypeChanges = Object.entries(state.pendingEquipmentTypeChanges || {});
-    const pendingTypeChangesForSave = { ...(state.pendingEquipmentTypeChanges || {}) };
+    const typeChangesForSave = {
+      ...collectEquipmentTypeChangesForSave(state.mapStructure),
+      ...(state.pendingEquipmentTypeChanges || {}),
+    };
+    const equipmentTypeChanges = Object.entries(typeChangesForSave);
+    const pendingTypeChangesForSave = { ...typeChangesForSave };
     const moves = diffMoves(state.allocations, state.mapStructure, pendingTypeChangesForSave);
     if (equipmentTypeChanges.length > 0) {
       for (let index = 0; index < equipmentTypeChanges.length; index += 1) {
@@ -1894,7 +1923,7 @@ function App() {
     if (moves.length > 0) {
       if (setStatus) setStatus('Salvando movimentos pendentes…');
       setProgress(equipmentTypeChanges.length ? 58 : 45);
-      const movesResponse = await API.saveBatchMovesAsync(moves, {});
+      const movesResponse = await API.saveBatchMovesAsync(moves, { allowSecondSlot: !!state.mode2aLeva });
       if (!movesResponse || !movesResponse.success) {
         throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
       }
@@ -1906,12 +1935,13 @@ function App() {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
     if (equipmentTypeChanges.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
+    markInitialEquipTypesSaved(state.mapStructure);
     BOOTSTRAP.INITIAL_PLACEMENTS = collectPlacements(state.allocations);
     savedFingerprintRef.current = pendingFingerprint;
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
     return versionResponse;
-  }, [state.allocations, state.pendingEquipmentTypeChanges, pendingFingerprint]);
+  }, [state.allocations, state.mapStructure, state.pendingEquipmentTypeChanges, state.mode2aLeva, pendingFingerprint]);
 
   const yieldToBrowser = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 

@@ -129,6 +129,32 @@ def test_save_batch_moves_skips_missing_source_row(monkeypatch):
     assert fake.appended_rows is None
 
 
+def test_save_batch_moves_is_idempotent_when_target_already_has_same_sku(monkeypatch):
+    values = [
+        ["location_id", "product_code", "product_name"],
+        ["LJ-R1-001-1A", "SKU1", "Produto 1"],
+    ]
+    fake = _FakeClient(values)
+    monkeypatch.setattr(gsheets_backend, "GSheetsClient", lambda sheet_id: fake)
+    monkeypatch.setattr(gsheets_backend, "_get_log_datetime", lambda: ("2026-04-20", "10:00:00"))
+
+    result = gsheets_backend.save_batch_moves_gsheet(
+        "sheet-id",
+        [
+            {
+                "productCode": "SKU1",
+                "locAnteriorId": "UNALLOCATED",
+                "locNovoId": "bin-LJ-R1-001-1A",
+                "productInfo": {"product_code": "SKU1", "product_name": "Produto 1"},
+            }
+        ],
+    )
+
+    assert result["success"] is True
+    assert result["skippedDuplicateTargets"] == ["LJ-R1-001-1A:SKU1"]
+    assert fake.appended_rows is None
+
+
 def test_dashboard_ignores_plan_sku_absent_from_base_map():
     plano_data = [
         {"location_id": "LJ-R1-001-1A", "product_code": "SKU_ZERO", "product_name": "Produto zerado"},
@@ -189,3 +215,59 @@ def test_save_batch_moves_allows_multiple_products_from_same_origin(monkeypatch)
     updates = fake.updated_rows[1]
     moved_codes = {row[1] for row in updates.values() if len(row) > 1 and row[1] not in ("Vazio", None, "")}
     assert moved_codes == {"SKU1", "SKU2"}
+
+
+def test_save_batch_moves_does_not_create_second_slot_by_default(monkeypatch):
+    values = [
+        ["location_id", "product_code", "product_name", "slot_duplo"],
+        ["LJ-R1-001-1A", "SKU_DEST", "Produto destino", "NAO"],
+        ["LJ-R1-002-1A", "SKU_NEW", "Produto novo", "NAO"],
+    ]
+    fake = _FakeClient(values)
+    monkeypatch.setattr(gsheets_backend, "GSheetsClient", lambda sheet_id: fake)
+    monkeypatch.setattr(gsheets_backend, "_get_log_datetime", lambda: ("2026-04-24", "10:00:00"))
+
+    result = gsheets_backend.save_batch_moves_gsheet(
+        "sheet-id",
+        [
+            {
+                "productCode": "SKU_NEW",
+                "locAnteriorId": "bin-LJ-R1-002-1A",
+                "locNovoId": "bin-LJ-R1-001-1A",
+                "productInfo": {"product_code": "SKU_NEW", "product_name": "Produto novo"},
+            },
+        ],
+    )
+
+    assert result["success"] is False
+    assert result["fullTargets"] == ["LJ-R1-001-1A"]
+    assert fake.appended_rows is None
+
+
+def test_save_batch_moves_allows_second_slot_when_explicit(monkeypatch):
+    values = [
+        ["location_id", "product_code", "product_name", "slot_duplo"],
+        ["LJ-R1-001-1A", "SKU_DEST", "Produto destino", "NAO"],
+        ["LJ-R1-002-1A", "SKU_NEW", "Produto novo", "NAO"],
+    ]
+    fake = _FakeClient(values)
+    monkeypatch.setattr(gsheets_backend, "GSheetsClient", lambda sheet_id: fake)
+    monkeypatch.setattr(gsheets_backend, "_get_log_datetime", lambda: ("2026-04-24", "10:00:00"))
+
+    result = gsheets_backend.save_batch_moves_gsheet(
+        "sheet-id",
+        [
+            {
+                "productCode": "SKU_NEW",
+                "locAnteriorId": "bin-LJ-R1-002-1A",
+                "locNovoId": "bin-LJ-R1-001-1A",
+                "allowSecondSlot": True,
+                "productInfo": {"product_code": "SKU_NEW", "product_name": "Produto novo"},
+            },
+        ],
+    )
+
+    assert result["success"] is True
+    assert fake.appended_rows is not None
+    appended = fake.appended_rows[1]
+    assert appended[0][1] == "SKU_NEW"

@@ -22,10 +22,11 @@ def api_save_batch_moves(req: ScriptRequest) -> JSONResponse:
     moves = req.args[0] if req.args else []
     options = req.args[1] if len(req.args) > 1 and isinstance(req.args[1], dict) else {}
     skip_full = bool(options.get("skipFull", False))
+    allow_second_slot = bool(options.get("allowSecondSlot", False) or options.get("allow_second_slot", False))
     active = _require_active_sheet()
     if not active:
         return JSONResponse({"success": False, "error": "Nenhuma planilha ativa. Conecte uma planilha primeiro."})
-    result = save_batch_moves_gsheet(active["sheet_id"], moves, skip_full=skip_full)
+    result = save_batch_moves_gsheet(active["sheet_id"], moves, skip_full=skip_full, allow_second_slot=allow_second_slot)
     if result.get("success"):
         try:
             log_result = append_card175_change_logs(active["sheet_id"], moves, user="local")

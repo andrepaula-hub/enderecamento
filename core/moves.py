@@ -221,7 +221,12 @@ def _build_location_map(ws, headers: list[str]) -> dict[str, list[int]]:
     return location_map
 
 
-def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local") -> dict[str, Any]:
+def save_batch_moves(
+    path: Path,
+    moves: list[dict[str, Any]],
+    user: str = "local",
+    allow_second_slot: bool = False,
+) -> dict[str, Any]:
     with _lock:
         wb = load_workbook(path)
         plano_ws = wb["Plano_Enderecamento_Final"]
@@ -252,6 +257,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
         logs: list[dict[str, Any]] = []
         missing_targets: list[str] = []
         full_targets: list[str] = []
+        skipped_duplicate_targets: list[str] = []
         data, hora = _get_log_datetime()
         prepared_moves: list[dict[str, Any]] = []
 
@@ -291,6 +297,14 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
                     return row_num
             return None
 
+        def _location_has_product(location_id: str | None, product_code: str) -> bool:
+            if not location_id or not product_code:
+                return False
+            for row_num in location_map.get(location_id) or []:
+                if _row_code(row_num) == product_code:
+                    return True
+            return False
+
         def _clone_row_for_location(location_id: str) -> int | None:
             loc_rows = location_map.get(location_id) or []
             if not loc_rows:
@@ -302,7 +316,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
             location_map.setdefault(location_id, []).append(new_row_num)
             return new_row_num
 
-        def _find_dest_row(location_id: str | None) -> tuple[int | None, str | None]:
+        def _find_dest_row(location_id: str | None, move_allows_second_slot: bool = False) -> tuple[int | None, str | None]:
             if not location_id:
                 return None, "missing"
             loc_rows = location_map.get(location_id) or []
@@ -313,6 +327,8 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
                     return row_num, None
             occupied_count = sum(0 if _is_row_empty(rn) else 1 for rn in loc_rows)
             if occupied_count >= 2:
+                return None, "full"
+            if not (allow_second_slot or move_allows_second_slot):
                 return None, "full"
             new_row = _clone_row_for_location(location_id)
             if not new_row:
@@ -329,12 +345,21 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
             )
             loc_anterior = normalize_string(move.get("locAnteriorId"))
             loc_novo = normalize_string(move.get("locNovoId"))
+            move_allows_second_slot = bool(
+                move.get("allowSecondSlot")
+                or move.get("allow_second_slot")
+                or (move.get("slot") in {2, "2", "p2", "P2"})
+            )
 
             if loc_novo == PRANCHETA_ID:
                 continue
 
             clean_anterior = loc_anterior.replace("bin-", "") if loc_anterior else None
             clean_novo = loc_novo.replace("bin-", "") if loc_novo else None
+
+            if loc_novo and loc_novo not in {UNALLOCATED_ID, PRANCHETA_ID} and _location_has_product(clean_novo, product_code):
+                skipped_duplicate_targets.append(f"{clean_novo}:{product_code}")
+                continue
 
             if clean_anterior and loc_anterior not in {PRANCHETA_ID, UNALLOCATED_ID}:
                 src_row_num = _find_source_row(clean_anterior, product_code)
@@ -352,6 +377,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
                     "clean_anterior": clean_anterior,
                     "clean_novo": clean_novo,
                     "expects_target": bool(loc_novo and loc_novo not in {UNALLOCATED_ID, PRANCHETA_ID}),
+                    "allow_second_slot": move_allows_second_slot,
                 }
             )
 
@@ -364,6 +390,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
             clean_anterior = item["clean_anterior"]
             clean_novo = item["clean_novo"]
             expects_target = item["expects_target"]
+            move_allows_second_slot = item["allow_second_slot"]
 
             if loc_novo == UNALLOCATED_ID:
                 log_anterior_label = LOG_UNALLOCATED_LABEL if loc_anterior == UNALLOCATED_ID else clean_anterior
@@ -385,7 +412,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
 
             dest_row = None
             if expects_target:
-                dest_row, dest_err = _find_dest_row(clean_novo)
+                dest_row, dest_err = _find_dest_row(clean_novo, move_allows_second_slot)
                 if dest_err == "missing":
                     if clean_novo:
                         missing_targets.append(clean_novo)
@@ -487,6 +514,7 @@ def save_batch_moves(path: Path, moves: list[dict[str, Any]], user: str = "local
         "updated": updates,
         "appended": appended,
         "logsAdded": len(logs),
+        "skippedDuplicateTargets": sorted(set(skipped_duplicate_targets)),
     }
 
 
