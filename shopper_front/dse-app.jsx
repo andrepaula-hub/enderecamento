@@ -67,13 +67,6 @@ function parseEscaninhoId(escaninhoId) {
 
 function inferSelectedStoreFromBootstrap() {
   const stores = (window.DSEData && window.DSEData.STORES) || BOOTSTRAP.STORES || [];
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(DSE_SELECTED_STORE_KEY) || 'null');
-    if (saved && saved.id) {
-      const matchedSaved = stores.find((store) => String(store.id || '') === String(saved.id || ''));
-      return matchedSaved || saved;
-    }
-  } catch (error) {}
   const title = String(BOOTSTRAP.ACTIVE_SHEET?.title || BOOTSTRAP.WORKFLOW?.target?.title || '').trim();
   const cleanedTitle = title
     .replace(/endere[cç]amento/ig, ' ')
@@ -89,6 +82,13 @@ function inferSelectedStoreFromBootstrap() {
   });
   if (matched) return matched;
   if (cleanedTitle) return { id:cleanedTitle, nome:cleanedTitle, codigo:'' };
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(DSE_SELECTED_STORE_KEY) || 'null');
+    if (saved && saved.id) {
+      const matchedSaved = stores.find((store) => String(store.id || '') === String(saved.id || ''));
+      return matchedSaved || saved;
+    }
+  } catch (error) {}
   return null;
 }
 
@@ -116,15 +116,21 @@ function capQueueByRemainingBins(queue, allocations) {
       allocatedCountByCode[code] = (allocatedCountByCode[code] || 0) + 1;
     });
   });
-  const used = {};
-  return (queue || []).filter((entryId) => {
+  const entriesByCode = {};
+  (queue || []).forEach((entryId) => {
     const code = resolveBoardEntryProductCode(entryId);
-    if (!code) return false;
-    const remaining = Math.max(0, requiredBinsForQueueCode(code) - (allocatedCountByCode[code] || 0));
-    if ((used[code] || 0) >= remaining) return false;
-    used[code] = (used[code] || 0) + 1;
-    return true;
+    if (!code) return;
+    if (!entriesByCode[code]) entriesByCode[code] = [];
+    entriesByCode[code].push(entryId);
   });
+  const out = [];
+  Object.entries(entriesByCode).forEach(([code, entryIds]) => {
+    const remaining = Math.max(0, requiredBinsForQueueCode(code) - (allocatedCountByCode[code] || 0));
+    for (let index = 0; index < remaining; index += 1) {
+      out.push(entryIds[index] || entryIds[0]);
+    }
+  });
+  return out;
 }
 
 function collectStreetFillTargets(state, options) {
@@ -155,11 +161,11 @@ function fillProductColdClass(productCode) {
   const product = PRODUCT_MAP[productCode];
   if (!product) return 'other';
   const arm = normalizeSearchText(product.arm || product.raw?.categoria_armazenagem || '');
-  const degelo = String(product.degelo || '').trim().toUpperCase();
+  const degelo = degeloClassValue(product.degelo);
   if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
   if (arm.includes('geladeira') || arm.includes('refriger')) {
     if (product.alto) return 'geladeira_alta';
-    if (degelo === 'NÃO' || degelo === 'NAO') return 'geladeira_degelo';
+    if (degelo === 'nao') return 'geladeira_degelo';
     return 'geladeira';
   }
   return 'other';
@@ -526,259 +532,14 @@ function equipmentSummaryLabel(eq, allocations) {
 }
 
 function degeloNaoValue(value) {
-  const text = String(value || '').trim().toUpperCase();
-  return text === 'NÃO' || text === 'NAO';
+  return degeloClassValue(value) === 'nao';
 }
 
-function applyMovesToAllocations(baseAllocations, moves) {
-  const next = { ...(baseAllocations || {}) };
-  (moves || []).forEach((move) => {
-    const code = resolveBoardEntryProductCode(move.productId);
-    if (!code || !move.escaninhoId) return;
-    const prev = next[move.escaninhoId] || { p1:null, p2:null };
-    next[move.escaninhoId] = Number(move.slot || 1) === 2
-      ? { p1:prev.p1, p2:code }
-      : { p1:code, p2:prev.p2 };
-  });
-  return next;
-}
-
-function isGeneratorColdEquipmentByContents(eq, allocations) {
-  const tipo = normalizeSearchText(eq?.tipo || '');
-  if (tipo.includes('alta')) return false;
-  if (tipo.includes('freezer')) return true;
-  if (!tipo.includes('geladeira') && !tipo.includes('refriger')) return false;
-  let occupied = 0;
-  let degeloNao = 0;
-  for (let level = 1; level <= Number(eq?.niveis || 0); level += 1) {
-    for (let pos = 1; pos <= Number(eq?.escsPerNivel || 0); pos += 1) {
-      const alloc = allocations[`${eq.id}-${level}-${pos}`] || {};
-      ['p1', 'p2'].forEach((slot) => {
-        const code = resolveBoardEntryProductCode(alloc[slot]);
-        const product = PRODUCT_MAP[code];
-        if (!product) return;
-        occupied += 1;
-        if (degeloNaoValue(product.degelo)) degeloNao += 1;
-      });
-    }
-  }
-  return occupied > 0 && degeloNao / occupied >= 0.5;
-}
-
-function scoreGeneratorColdGroups(equipment, allocations) {
-  let score = 0;
-  let run = 0;
-  const flush = () => {
-    const fullGroups = Math.floor(run / 3);
-    const remainder = run % 3;
-    score += fullGroups * 10000;
-    if (remainder === 1) score += 40;
-    if (remainder === 2) score += 800;
-    if (run > 3 && remainder !== 0) score -= remainder * 180;
-    run = 0;
-  };
-  (equipment || []).forEach((eq) => {
-    if (isGeneratorColdEquipmentByContents(eq, allocations)) run += 1;
-    else flush();
-  });
-  flush();
-  return score;
-}
-
-function remapMoveTargetsForEquipmentSwap(moves, eqA, eqB) {
-  const aPrefix = `${eqA.id}-`;
-  const bPrefix = `${eqB.id}-`;
-  return (moves || []).map((move) => {
-    const escaninhoId = String(move.escaninhoId || '');
-    if (escaninhoId.startsWith(aPrefix)) {
-      return { ...move, escaninhoId:`${eqB.id}-${escaninhoId.slice(aPrefix.length)}` };
-    }
-    if (escaninhoId.startsWith(bPrefix)) {
-      return { ...move, escaninhoId:`${eqA.id}-${escaninhoId.slice(bPrefix.length)}` };
-    }
-    return move;
-  });
-}
-
-function canSwapNormalFridgeContents(eqA, eqB) {
-  const typeA = normalizeSearchText(eqA?.tipo || '');
-  const typeB = normalizeSearchText(eqB?.tipo || '');
-  if (typeA !== 'geladeira' || typeB !== 'geladeira') return false;
-  return Number(eqA?.niveis || 0) === Number(eqB?.niveis || 0)
-    && Number(eqA?.escsPerNivel || 0) === Number(eqB?.escsPerNivel || 0);
-}
-
-function equipmentSlotIds(eq) {
-  const ids = [];
-  for (let level = 1; level <= Number(eq?.niveis || 0); level += 1) {
-    for (let pos = 1; pos <= Number(eq?.escsPerNivel || 0); pos += 1) {
-      ids.push(`${eq.id}-${level}-${pos}`);
-    }
-  }
-  return ids;
-}
-
-function productCanMoveToSlot(productId, eq, escaninhoId) {
-  const product = PRODUCT_MAP[resolveBoardEntryProductCode(productId)];
-  if (!product || !eq) return false;
-  const tipo = normalizeSearchText(eq.tipo || '');
-  const cls = fillProductColdClass(resolveBoardEntryProductCode(productId));
-  if (cls === 'freezer') return tipo.includes('freezer');
-  if (cls === 'geladeira_alta') return tipo.includes('geladeira') && tipo.includes('alta');
-  if (cls === 'geladeira' || cls === 'geladeira_degelo') {
-    if (!tipo.includes('geladeira') || tipo.includes('alta')) return false;
-    const parsed = parseEscaninhoId(escaninhoId);
-    const group = String(product.grupo || '').trim().toUpperCase();
-    if (group === 'FLV' && (Number(parsed.pos) === 1 || Number(parsed.pos) === Number(eq.escsPerNivel || 0))) {
-      return false;
-    }
-    return true;
-  }
-  return normalizeSearchText(product.arm || product.raw?.categoria_armazenagem || '').includes(tipo);
-}
-
-function equipmentHasCompatibleShapeAndType(eqA, eqB) {
-  return normalizeSearchText(eqA?.tipo || '') === normalizeSearchText(eqB?.tipo || '')
-    && Number(eqA?.niveis || 0) === Number(eqB?.niveis || 0)
-    && Number(eqA?.escsPerNivel || 0) === Number(eqB?.escsPerNivel || 0);
-}
-
-function compactStreetFillHoles(state, mapStructure, equipmentIds, moves) {
-  const compactedMoves = (moves || []).map((move) => ({ ...move }));
-  const equipmentByIdMap = {};
-  (mapStructure || []).forEach((street) => {
-    (street.equipment || []).forEach((eq) => { equipmentByIdMap[eq.id] = eq; });
-  });
-  const equipment = (equipmentIds || []).map((id) => equipmentByIdMap[id]).filter(Boolean);
-  if (equipment.length < 2 || !compactedMoves.length) return compactedMoves;
-
-  const slotsById = new Map();
-  equipment.forEach((eq, equipmentIndex) => {
-    equipmentSlotIds(eq).forEach((slotId, slotIndex) => {
-      slotsById.set(slotId, { eq, equipmentIndex, slotIndex });
-    });
-  });
-
-  const buckets = new Map();
-  equipment.forEach((eq, equipmentIndex) => {
-    const key = [
-      normalizeSearchText(eq.tipo || ''),
-      Number(eq.niveis || 0),
-      Number(eq.escsPerNivel || 0),
-    ].join('|');
-    if (!buckets.has(key)) buckets.set(key, { equipment:[], moves:[] });
-    buckets.get(key).equipment.push({ eq, equipmentIndex });
-  });
-
-  compactedMoves.forEach((move, index) => {
-    const slotInfo = slotsById.get(String(move.escaninhoId || ''));
-    if (!slotInfo) return;
-    const key = [
-      normalizeSearchText(slotInfo.eq.tipo || ''),
-      Number(slotInfo.eq.niveis || 0),
-      Number(slotInfo.eq.escsPerNivel || 0),
-    ].join('|');
-    const bucket = buckets.get(key);
-    if (bucket) bucket.moves.push({ move, index });
-  });
-
-  buckets.forEach((bucket) => {
-    if (!bucket.moves.length || bucket.equipment.length < 2) return;
-    const orderedSlots = bucket.equipment
-      .sort((a, b) => a.equipmentIndex - b.equipmentIndex)
-      .flatMap(({ eq }) => equipmentSlotIds(eq).map((slotId) => ({ eq, slotId })))
-      .filter(({ slotId }) => {
-        const slot = state.allocations[slotId] || {};
-        return !slot.p1;
-      });
-    const usedSlots = new Set();
-
-    bucket.moves
-      .sort((a, b) => a.index - b.index)
-      .forEach(({ move }) => {
-        const currentSlot = String(move.escaninhoId || '');
-        let target = null;
-        for (const candidate of orderedSlots) {
-          if (usedSlots.has(candidate.slotId)) continue;
-          if (!productCanMoveToSlot(move.productId, candidate.eq, candidate.slotId)) continue;
-          target = candidate.slotId;
-          break;
-        }
-        if (!target && currentSlot && !usedSlots.has(currentSlot)) target = currentSlot;
-        if (!target) return;
-        move.escaninhoId = target;
-        usedSlots.add(target);
-      });
-  });
-
-  return compactedMoves.filter((move) => move.productId && move.escaninhoId);
-}
-
-function planStreetPowerGroupSwaps(state, mapStructure, equipmentIds, moves) {
-  const swaps = [];
-  const equipmentByIdMap = {};
-  (mapStructure || []).forEach((street) => {
-    (street.equipment || []).forEach((eq) => { equipmentByIdMap[eq.id] = eq; });
-  });
-  const equipment = (equipmentIds || []).map((id) => equipmentByIdMap[id]).filter(Boolean);
-  if (equipment.length < 3 || !(moves || []).length) return swaps;
-
-  let projected = applyMovesToAllocations(state.allocations, moves);
-  let currentScore = scoreGeneratorColdGroups(equipment, projected);
-  let improved = true;
-  let guard = 0;
-  while (improved && guard < equipment.length) {
-    improved = false;
-    guard += 1;
-    let best = { score:currentScore, distance:Infinity, from:-1, to:-1 };
-    for (let from = 0; from < equipment.length; from += 1) {
-      for (let to = 0; to < equipment.length; to += 1) {
-        if (from === to) continue;
-        const eqA = equipment[from];
-        const eqB = equipment[to];
-        if (!canSwapNormalFridgeContents(eqA, eqB)) continue;
-        const aPower = isGeneratorColdEquipmentByContents(eqA, projected);
-        const bPower = isGeneratorColdEquipmentByContents(eqB, projected);
-        if (aPower === bPower) continue;
-        const candidateProjected = swapEquipmentAllocations(projected, eqA, eqB);
-        const score = scoreGeneratorColdGroups(equipment, candidateProjected);
-        const distance = Math.abs(from - to);
-        if (score > best.score || (score === best.score && distance < best.distance)) {
-          best = { score, distance, from, to };
-        }
-      }
-    }
-    if (best.from >= 0) {
-      const eqA = equipment[best.from];
-      const eqB = equipment[best.to];
-      swaps.push({ equipA:eqA.id, equipB:eqB.id });
-      projected = swapEquipmentAllocations(projected, eqA, eqB);
-      currentScore = scoreGeneratorColdGroups(equipment, projected);
-      improved = true;
-    }
-  }
-  return swaps;
-}
-
-function swapEquipmentAllocations(allocations, eqA, eqB) {
-  const next = { ...(allocations || {}) };
-  const aPrefix = `${eqA.id}-`;
-  const bPrefix = `${eqB.id}-`;
-  const aSnap = {};
-  const bSnap = {};
-  equipmentSlotIds(eqA).forEach((slotId) => {
-    const suffix = slotId.slice(aPrefix.length);
-    if (next[slotId]) aSnap[suffix] = next[slotId];
-    delete next[slotId];
-  });
-  equipmentSlotIds(eqB).forEach((slotId) => {
-    const suffix = slotId.slice(bPrefix.length);
-    if (next[slotId]) bSnap[suffix] = next[slotId];
-    delete next[slotId];
-  });
-  Object.entries(aSnap).forEach(([suffix, value]) => { next[`${eqB.id}-${suffix}`] = value; });
-  Object.entries(bSnap).forEach(([suffix, value]) => { next[`${eqA.id}-${suffix}`] = value; });
-  return next;
+function degeloClassValue(value) {
+  const text = normalizeSearchText(value || '').trim();
+  if (text.startsWith('nao') || text.startsWith('não')) return 'nao';
+  if (text.startsWith('pode')) return 'pode';
+  return '';
 }
 
 function buildEquipmentSummaryText(state) {
@@ -2145,6 +1906,7 @@ function App() {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
     if (equipmentTypeChanges.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
+    BOOTSTRAP.INITIAL_PLACEMENTS = collectPlacements(state.allocations);
     savedFingerprintRef.current = pendingFingerprint;
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
@@ -2211,7 +1973,7 @@ function App() {
         allocations:state.allocations,
         target_groups:targetGroups,
         options:{
-          allow_top_level:true,
+          allow_top_level:levelMode !== 'without_top',
           allow_second_slot:false,
           whole_street:true,
           degelo_preferred_equipment_ids:degeloPreferredEquipmentIds,
@@ -2233,8 +1995,7 @@ function App() {
       };
     }).filter((item) => item.productId && allTargetIds.has(item.escaninhoId));
 
-    const allMoves = compactStreetFillHoles(state, plannedMapStructure, selectedEquipmentIds, moves);
-    const postFillSwaps = planStreetPowerGroupSwaps(state, plannedMapStructure, selectedEquipmentIds, allMoves);
+    const allMoves = moves;
     if (!allMoves.length) throw new Error('Nenhuma alocação possível para os filtros atuais.');
 
     const historyGroup = allMoves.length > 1 ? `fill-street:${streetId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : null;
@@ -2242,7 +2003,7 @@ function App() {
       dispatch({ type:'APPLY_EQUIP_TYPE_PLAN', typePlan:plannedTypePlan });
       await yieldToBrowser();
     }
-    const batchSize = 80;
+    const batchSize = 1;
     for (let index = 0; index < allMoves.length; index += batchSize) {
       const batch = allMoves.slice(index, index + batchSize);
       dispatch({ type:'ALLOCATE_BATCH', moves:batch, historyGroup });
@@ -2256,10 +2017,6 @@ function App() {
           phase:'aplicando',
         });
       }
-      if (index + batchSize < allMoves.length) await yieldToBrowser();
-    }
-    for (const swap of postFillSwaps) {
-      dispatch({ type:'SWAP_EQUIP_CONTENTS', equipA:swap.equipA, equipB:swap.equipB });
       await yieldToBrowser();
     }
     if (typeof onProgress === 'function') {

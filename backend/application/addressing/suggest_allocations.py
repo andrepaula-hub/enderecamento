@@ -12,6 +12,7 @@ from core.agent_scoring import (
     _build_placement_index,
     _commit_product_to_slot,
     _group,
+    _degelo_class,
     _hard_rule_violations,
     _is_cold_high_product,
     _normalize_curve_zones,
@@ -97,8 +98,9 @@ def suggest_allocations(
         product = dict(products_by_code[code])
         required_from_product = max(1, int(product.get("escaninhos_necessarios") or 1))
         product["_required_volume_l"] = _required_volume_l(product)
+        product["_total_required_bins"] = required_from_product
         remaining_required = max(0, required_from_product - allocated_counts.get(code, 0))
-        requested = min(requested_counts[code], remaining_required)
+        requested = remaining_required
         if requested <= 0:
             del requested_counts[code]
             continue
@@ -143,6 +145,12 @@ def suggest_allocations(
         for product in sorted_products
         if _is_cold_high_product(product)
     )
+    pending_degelo_units = Counter(
+        _degelo_class(product)
+        for product in sorted_products
+        for _ in range(max(1, int(product.get("escaninhos_necessarios") or 1)))
+        if _degelo_class(product) in {"nao", "pode"}
+    )
 
     for product in sorted_products:
         code = str(product.get("product_code") or "")
@@ -151,10 +159,17 @@ def suggest_allocations(
         high_units_remaining_after_current = pending_cold_high_units
         if product_is_cold_high:
             high_units_remaining_after_current = max(0, pending_cold_high_units - required)
+        degelo_class = _degelo_class(product)
+        opposite_degelo_units_remaining = 0
+        if degelo_class == "nao":
+            opposite_degelo_units_remaining = pending_degelo_units.get("pode", 0)
+        elif degelo_class == "pode":
+            opposite_degelo_units_remaining = pending_degelo_units.get("nao", 0)
         candidates = _pick_slots_for_product(
             product, required, slots, rules, chemical_equips,
             reserved_locations, placement_index, product_placement_index, curve_zones,
             degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
+            opposite_degelo_units_remaining,
         )
         if len(candidates) != required:
             unallocated_out.append(code)
@@ -171,6 +186,8 @@ def suggest_allocations(
 
         if product_is_cold_high:
             pending_cold_high_units = max(0, pending_cold_high_units - required)
+        if degelo_class in pending_degelo_units:
+            pending_degelo_units[degelo_class] = max(0, pending_degelo_units[degelo_class] - required)
 
         for unit_idx, candidate in enumerate(candidates, start=1):
             target_slot = 2 if candidate.occupant_count == 1 else 1
@@ -182,6 +199,15 @@ def suggest_allocations(
                 placement = _placement_for_slot(product, slot_ref)
                 _add_placement_to_index(placement_index, placement)
                 product_placement_index.setdefault(code, []).append(placement)
+
+    proposed, validation_unallocated = _drop_invalid_plan_moves(
+        proposed=proposed,
+        products_to_allocate=products_to_allocate,
+        allocations=allocations,
+        map_structure=map_structure,
+        products_by_code=products_by_code,
+    )
+    unallocated_out.extend(code for code in validation_unallocated if code not in unallocated_out)
 
     return {
         "success": True,
@@ -196,6 +222,120 @@ def suggest_allocations(
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
+def _drop_invalid_plan_moves(
+    *,
+    proposed: list[dict[str, Any]],
+    products_to_allocate: list[dict[str, Any]],
+    allocations: dict[str, dict[str, str | None]],
+    map_structure: list[dict[str, Any]],
+    products_by_code: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    invalid_codes: set[str] = set()
+    product_by_code = {str(product.get("product_code") or ""): product for product in products_to_allocate}
+
+    final_slots_by_code: dict[str, list[str]] = {}
+    for slot_id, alloc in (allocations or {}).items():
+        if not isinstance(alloc, dict):
+            continue
+        for raw_code in (alloc.get("p1"), alloc.get("p2")):
+            code = _entry_product_code(raw_code)
+            if code and code != BLOCKED_SLOT_CODE:
+                final_slots_by_code.setdefault(code, []).append(str(slot_id))
+    for move in proposed:
+        code = _entry_product_code(move.get("productCode"))
+        slot_id = str(move.get("escaninhoId") or "")
+        if code and slot_id:
+            final_slots_by_code.setdefault(code, []).append(slot_id)
+
+    for code, product in product_by_code.items():
+        if code not in final_slots_by_code:
+            continue
+        required = max(1, int(product.get("_total_required_bins") or product.get("escaninhos_necessarios") or 1))
+        if required <= 1:
+            continue
+        slot_ids = final_slots_by_code.get(code, [])
+        if len(slot_ids) != required or not _slot_ids_are_contiguous_block(slot_ids, map_structure):
+            invalid_codes.add(code)
+
+    mixed_degelo_equips: set[str] = set()
+    degelo_by_equip: dict[str, set[str]] = {}
+    for code, slot_ids in final_slots_by_code.items():
+        product = products_by_code.get(code)
+        if not product:
+            continue
+        degelo = _degelo_class(product)
+        if degelo not in {"nao", "pode"}:
+            continue
+        for slot_id in slot_ids:
+            equip_id = _equipment_id_from_location_id(slot_id)
+            if equip_id:
+                degelo_by_equip.setdefault(equip_id, set()).add(degelo)
+    for equip_id, classes in degelo_by_equip.items():
+        if {"nao", "pode"}.issubset(classes):
+            mixed_degelo_equips.add(equip_id)
+    if len(mixed_degelo_equips) > 1:
+        for move in proposed:
+            if _equipment_id_from_location_id(move.get("escaninhoId")) in mixed_degelo_equips:
+                invalid_codes.add(_entry_product_code(move.get("productCode")))
+
+    if not invalid_codes:
+        return proposed, []
+    filtered = [move for move in proposed if _entry_product_code(move.get("productCode")) not in invalid_codes]
+    return filtered, sorted(code for code in invalid_codes if code)
+
+
+def _slot_ids_are_contiguous_block(slot_ids: list[str], map_structure: list[dict[str, Any]]) -> bool:
+    parsed = [_parse_front_location_id(slot_id) for slot_id in slot_ids]
+    if not parsed or any(item is None for item in parsed):
+        return False
+    parsed_items = [item for item in parsed if item is not None]
+    equip_ids = {item["equip_id"] for item in parsed_items}
+    if len(equip_ids) != 1:
+        return False
+    equip_id = next(iter(equip_ids))
+    by_level: dict[int, list[int]] = {}
+    for item in parsed_items:
+        by_level.setdefault(int(item["level"]), []).append(int(item["position"]))
+    levels = sorted(by_level)
+
+    def contiguous(positions: list[int]) -> bool:
+        ordered = sorted(positions)
+        return bool(ordered) and ordered == list(range(ordered[0], ordered[0] + len(ordered)))
+
+    if len(levels) == 1:
+        return contiguous(by_level[levels[0]])
+    if len(levels) != 2 or levels[1] != levels[0] + 1:
+        return False
+    if not all(contiguous(by_level[level]) for level in levels):
+        return False
+    first = sorted(by_level[levels[0]])
+    second = sorted(by_level[levels[1]])
+    larger = first if len(first) >= len(second) else second
+    smaller = second if larger is first else first
+    larger_set = set(larger)
+    smaller_set = set(smaller)
+    if len(larger) <= len(smaller):
+        return False
+    return bool(smaller) and smaller_set.issubset(larger_set) and (smaller[0] == larger[0] or smaller[-1] == larger[-1])
+
+
+def _parse_front_location_id(location_id: Any) -> dict[str, Any] | None:
+    parts = str(location_id or "").split("-")
+    if len(parts) < 4:
+        return None
+    try:
+        position = int(parts[-1])
+        level = int(parts[-2])
+    except ValueError:
+        return None
+    return {"equip_id": "-".join(parts[:-2]), "level": level, "position": position}
+
+
+def _equipment_id_from_location_id(location_id: Any) -> str:
+    parsed = _parse_front_location_id(location_id)
+    return str(parsed.get("equip_id") or "") if parsed else ""
+
 
 def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
     return {

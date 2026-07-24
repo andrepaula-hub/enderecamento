@@ -149,6 +149,9 @@ _FAMILY_STOPWORDS = {
     "de", "da", "do", "das", "dos", "com", "sem", "para", "por", "em", "no", "na", "nos", "nas",
     "un", "und", "unidade", "unidades", "pct", "pack", "leve", "pague", "tradicional", "original",
     "sabor", "tipo", "zero", "light", "integral", "organico", "organica", "extra", "premium",
+    "barra", "barras", "proteina", "protein", "chocolate", "morango", "limão", "limao", "laranja",
+    "uva", "banana", "cafe", "café", "dobro", "nitrato",
+    "produto",
 }
 
 _FAMILY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -195,7 +198,6 @@ _FAMILY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("macarrao", ("macarrao", "massa")),
 )
 
-
 def _name_family(row: dict[str, Any]) -> str:
     """Família visual derivada do nome para separar SKUs parecidos próximos.
 
@@ -205,6 +207,21 @@ def _name_family(row: dict[str, Any]) -> str:
     name = _normalize_text(row.get("product_name") or row.get("nome"))
     if not name:
         return ""
+    raw_tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", name)
+        if token
+        and not token.isdigit()
+        and not re.fullmatch(r"\d+(ml|l|g|kg|cm|un)?", token)
+    ]
+    if len(raw_tokens) >= 2 and 1 < len(raw_tokens[0]) <= 3 and len(raw_tokens[1]) >= 3:
+        return raw_tokens[0] + raw_tokens[1]
+    for token in raw_tokens:
+        if len(token) >= 4 and re.search(r"[a-z]", token) and re.search(r"\d", token):
+            return token
+    for token in raw_tokens:
+        if len(token) >= 5 and token not in _FAMILY_STOPWORDS:
+            return token
     padded = f" {name} "
     for family, patterns in _FAMILY_PATTERNS:
         if any(pattern in padded or pattern in name for pattern in patterns):
@@ -357,13 +374,11 @@ def _hard_rule_violations(
     if not rules.allow_top_level and slot.is_top_level:
         reasons.append("Uso de nivel mais alto nao liberado.")
 
-    clicked_top_override = rules.allow_clicked_top_level and slot.is_top_level
-
-    if _is_egg(product) and slot.level is not None and (slot.level < rules.egg_min_level or slot.level > rules.egg_max_level) and not clicked_top_override:
+    if _is_egg(product) and slot.level is not None and (slot.level < rules.egg_min_level or slot.level > rules.egg_max_level):
         reasons.append("Ovos fora dos niveis intermediarios permitidos.")
 
     if _is_prateleira(slot):
-        if group == "flv" and ((slot.is_top_level and not clicked_top_override) or slot.is_bottom_level):
+        if group == "flv" and (slot.is_top_level or slot.is_bottom_level):
             reasons.append("FLV em nivel proibido de prateleira.")
         peso = parse_number(product.get("peso_kg_unitario")) or 0
         if (peso > 2 or parse_bool_flag(product.get("is_pesado"))) and slot.is_top_level:
@@ -427,6 +442,7 @@ def _pick_slots_for_product(
     degelo_preferred_equips: set[str] | None = None,
     curve_priority_enabled: bool = False,
     cold_high_units_remaining: int = 0,
+    opposite_degelo_units_remaining: int = 0,
 ) -> list[Slot]:
     required = max(1, int(required or 1))
     candidates: list[Slot] = []
@@ -451,38 +467,40 @@ def _pick_slots_for_product(
         placement_index,
         degelo_preferred_equips,
         cold_high_units_remaining,
+        opposite_degelo_units_remaining,
     ):
-        if not candidate_tier:
-            continue
-        if required == 1 and not existing_product_placements:
-            return [
-                max(
-                    candidate_tier,
-                    key=lambda slot: _score_slot(
-                        product,
-                        slot,
-                        placement_index,
-                        curve_zone_map,
-                        degelo_preferred_equips,
-                        curve_priority_enabled,
-                    ),
-                )
-            ]
+        for conflict_tier in _conflict_avoidance_tiers(product, candidate_tier, placement_index):
+            if not conflict_tier:
+                continue
+            if required == 1 and not existing_product_placements:
+                return [
+                    max(
+                        conflict_tier,
+                        key=lambda slot: _score_slot(
+                            product,
+                            slot,
+                            placement_index,
+                            curve_zone_map,
+                            degelo_preferred_equips,
+                            curve_priority_enabled,
+                        ),
+                    )
+                ]
 
-        grouped_runs = _candidate_runs(product, candidate_tier, required, rules, existing_product_placements)
-        if not grouped_runs:
-            continue
-        return max(
-            grouped_runs,
-            key=lambda run: _score_run(
-                product,
-                run,
-                placement_index,
-                curve_zone_map,
-                degelo_preferred_equips,
-                curve_priority_enabled,
-            ),
-        )
+            grouped_runs = _candidate_runs(product, conflict_tier, required, rules, existing_product_placements)
+            if not grouped_runs:
+                continue
+            return max(
+                grouped_runs,
+                key=lambda run: _score_run(
+                    product,
+                    run,
+                    placement_index,
+                    curve_zone_map,
+                    degelo_preferred_equips,
+                    curve_priority_enabled,
+                ),
+            )
     return []
 
 
@@ -492,6 +510,7 @@ def _cold_candidate_tiers(
     placement_index: dict[tuple[str, str], list[dict[str, Any]]],
     degelo_preferred_equips: set[str] | None = None,
     cold_high_units_remaining: int = 0,
+    opposite_degelo_units_remaining: int = 0,
 ) -> list[list[Slot]]:
     if _category_group(product) != "refrigerado":
         return [candidates]
@@ -523,22 +542,65 @@ def _cold_candidate_tiers(
         opposite = "pode" if current_degelo == "nao" else "nao"
         return any(placement.get("degelo_class") == opposite for placement in placements)
 
+    def has_current(slot: Slot) -> bool:
+        placements = placement_index.get(("__degelo__", slot.equip_id), [])
+        return any(placement.get("degelo_class") == current_degelo for placement in placements)
+
     clean = [slot for slot in base_candidates if not has_opposite(slot)]
+    mixed_candidates = [
+        slot for slot in base_candidates
+        if has_opposite(slot) or has_current(slot)
+    ]
+
+    def transition_candidates() -> list[Slot]:
+        mixed_equip_ids = {
+            slot.equip_id for slot in base_candidates
+            if has_opposite(slot) and has_current(slot)
+        }
+        if mixed_equip_ids:
+            preferred_mixed = sorted(mixed_equip_ids)[0]
+            return [slot for slot in base_candidates if slot.equip_id == preferred_mixed]
+
+        opposite_equip_ids = {
+            slot.equip_id for slot in base_candidates
+            if has_opposite(slot)
+        }
+        if opposite_equip_ids:
+            best = sorted(
+                opposite_equip_ids,
+                key=lambda equip_id: (
+                    -len([slot for slot in base_candidates if slot.equip_id == equip_id]),
+                    equip_id,
+                ),
+            )[0]
+            return [slot for slot in base_candidates if slot.equip_id == best]
+        return mixed_candidates
+
     if not clean:
-        return [base_candidates]
+        if opposite_degelo_units_remaining > 0:
+            return []
+        return _unique_slot_tiers([transition_candidates(), base_candidates])
 
     if current_degelo == "nao":
         planned_clean = [
             slot for slot in clean
             if _normalize_equip_id(slot.equip_id) in preferred_equips
         ]
-        return _unique_slot_tiers([planned_clean, clean, base_candidates])
+        if planned_clean:
+            return _unique_slot_tiers([planned_clean, clean])
+        if opposite_degelo_units_remaining > 0:
+            return []
+        return _unique_slot_tiers([clean, transition_candidates(), base_candidates])
 
     regular_clean = [
         slot for slot in clean
         if _normalize_equip_id(slot.equip_id) not in preferred_equips
     ]
-    return _unique_slot_tiers([regular_clean, clean, base_candidates])
+    if regular_clean:
+        return _unique_slot_tiers([regular_clean, clean])
+    if opposite_degelo_units_remaining > 0:
+        return []
+    return _unique_slot_tiers([clean, transition_candidates(), base_candidates])
 
 
 def _unique_slot_tiers(tiers: list[list[Slot]]) -> list[list[Slot]]:
@@ -551,6 +613,82 @@ def _unique_slot_tiers(tiers: list[list[Slot]]) -> list[list[Slot]]:
         seen.add(key)
         unique.append(tier)
     return unique
+
+
+def _has_same_level_attribute_conflict(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None:
+        return False
+
+    checks: list[tuple[Any, ...]] = []
+    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    if subcat:
+        checks.append((subcat, slot.equip_id))
+    family = _visual_family(product)
+    if family:
+        checks.append(("__family__", family, slot.equip_id))
+    manufacturer = _manufacturer(product)
+    if manufacturer:
+        checks.append(("__manufacturer__", manufacturer, slot.equip_id))
+
+    for key in checks:
+        for placement in placement_index.get(key, []):
+            if _same_product(product, placement):
+                continue
+            try:
+                if int(placement.get("level")) == int(slot.level):
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
+def _has_direct_attribute_adjacency(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None or slot.position is None:
+        return False
+
+    checks: list[tuple[Any, ...]] = []
+    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    if subcat:
+        checks.append((subcat, slot.equip_id))
+    family = _visual_family(product)
+    if family:
+        checks.append(("__family__", family, slot.equip_id))
+    manufacturer = _manufacturer(product)
+    if manufacturer:
+        checks.append(("__manufacturer__", manufacturer, slot.equip_id))
+
+    for key in checks:
+        for placement in placement_index.get(key, []):
+            if _same_product(product, placement):
+                continue
+            level_distance, pos_distance = _placement_distance(slot, placement)
+            if level_distance == 0 and pos_distance == 1:
+                return True
+    return False
+
+
+def _conflict_avoidance_tiers(
+    product: dict[str, Any],
+    candidates: list[Slot],
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> list[list[Slot]]:
+    same_level_clean = [
+        slot for slot in candidates
+        if not _has_same_level_attribute_conflict(product, slot, placement_index)
+    ]
+    direct_adjacency_clean = [
+        slot for slot in candidates
+        if not _has_direct_attribute_adjacency(product, slot, placement_index)
+    ]
+    return _unique_slot_tiers([same_level_clean, direct_adjacency_clean, candidates])
 
 
 def _candidate_runs(
@@ -656,15 +794,21 @@ def _candidate_stacked_runs(empty_candidates: list[Slot], required: int) -> list
                         slot for slot in adjacent_slots
                         if int(slot.position or 0) in primary_positions
                     ]
-                    aligned_by_edge = sorted(
-                        aligned,
-                        key=lambda slot: (
-                            0 if int(slot.position or 0) in edge_positions else 1,
-                            abs(int(slot.position or 0) - min(edge_positions)),
-                        ),
-                    )
-                    if len(aligned_by_edge) >= remaining:
-                        runs.append(primary_run + aligned_by_edge[:remaining])
+                    for aligned_run in _contiguous_slot_runs(aligned):
+                        if len(aligned_run) < remaining:
+                            continue
+                        ordered_run = sorted(
+                            aligned_run,
+                            key=lambda slot: int(slot.position or 999),
+                        )
+                        left = ordered_run[:remaining]
+                        right = ordered_run[-remaining:]
+                        for secondary in (left, right):
+                            secondary_positions = {int(slot.position or 0) for slot in secondary}
+                            if not secondary_positions:
+                                continue
+                            if min(secondary_positions) in edge_positions or max(secondary_positions) in edge_positions:
+                                runs.append(primary_run + secondary)
     return runs
 
 
