@@ -6,6 +6,10 @@ const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 const DSEHelpers = window.DSEHelpers || {};
 const normalizeSearchText = DSEHelpers.normalizeSearchText || ((value) => String(value || '').toLowerCase());
+const verticalLaneKey = DSEHelpers.verticalLaneKey || ((equipId, pos) => `${equipId}|${pos}`);
+const readVerticalLaneLocks = DSEHelpers.readVerticalLaneLocks || (() => []);
+const writeVerticalLaneLocks = DSEHelpers.writeVerticalLaneLocks || (() => {});
+const isVerticalLaneLockedHelper = DSEHelpers.isVerticalLaneLocked || ((equipId, pos, locks) => (locks || []).includes(verticalLaneKey(equipId, pos)));
 
 function parseBoardEntryCode(entryId) {
   if (typeof DSEHelpers.parseBoardEntryCode === 'function') {
@@ -19,6 +23,14 @@ function parseBoardEntryCode(entryId) {
 function cssEscapeValue(value) {
   if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(String(value || ''));
   return String(value || '').replace(/["\\]/g, '\\$&');
+}
+
+function slotShortLabel(escaninhoId) {
+  const parts = String(escaninhoId || '').split('-');
+  const pos = parseInt(parts.pop() || '', 10);
+  const level = parseInt(parts.pop() || '', 10);
+  if (!Number.isFinite(level) || !Number.isFinite(pos) || level <= 0 || pos <= 0) return '';
+  return `${level}${String.fromCharCode(64 + pos)}`;
 }
 
 function requiredBinsForProductCode(productCode) {
@@ -43,17 +55,24 @@ const EQUIP_CFG = {
 
 const ALL_TYPES = Object.entries(EQUIP_CFG).map(([id,cfg])=>({id,...cfg}));
 
+function normalizeEquipmentFilterList(filter) {
+  if (Array.isArray(filter)) return [...new Set(filter.filter((item)=>item && item !== 'all'))];
+  if (!filter || filter === 'all') return [];
+  return [filter];
+}
+
 function equipmentMatchesGlobalFilter(eq, filter) {
-  if (!filter || filter === 'all') return true;
+  const filters = normalizeEquipmentFilterList(filter);
+  if (!filters.length) return true;
   const tipo = String(eq?.tipo || '').toLowerCase();
   const tipoAnterior = String(eq?.tipoAnterior || '').toLowerCase();
-  const matches = (value) => {
-    if (filter === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
-    if (filter === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
-    if (filter === 'freezer') return value.includes('freezer');
-    return value === filter;
+  const matches = (value, filterId) => {
+    if (filterId === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
+    if (filterId === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
+    if (filterId === 'freezer') return value.includes('freezer');
+    return value === filterId;
   };
-  return matches(tipo) || matches(tipoAnterior);
+  return filters.some((filterId)=>matches(tipo, filterId) || matches(tipoAnterior, filterId));
 }
 
 function parseEscId(escaninhoId) {
@@ -153,30 +172,6 @@ function getPowerGroupsByEquipment(equipment, allocations) {
   return groups;
 }
 
-function productStorageKind(product) {
-  const arm = normalizeSearchText(product?.arm || product?.raw?.categoria_armazenagem || '');
-  if (arm.includes('freezer') || arm.includes('congel')) return 'freezer';
-  if (arm.includes('geladeira') || arm.includes('refriger')) return 'geladeira';
-  if (arm.includes('prateleira')) return 'prateleira';
-  return 'any';
-}
-
-function productRequiresHighFridge(product) {
-  return productStorageKind(product) === 'geladeira' && !!product?.alto;
-}
-
-function isHighFridgeEquipment(eq) {
-  return normalizeSearchText(eq?.tipo || '').includes('geladeira_alta');
-}
-
-function equipmentStorageKind(eq) {
-  const tipo = String(eq?.tipo || '').toLowerCase();
-  if (tipo.includes('freezer')) return 'freezer';
-  if (tipo.includes('geladeira')) return 'geladeira';
-  if (tipo.includes('prateleira') || tipo.includes('pamplona') || tipo.includes('lateral')) return 'prateleira';
-  return 'any';
-}
-
 function FillStreetIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ display:'block' }} aria-hidden="true">
@@ -266,6 +261,8 @@ function PlanogramSlot({ slot, width, height, isHighlighted, matchSearch, subcat
   const groupStyle = GROUP_STYLE[product?.grupo] || GROUP_STYLE.Neutro;
   const borderColor = product ? (groupStyle.text || '#94A3B8') : 'rgba(148,163,184,0.42)';
   const dual = !!(slot.p1 && slot.p2);
+  const addressLabel = slotShortLabel(slot.escsId);
+  const isLocked = !!slot.isLocked;
   const outline = isHighlighted ? '4px solid #DC2626' : matchSearch ? '2px solid #F59C00' : slot.sameSubcatLevelConflict ? '2px dashed #DC2626' : 'none';
   return (
     <div
@@ -281,11 +278,12 @@ function PlanogramSlot({ slot, width, height, isHighlighted, matchSearch, subcat
         flexShrink:0,
         padding:5,
         borderRadius:6,
-        border:`1px solid ${borderColor}66`,
-        background:product ? groupStyle.bg : 'rgba(248,250,252,0.45)',
+        border:`1px solid ${isLocked ? 'rgba(220,38,38,0.62)' : `${borderColor}66`}`,
+        background:isLocked ? 'rgba(254,226,226,0.62)' : (product ? groupStyle.bg : 'rgba(248,250,252,0.45)'),
         outline,
         outlineOffset:isHighlighted?'3px':'0px',
         opacity:subcatMatch?1:0.25,
+        filter:isLocked?'saturate(0.52) brightness(0.97)':'none',
         cursor:'pointer',
         boxSizing:'border-box',
         overflow:'hidden',
@@ -296,6 +294,7 @@ function PlanogramSlot({ slot, width, height, isHighlighted, matchSearch, subcat
     >
       {!product ? (
         <div style={{ height:'100%', border:'1px dashed rgba(148,163,184,0.38)', borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--map-text-muted)', fontSize:9, fontWeight:800 }}>
+          <span style={{ position:'absolute', top:7, left:7, fontSize:8, fontWeight:900, color:isLocked?'#B91C1C':'#475569', background:'rgba(255,255,255,0.84)', border:`1px solid ${isLocked?'rgba(239,68,68,0.42)':'rgba(148,163,184,0.28)'}`, borderRadius:3, padding:'2px 4px', fontFamily:'var(--font-numeric)' }}>{addressLabel}</span>
           vazio
         </div>
       ) : dual ? (
@@ -306,6 +305,12 @@ function PlanogramSlot({ slot, width, height, isHighlighted, matchSearch, subcat
       ) : (
         <PlanogramProductFace product={product} />
       )}
+      {product && (
+        <span style={{ position:'absolute', top:7, right:7, fontSize:8, fontWeight:900, color:isLocked?'#B91C1C':'#475569', background:'rgba(255,255,255,0.88)', border:`1px solid ${isLocked?'rgba(239,68,68,0.42)':'rgba(148,163,184,0.28)'}`, borderRadius:3, padding:'2px 4px', fontFamily:'var(--font-numeric)' }}>
+          {addressLabel}
+        </span>
+      )}
+      {isLocked && <div style={{ position:'absolute', inset:0, border:'2px solid rgba(220,38,38,0.72)', background:'repeating-linear-gradient(135deg, rgba(220,38,38,0.10) 0 7px, transparent 7px 14px)', pointerEvents:'none', borderRadius:6 }} />}
     </div>
   );
 }
@@ -359,7 +364,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
             onKeyDown={e=>{ if(e.key==='Enter'){ const v=renameVal.trim(); if(v&&v!==eq.id) dispatch({type:'RENAME_EQUIP',oldId:eq.id,newId:v}); onClose(); } if(e.key==='Escape') setMode(null); }}
             style={{ width:'100%', padding:'5px 8px', fontSize:11, fontFamily:'var(--font-numeric)', background:'var(--cfg-input-bg)', border:'1px solid var(--dropdown-border)', borderRadius:4, color:'var(--dropdown-text)', outline:'none', marginBottom:4 }}
           />
-          <div style={{ fontSize:9, color:'var(--map-text-muted)', marginBottom:8, lineHeight:1.4 }}>Salvar reordena o equipamento pelo número automaticamente.</div>
+          <div style={{ fontSize:9, color:'var(--map-text-muted)', marginBottom:8, lineHeight:1.4 }}>Salvar atualiza o equipamento na planilha e reordena pelo número.</div>
           <div style={{ display:'flex', gap:5 }}>
             <button
               onClick={()=>{ const v=renameVal.trim(); if(v&&v!==eq.id) dispatch({type:'RENAME_EQUIP',oldId:eq.id,newId:v}); onClose(); }}
@@ -387,6 +392,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Trocar conteúdo com…',()=>{onStartSwap(eq.id);onClose();},{icon:'⇄'})}
         {item('Recolher produtos',()=>{dispatch({type:'COLLECT_EQUIP',equipId:eq.id});onClose();},{icon:'↙'})}
+        {item('Recolher só 2º slot',()=>{dispatch({type:'COLLECT_EQUIP_SLOT',equipId:eq.id,slot:2});onClose();},{icon:'2×'})}
 
         <div style={{ height:1, background:'var(--dropdown-border)', margin:'4px 0' }} />
         {item('Remover equipamento',()=>setMode('confirmRemove'),{icon:'✕',danger:true})}
@@ -396,11 +402,12 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
 }
 
 // ── Equipment card ─────────────────────────────────────────────────────────────
-const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={}, planogramMode=false, onTogglePlanogram, powerGroup=null }) {
+const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, isCollapsed, onToggleCollapse, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, subcatFilters=[], escW, pendingEquipmentTypeChanges={}, planogramMode=false, onTogglePlanogram, powerGroup=null, verticalLaneLocks=[], onToggleVerticalLaneLock, onFillVerticalLane }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({x:0,y:0});
   const menuBtnRef = useRef(null);
   const [hovHeader, setHovHeader] = useState(false);
+  const [hovEquipment, setHovEquipment] = useState(false);
   const cfg = EQUIP_CFG[eq.tipo]||EQUIP_CFG.prateleira;
   const isTypePending = !!pendingEquipmentTypeChanges[eq.id];
   const isCard175 = !!eq.card175Only;
@@ -410,9 +417,14 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
     : (isDark ? cfg.headerBgD : cfg.headerBgL);
 
   const stats = useMemo(()=>{
-    let f=0,t=0;
-    for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){ t++; if(allocations[`${eq.id}-${n}-${s}`]?.p1) f++; }
-    return {filled:f,total:t};
+    let f=0,t=0,dual=0;
+    for(let n=1;n<=eq.niveis;n++) for(let s=1;s<=eq.escsPerNivel;s++){
+      t++;
+      const alloc = allocations[`${eq.id}-${n}-${s}`] || {};
+      if(alloc.p1) f++;
+      if(alloc.p1 && alloc.p2) dual++;
+    }
+    return {filled:f,total:t,dual};
   },[eq,allocations]);
 
   const productCounts = useMemo(()=>{
@@ -435,9 +447,18 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 
   const isSwapSource   = swapSource === eq.id;
   const isSwapTarget   = swapSource && swapSource !== eq.id;
+  const hasDualSlots = stats.dual > 0;
   const showDegeloBadge = isCollapsed && degeloStats.majority && String(eq.tipo || '').includes('geladeira');
-  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (showDegeloBadge ? '#38BDF8' : (collapsedGroupStyle ? collapsedGroupStyle.text : (isCard175 ? '#C41230' : cfg.borderColor))));
-  const effectiveHdrBg = showDegeloBadge ? 'rgba(56,189,248,0.13)' : (collapsedGroupStyle ? collapsedGroupStyle.bg : hdrBg);
+  const swapBorderColor = isSwapSource ? '#F59C00' : (isSwapTarget ? 'rgba(245,156,0,0.4)' : (hasDualSlots ? '#8B5CF6' : (showDegeloBadge ? '#38BDF8' : (collapsedGroupStyle ? collapsedGroupStyle.text : (isCard175 ? '#C41230' : cfg.borderColor)))));
+  const effectiveHdrBg = hasDualSlots ? 'rgba(139,92,246,0.13)' : (showDegeloBadge ? 'rgba(56,189,248,0.13)' : (collapsedGroupStyle ? collapsedGroupStyle.bg : hdrBg));
+  const lockedLanePositions = useMemo(() => {
+    const out = new Set();
+    for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
+      if (isVerticalLaneLockedHelper(eq.id, pos, verticalLaneLocks)) out.add(pos);
+    }
+    return out;
+  }, [eq.id, eq.escsPerNivel, verticalLaneLocks]);
+  const showLaneControls = hovEquipment || lockedLanePositions.size > 0;
 
   const labelW=24, gap=3; // escW is now passed as prop (standardized to geladeira 5-slot size)
 
@@ -447,7 +468,10 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
   };
 
   return (
-    <div data-equipment-id={eq.id} style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)'), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
+    <div data-equipment-id={eq.id}
+      onMouseEnter={()=>setHovEquipment(true)}
+      onMouseLeave={()=>setHovEquipment(false)}
+      style={{ borderLeft: `4px solid ${swapBorderColor}`, background:'var(--map-equip-bg)', borderRadius:6, overflow:'visible', boxShadow: isSwapSource?`0 0 0 2px #F59C00`:(hasDualSlots?`0 0 0 2px rgba(139,92,246,0.34), 0 2px 12px rgba(139,92,246,0.16)`:(isCard175?`0 0 0 2px #C41230, 0 2px 12px rgba(196,18,48,0.35)`:'var(--map-equip-shadow)')), marginBottom:6, flexShrink:0, position:'relative', transition:'box-shadow 0.15s' }}>
       <div style={{ background:effectiveHdrBg, padding:'0 8px', height:34, display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none', borderRadius:'2px 5px 0 0', position:'relative' }}
         onClick={handleHeaderClick}
         onMouseEnter={()=>setHovHeader(true)}
@@ -485,6 +509,11 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
         {powerGroup && (
           <span title={`Grupo de gerador formado: equipamento ${powerGroup.position} de ${powerGroup.size}`} style={{ fontSize:10, fontWeight:900, color:'#A15C00', background:'rgba(250,204,21,0.24)', border:'1px solid rgba(250,204,21,0.58)', padding:'1px 5px', borderRadius:4, flexShrink:0, lineHeight:1.35 }}>
             ⚡3
+          </span>
+        )}
+        {hasDualSlots && (
+          <span title={`${stats.dual} escaninho(s) com 2 produtos. Alt+clique recolhe/aloca só o 2º slot; Alt+Shift vale para o nível; Alt+Cmd/Ctrl vale para o equipamento.`} style={{ fontSize:9, fontWeight:900, color:'#6D28D9', background:'rgba(139,92,246,0.18)', border:'1px solid rgba(139,92,246,0.45)', padding:'1px 5px', borderRadius:4, flexShrink:0, lineHeight:1.35 }}>
+            2× {stats.dual}
           </span>
         )}
 
@@ -549,6 +578,36 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 
       {!isCollapsed && (
         <div key={planogramMode?'planogram':'operational'} style={{ padding:'6px 8px', display:'flex', flexDirection:'column', gap:planogramMode?6:3, overflowX:'visible', overflowY:'visible' }}>
+          {showLaneControls && (
+            <div style={{ display:'flex', alignItems:'center', gap, flexWrap:'nowrap', minWidth:labelW + eq.escsPerNivel * ((planogramMode ? getPlanogramSlotWidth(escW) : escW) + gap), marginBottom:2, opacity:showLaneControls?1:0, transition:'opacity 0.12s' }}>
+              <span style={{ width:labelW, flexShrink:0 }} />
+              {Array.from({ length:eq.escsPerNivel }, (_, si) => {
+                const pos = si + 1;
+                const locked = lockedLanePositions.has(pos);
+                const laneW = planogramMode ? getPlanogramSlotWidth(escW) : escW;
+                return (
+                  <div key={`lane-${pos}`} style={{ width:laneW, height:20, flexShrink:0, display:'flex', gap:3, alignItems:'center', justifyContent:'center' }}>
+                    <button
+                      type="button"
+                      title={`Preencher coluna ${pos}`}
+                      onClick={(event) => { event.stopPropagation(); onFillVerticalLane && onFillVerticalLane(eq.id, pos); }}
+                      style={{ width:20, height:18, border:'1px solid rgba(13,171,119,0.35)', borderRadius:4, background:'rgba(13,171,119,0.10)', color:'#0DAB77', cursor:'pointer', fontSize:12, fontWeight:900, lineHeight:1 }}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      title={locked ? `Desbloquear coluna ${pos}` : `Bloquear coluna ${pos} em ações em massa`}
+                      onClick={(event) => { event.stopPropagation(); onToggleVerticalLaneLock && onToggleVerticalLaneLock(eq.id, pos); }}
+                      style={{ width:20, height:18, border:`1px solid ${locked ? 'rgba(220,38,38,0.62)' : 'rgba(100,116,139,0.24)'}`, borderRadius:4, background:locked ? 'rgba(220,38,38,0.16)' : 'rgba(248,250,252,0.72)', color:locked ? '#DC2626' : '#94A3B8', cursor:'pointer', fontSize:12, fontWeight:900, lineHeight:1 }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {Array.from({length:eq.niveis},(_,ni)=>{
             const nivel=ni+1;
             // Build slot data for this row
@@ -557,7 +616,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
               const alloc=allocations[escsId]||{};
               const p1=alloc.p1?PRODUCT_MAP[alloc.p1]:null;
               const p2=alloc.p2?PRODUCT_MAP[alloc.p2]:null;
-              return { pos, escsId, alloc, p1, p2, p1id:alloc.p1||null };
+              return { pos, escsId, alloc, p1, p2, p1id:alloc.p1||null, isLocked:lockedLanePositions.has(pos) };
             });
             const subcatCodes = {};
             slots.forEach(slot => {
@@ -665,6 +724,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                           <div key={ri} title={conflictTitle} style={{ width:escW, flexShrink:0, outline:isHighlighted?'4px solid #DC2626':matchSearch?'2px solid #F59C00':conflictOutline, outlineOffset:isHighlighted?'3px':'0px', borderRadius:6, animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none', opacity:subcatMatch?1:0.25, transition:'opacity 0.15s', position:'relative', zIndex:isHighlighted?20:'auto', background:isHighlighted?'rgba(220,38,38,0.10)':slot.sameSubcatLevelConflict?'rgba(220,38,38,0.08)':'transparent' }}>
                             <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={!slot.p1}
                           isAllocating={hasAllocationSource&&(!slot.p1 || !slot.p2)} isHighlighted={isHighlighted}
+                          isLocked={slot.isLocked}
                           equipCap={eq.cap}
                           onClick={onEscClick}
                           onHover={onHoverEsc}
@@ -685,6 +745,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
                           <div key={slot.pos} style={{ width:escW, flexShrink:0, outline:isHighlighted?'4px solid #DC2626':'none', outlineOffset:isHighlighted?'3px':'0px', borderRadius:6, animation:isHighlighted?'dse-highlight-pulse 0.75s ease-in-out 8':'none', position:'relative', zIndex:isHighlighted?20:'auto', background:isHighlighted?'rgba(220,38,38,0.10)':'transparent' }}>
                             <DSEEscaninho escaninhoId={slot.escsId} product1={slot.p1} product2={slot.p2} isEmpty={false}
                               isAllocating={false} isHighlighted={isHighlighted}
+                              isLocked={slot.isLocked}
                               equipCap={eq.cap}
                               onClick={onEscClick}
                               onHover={onHoverEsc}
@@ -706,7 +767,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
 });
 
 // ── Street column ──────────────────────────────────────────────────────────────
-const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, onFillStreet, globalEquipmentFilter='all', globalPlanogramMode=false, subcatFilters=[], pendingEquipmentTypeChanges={} }) {
+const StreetColumn = memo(function StreetColumn({ street, allocations, hasAllocationSource, onEscClick, onHoverEsc, onHoverEnd, equipCollapsed, onToggleEquip, isCollapsed, onToggleStreet, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, highlightProductId, onRecolherRua, onFillStreet, globalEquipmentFilter='all', globalPlanogramMode=false, subcatFilters=[], pendingEquipmentTypeChanges={}, verticalLaneLocks=[], onToggleVerticalLaneLock, onFillVerticalLane }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [fillOpen, setFillOpen] = useState(false);
@@ -715,8 +776,9 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
   const [fillProgress, setFillProgress] = useState(null);
   const [newEquipTipo, setNewEquipTipo] = useState('prateleira');
   const [newEquipOpen, setNewEquipOpen] = useState(false);
+  const [forceVisibleEquipmentIds, setForceVisibleEquipmentIds] = useState({});
   const [pairFilter, setPairFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
+  const [typeFilters, setTypeFilters] = useState([]);
   const [planogramEquipment, setPlanogramEquipment] = useState({});
   const stats = useMemo(()=>{
     let f=0,t=0;
@@ -739,17 +801,17 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
       return false;
     };
     return street.equipment.filter(eq=>{
-      if (equipmentHasHighlight(eq)) return true;
+      if (equipmentHasHighlight(eq) || forceVisibleEquipmentIds[eq.id]) return true;
       if (!equipmentMatchesGlobalFilter(eq, globalEquipmentFilter)) return false;
       if (pairFilter!=='all') {
         const num = parseInt(eq.id.split('-').pop()||'0');
         if (pairFilter==='even' && num%2!==0) return false;
         if (pairFilter==='odd'  && num%2===0) return false;
       }
-      if (typeFilter!=='all' && eq.tipo!==typeFilter && eq.tipoAnterior!==typeFilter) return false;
+      if (typeFilters.length && !typeFilters.some((filter)=>eq.tipo===filter || eq.tipoAnterior===filter)) return false;
       return true;
     });
-  },[street.equipment,pairFilter,typeFilter,globalEquipmentFilter,highlightProductId,allocations]);
+  },[street.equipment,pairFilter,typeFilters,globalEquipmentFilter,highlightProductId,allocations,forceVisibleEquipmentIds]);
 
   const visiblePlanogramIds = useMemo(() => {
     const ids = {};
@@ -902,10 +964,10 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
           <div style={{ position:'relative', flexShrink:0 }} onClick={e=>e.stopPropagation()}>
             <button onClick={()=>setFilterOpen(v=>!v)} title="Filtrar equipamentos"
               style={{ width:20, height:20,
-                background:(pairFilter!=='all'||typeFilter!=='all')?'rgba(13,171,119,0.22)':'rgba(255,255,255,0.08)',
-                border:(pairFilter!=='all'||typeFilter!=='all')?'1px solid rgba(13,171,119,0.5)':'1px solid rgba(255,255,255,0.15)',
+                background:(pairFilter!=='all'||typeFilters.length)?'rgba(13,171,119,0.22)':'rgba(255,255,255,0.08)',
+                border:(pairFilter!=='all'||typeFilters.length)?'1px solid rgba(13,171,119,0.5)':'1px solid rgba(255,255,255,0.15)',
                 borderRadius:3, cursor:'pointer',
-                color:(pairFilter!=='all'||typeFilter!=='all')?'#3DD4A6':'rgba(255,255,255,0.55)',
+                color:(pairFilter!=='all'||typeFilters.length)?'#3DD4A6':'rgba(255,255,255,0.55)',
                 fontSize:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
               <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{display:'block'}}><path d="M1 2h10l-4 5v3l-2-1V7L1 2z" fill="currentColor"/></svg>
             </button>
@@ -927,29 +989,30 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
                 {equipTypes.length > 1 && (<>
                   <div style={{ fontSize:9, fontWeight:700, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Tipo de equipamento</div>
                   <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
-                    <button onClick={()=>setTypeFilter('all')}
+                    <button onClick={()=>setTypeFilters([])}
                       style={{ padding:'2px 7px', fontSize:9, fontWeight:700, borderRadius:3, cursor:'pointer',
-                        border:typeFilter==='all'?'1px solid rgba(13,171,119,0.5)':'1px solid var(--dropdown-border)',
-                        background:typeFilter==='all'?'rgba(13,171,119,0.12)':'transparent',
-                        color:typeFilter==='all'?'var(--shopper-green)':'var(--dropdown-text)', fontFamily:'var(--font-sans)' }}>
+                        border:typeFilters.length===0?'1px solid rgba(13,171,119,0.5)':'1px solid var(--dropdown-border)',
+                        background:typeFilters.length===0?'rgba(13,171,119,0.12)':'transparent',
+                        color:typeFilters.length===0?'var(--shopper-green)':'var(--dropdown-text)', fontFamily:'var(--font-sans)' }}>
                       Todos
                     </button>
                     {equipTypes.map(t=>{
                       const cfg=EQUIP_CFG[t]||EQUIP_CFG.prateleira;
+                      const selected = typeFilters.includes(t);
                       return (
-                        <button key={t} onClick={()=>setTypeFilter(t)}
+                        <button key={t} onClick={()=>setTypeFilters((current)=>current.includes(t) ? current.filter((item)=>item!==t) : [...current,t])}
                           style={{ padding:'2px 7px', fontSize:9, fontWeight:700, borderRadius:3, cursor:'pointer',
-                            border:typeFilter===t?`1px solid ${cfg.borderColor}`:'1px solid var(--dropdown-border)',
-                            background:typeFilter===t?`${cfg.borderColor}18`:'transparent',
-                            color:typeFilter===t?cfg.color:'var(--dropdown-text)', fontFamily:'var(--font-sans)' }}>
+                            border:selected?`1px solid ${cfg.borderColor}`:'1px solid var(--dropdown-border)',
+                            background:selected?`${cfg.borderColor}18`:'transparent',
+                            color:selected?cfg.color:'var(--dropdown-text)', fontFamily:'var(--font-sans)' }}>
                           {cfg.label}
                         </button>
                       );
                     })}
                   </div>
                 </>)}
-                {(pairFilter!=='all'||typeFilter!=='all') && (
-                  <button onClick={()=>{setPairFilter('all');setTypeFilter('all');}}
+                {(pairFilter!=='all'||typeFilters.length) && (
+                  <button onClick={()=>{setPairFilter('all');setTypeFilters([]);}}
                     style={{ marginTop:8, width:'100%', padding:'4px', fontSize:9, fontWeight:700, background:'transparent',
                       border:'1px solid var(--dropdown-border)', borderRadius:3, cursor:'pointer',
                       color:'var(--map-text-muted)', fontFamily:'var(--font-sans)' }}>
@@ -993,17 +1056,10 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
                   })}
                 </div>
                 <button onClick={()=>{
-                  const TIPO_DEF={
-                    prateleira:{niveis:5,escsPerNivel:7,cap:30.24},
-                    prateleira_pamplona:{niveis:3,escsPerNivel:7,cap:30.24,card175Only:true},
-                    geladeira:{niveis:4,escsPerNivel:5,cap:20.00},
-                    geladeira_alta:{niveis:4,escsPerNivel:5,cap:20.00},
-                    geladeira_gerador:{niveis:4,escsPerNivel:5,cap:20.00},
-                    freezer:{niveis:3,escsPerNivel:4,cap:15.00},
-                    quimico:{niveis:4,escsPerNivel:7,cap:30.24},
-                  };
-                  const d=TIPO_DEF[newEquipTipo]||TIPO_DEF.prateleira;
-                  dispatch({type:'ADD_EQUIP',streetId:street.id,tipo:newEquipTipo,...d});
+                  const mx=Math.max(0,...street.equipment.map(eq=>parseInt(eq.id.split('-')[1]||'0',10)).filter(Number.isFinite));
+                  const nextId=`${street.id}-${String(mx+1).padStart(3,'0')}`;
+                  setForceVisibleEquipmentIds((current)=>Object.assign({}, current, { [nextId]:true }));
+                  dispatch({type:'ADD_EQUIP',streetId:street.id,tipo:newEquipTipo});
                   setNewEquipOpen(false);
                 }}
                   style={{ width:'100%', padding:'6px', fontSize:10, fontWeight:700, background:'rgba(13,171,119,0.14)', border:'1px solid rgba(13,171,119,0.4)', borderRadius:5, cursor:'pointer', color:'#0DAB77', fontFamily:'var(--font-sans)' }}>
@@ -1052,7 +1108,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               }})} style={{ marginTop:6, padding:'4px 10px', fontSize:10, fontWeight:700, background:'transparent', border:'1px dashed rgba(148,163,184,0.3)', borderRadius:4, cursor:'pointer', color:'var(--map-text-muted)', fontFamily:'var(--font-sans)' }}>+ Adicionar</button>
             </div>
           )}
-          {(pairFilter!=='all'||typeFilter!=='all'||globalEquipmentFilter!=='all') && visibleEquipment.length===0 && street.equipment.length>0 && (
+          {(pairFilter!=='all'||typeFilters.length||normalizeEquipmentFilterList(globalEquipmentFilter).length) && visibleEquipment.length===0 && street.equipment.length>0 && (
             <div style={{ padding:'10px 8px', textAlign:'center', color:'var(--map-text-muted)', fontSize:10 }}>
               Nenhum equipamento com o filtro ativo.
             </div>
@@ -1068,6 +1124,9 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
               escW={escWFixed} pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
               planogramMode={!!visiblePlanogramIds[eq.id]} onTogglePlanogram={toggleEquipmentPlanogram}
               powerGroup={powerGroupsByEquipment[eq.id] || null}
+              verticalLaneLocks={verticalLaneLocks}
+              onToggleVerticalLaneLock={onToggleVerticalLaneLock}
+              onFillVerticalLane={onFillVerticalLane}
             />
           ))}
         </div>
@@ -1090,6 +1149,7 @@ function StreetMI({ label, icon, onClick, danger }) {
 function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollapsed, onToggleEquip, onToggleStreet, onAllocate, onAllocateMany, onAllocateManyProgressive, onCollect, onCollectMany, selectedProduct, mode2aLeva, colWidth, searchQuery, dispatch, swapSource, onStartSwap, onCompleteSwap, onRecolherRua, onFillStreet, globalEquipmentFilter='all', globalPlanogramMode=false, highlightProductId, subcatFilters=[], queueProductIds=[], pendingEquipmentTypeChanges={} }) {
   const [tooltip, setTooltip] = useState(null);
   const [smartFillProgress, setSmartFillProgress] = useState(null);
+  const [verticalLaneLocks, setVerticalLaneLocks] = useState(() => readVerticalLaneLocks());
   const containerRef = useRef(null);
   const closeTimerRef = useRef(null);
   const rafRef = useRef(null);
@@ -1120,6 +1180,19 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     });
   }, [allocatedCountByCode]);
 
+  const toggleVerticalLaneLock = useCallback((equipId, pos) => {
+    const key = verticalLaneKey(equipId, pos);
+    if (!key) return;
+    setVerticalLaneLocks((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      const next = current.includes(key)
+        ? current.filter((item) => item !== key)
+        : current.concat(key);
+      writeVerticalLaneLocks(next);
+      return next;
+    });
+  }, []);
+
   const orderedEscaninhos = useCallback((equipId, level, clickedEscaninhoId, scope) => {
     const parsedClick = parseEscId(clickedEscaninhoId);
     const rows = [];
@@ -1135,6 +1208,8 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           if (scope === 'level' && n !== level) continue;
           if ((scope === 'equipment' || scope === 'street') && n < level) continue;
           for (let s = 1; s <= eq.escsPerNivel; s += 1) {
+            if (scope !== 'single' && scope !== 'vertical' && isVerticalLaneLockedHelper(eq.id, s, verticalLaneLocks)) continue;
+            if (scope === 'vertical' && s !== parsedClick.pos) continue;
             const escaninhoId = `${eq.id}-${n}-${s}`;
             rows.push({ escaninhoId, level:n, pos:s, equipId:eq.id });
           }
@@ -1155,184 +1230,13 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       return a.pos - b.pos;
     });
     return rows.map((item) => item.escaninhoId);
-  }, [mapStructure]);
-
-  // Score a slot for a specific product based on tipo_fisico rules from agent_scoring.py
-  const scoreSlotForProduct = useCallback((escaninhoId, productId, opts={}) => {
-    const { level, equipId } = parseEscId(escaninhoId);
-    const productCode = parseBoardEntryCode(productId);
-    const product = PRODUCT_MAP[productCode];
-    if (!product) return -level * 2;
-    let eq = null;
-    for (const street of mapStructure) {
-      for (const e of street.equipment) { if (e.id === equipId) { eq = e; break; } }
-      if (eq) break;
-    }
-    const equipKind = equipmentStorageKind(eq);
-    const productKind = productStorageKind(product);
-    if (productKind !== 'any' && equipKind !== productKind) return -99999;
-    const isPrateleira = equipKind === 'prateleira';
-    const isGeladeira = equipKind === 'geladeira';
-    const isFreezer = equipKind === 'freezer';
-    if (productRequiresHighFridge(product) && !isHighFridgeEquipment(eq)) return -99999;
-    if (!isPrateleira && !isGeladeira && !isFreezer) return -level * 2;
-    const niveis = eq ? eq.niveis : 5;
-    let score = 0;
-    const isTopLevel = level === 1;
-    const isBottomLevel = level === niveis;
-    // Pesado em prateleira: regra dura apenas contra nivel 1.
-    if (product.pesado) {
-      if (isTopLevel) return -99999;
-    }
-    // FLV em prateleira: bloqueia nível 1 e último nível
-    if (isPrateleira && (product.grupo || '').toUpperCase() === 'FLV') {
-      if (isTopLevel || isBottomLevel) return -99999;
-      score += 30;
-    }
-    if (isGeladeira && (product.grupo || '').toUpperCase() === 'FLV') {
-      const { pos } = parseEscId(escaninhoId);
-      if (pos === 1 || pos === eq.escsPerNivel) return -99999;
-      score += 30;
-    }
-    const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
-    if (isEgg && (level < 2 || level > 4)) {
-      return -99999;
-    }
-    // frágil/alto: prefere topo (nível 1)
-    if (product.fragil || product.alto) {
-      score += (niveis - level) * 12;
-    }
-    // pequeno: prefere níveis mais baixos
-    if (product.pequeno) {
-      score += level * 6;
-    }
-    score -= level * 2;
-    return score;
-  }, [mapStructure]);
-
-  const explainAllocationFailure = useCallback((clickedEscaninhoId) => {
-    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
-    const firstProductId = queue[0];
-    const product = PRODUCT_MAP[parseBoardEntryCode(firstProductId)];
-    const parsed = parseEscId(clickedEscaninhoId);
-    let eq = null;
-    for (const street of mapStructure) {
-      for (const candidate of street.equipment) {
-        if (candidate.id === parsed.equipId) { eq = candidate; break; }
-      }
-      if (eq) break;
-    }
-    if (!product || !eq) return 'Nenhum slot elegível para a seleção atual.';
-    const productKind = productStorageKind(product);
-    const equipKind = equipmentStorageKind(eq);
-    const kindLabel = { freezer:'Freezer', geladeira:'Geladeira', prateleira:'Prateleira', any:'equipamento compatível' };
-    if (productKind !== 'any' && equipKind !== productKind) {
-      return `${product.nome} exige ${kindLabel[productKind]}; ${eq.id} é ${kindLabel[equipKind] || eq.tipo}.`;
-    }
-    if (productRequiresHighFridge(product) && !isHighFridgeEquipment(eq)) {
-      return 'Produto refrigerado alto exige geladeira alta.';
-    }
-    const isEgg = (product.nome || '').toLowerCase().startsWith('ovo');
-    const isBottomLevel = Number(eq.niveis || 0) > 0 && parsed.level === Number(eq.niveis || 0);
-    if ((product.pesado && parsed.level === 1)
-      || (product.grupo === 'FLV' && (parsed.level === 1 || isBottomLevel))
-      || (isEgg && (parsed.level < 2 || parsed.level > 4))) {
-      return 'Esse nível não é elegível para o produto selecionado.';
-    }
-    return 'Nenhum slot elegível para a seleção atual.';
-  }, [capQueueByRequiredBins, mapStructure, queueProductIds, selectedProduct]);
-
-  const buildAllocationBatch = useCallback((clickedEscaninhoId, opts) => {
-    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
-    if (!queue.length) return [];
-    const parsed = parseEscId(clickedEscaninhoId);
-    const scope = opts.scope || 'single';
-    const slot = opts.slot || 1;
-    const allowClickedTop = !!opts.allowClickedTop;
-    const firstSlotHasSameProduct = (escaninhoId, productId) => {
-      if (slot !== 2) return false;
-      const alloc = allocations[escaninhoId] || {};
-      return parseBoardEntryCode(alloc.p1) === parseBoardEntryCode(productId);
-    };
-    const candidateIds = scope === 'equipment'
-      ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
-      : scope === 'level'
-        ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'level')
-        : scope === 'street'
-          ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'street')
-          : [clickedEscaninhoId];
-    const targets = candidateIds.filter((escaninhoId) => {
-      const alloc = allocations[escaninhoId] || {};
-      if (slot === 2) return !!alloc.p1 && !alloc.p2;
-      return !alloc.p1;
-    });
-    // Single product: sort slots by score for this product
-    if (selectedProduct) {
-      const sorted = [...targets]
-        .filter((escaninhoId) => !firstSlotHasSameProduct(escaninhoId, selectedProduct))
-        .filter((escaninhoId) => scoreSlotForProduct(escaninhoId, selectedProduct, { allowClickedTop }) > -99999)
-        .sort((a, b) => scoreSlotForProduct(b, selectedProduct, { allowClickedTop }) - scoreSlotForProduct(a, selectedProduct, { allowClickedTop }));
-      return sorted.slice(0, 1).map((escaninhoId) => ({ escaninhoId, productId: selectedProduct, slot }));
-    }
-    // Queue: greedy match — each product picks its best available slot
-    if (scope === 'equipment' && queue.length > 1) {
-      const used = new Set();
-      const result = [];
-      for (const productId of queue) {
-        if (result.length >= queue.length) break;
-        const best = [...targets]
-          .filter((s) => !used.has(s))
-          .filter((s) => !firstSlotHasSameProduct(s, productId))
-          .filter((s) => scoreSlotForProduct(s, productId, { allowClickedTop }) > -99999)
-          .sort((a, b) => scoreSlotForProduct(b, productId, { allowClickedTop }) - scoreSlotForProduct(a, productId, { allowClickedTop }))[0];
-        if (best && productId) { used.add(best); result.push({ escaninhoId: best, productId, slot }); }
-      }
-      return result.filter((item) => !!item.productId);
-    }
-    const result = [];
-    const used = new Set();
-    for (const productId of queue) {
-      const best = targets.find((escaninhoId) => !used.has(escaninhoId) && !firstSlotHasSameProduct(escaninhoId, productId) && scoreSlotForProduct(escaninhoId, productId, { allowClickedTop }) > -99999);
-      if (best && productId) {
-        used.add(best);
-        result.push({ escaninhoId: best, productId, slot });
-      }
-    }
-    return result.filter((item) => !!item.productId);
-  }, [allocations, capQueueByRequiredBins, orderedEscaninhos, queueProductIds, selectedProduct, scoreSlotForProduct]);
-
-  const buildScopedBackendAllocations = useCallback((allowedTargetIds, opts={}) => {
-    const allowSecondSlot = !!opts.allowSecondSlot;
-    const allowed = new Set(allowedTargetIds || []);
-    const scoped = {};
-    mapStructure.forEach((street) => {
-      street.equipment.forEach((eq) => {
-        for (let level = 1; level <= eq.niveis; level += 1) {
-          for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
-            const escaninhoId = `${eq.id}-${level}-${pos}`;
-            const current = allocations[escaninhoId] || {};
-            const p1 = current.p1 || null;
-            const p2 = current.p2 || null;
-            if (allowed.has(escaninhoId) || p1 || p2) {
-              scoped[escaninhoId] = {
-                p1,
-                p2: allowSecondSlot && !allowed.has(escaninhoId) && p1 && !p2 ? '__BLOCKED__' : p2,
-              };
-            } else {
-              scoped[escaninhoId] = { p1: '__BLOCKED__', p2: null };
-            }
-          }
-        }
-      });
-    });
-    return scoped;
-  }, [allocations, mapStructure]);
+  }, [mapStructure, verticalLaneLocks]);
 
   const handleSmartFill = useCallback(async (clickedEscaninhoId, scope, opts={}) => {
     const allowSecondSlot = !!opts.allowSecondSlot;
     const allowClickedTopLevel = !!opts.allowClickedTopLevel;
     const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
-    if (selectedProduct || queue.length <= 1) return null;
+    if (!queue.length) return [];
     const parsed = parseEscId(clickedEscaninhoId);
     const candidateIds = orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, scope || 'equipment');
     const targets = candidateIds.filter((escaninhoId) => {
@@ -1355,18 +1259,31 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
 
     if (!unallocatedCodes.length) return [];
 
-    const response = await fetch('/api/addressing/suggest', {
+    const targetGroupsByEquipment = {};
+    targets.forEach((escaninhoId) => {
+      const parsedTarget = parseEscId(escaninhoId);
+      if (!targetGroupsByEquipment[parsedTarget.equipId]) targetGroupsByEquipment[parsedTarget.equipId] = [];
+      targetGroupsByEquipment[parsedTarget.equipId].push(escaninhoId);
+    });
+    const targetGroups = Object.entries(targetGroupsByEquipment).map(([equipmentId, groupTargets]) => ({
+      equipmentId,
+      targets: groupTargets,
+    }));
+
+    const response = await fetch('/api/addressing/fill-street', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         unallocated_codes: unallocatedCodes,
         products_data: Object.values(PRODUCT_MAP),
         map_structure: mapStructure,
-        allocations: buildScopedBackendAllocations(targets, { allowSecondSlot }),
+        allocations,
+        target_groups: targetGroups,
         options: {
           allow_top_level: true,
           allow_second_slot: allowSecondSlot,
           allow_clicked_top_level: allowClickedTopLevel,
+          whole_street: scope === 'street',
         },
       }),
     });
@@ -1391,9 +1308,41 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
         };
       })
       .filter((item) => item.productId && targetSet.has(item.escaninhoId));
-  }, [allocations, buildScopedBackendAllocations, capQueueByRequiredBins, mapStructure, orderedEscaninhos, queueProductIds, selectedProduct]);
+  }, [allocations, capQueueByRequiredBins, mapStructure, orderedEscaninhos, queueProductIds, selectedProduct]);
 
-  const buildCollectBatch = useCallback((clickedEscaninhoId, scope) => {
+  const handleFillVerticalLane = useCallback(async (equipId, pos) => {
+    const clickedEscaninhoId = `${equipId}-1-${pos}`;
+    const wantsSecondSlot = !!mode2aLeva;
+    const queue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
+    if (!queue.length) {
+      setSmartFillProgress({ label:'Selecione um SKU ou deixe produtos visíveis na prancheta.', done:0, total:1, indeterminate:false, error:true });
+      window.setTimeout(() => setSmartFillProgress(null), 1600);
+      return;
+    }
+    try {
+      setSmartFillProgress({ label:'Calculando alocação da coluna…', done:0, total:1, indeterminate:true });
+      const smartBatch = await handleSmartFill(clickedEscaninhoId, 'vertical', { allowSecondSlot:wantsSecondSlot, allowClickedTopLevel:true });
+      if (smartBatch && smartBatch.length) {
+        if (typeof onAllocateManyProgressive === 'function') {
+          setSmartFillProgress({ label:'Aplicando alocação da coluna…', done:0, total:smartBatch.length, indeterminate:false });
+          await onAllocateManyProgressive(smartBatch, (done, total) => {
+            setSmartFillProgress({ label:'Aplicando alocação da coluna…', done, total, indeterminate:false });
+          });
+        } else {
+          onAllocateMany(smartBatch);
+        }
+        setSmartFillProgress({ label:'Coluna preenchida.', done:smartBatch.length, total:smartBatch.length, indeterminate:false });
+        window.setTimeout(() => setSmartFillProgress(null), 700);
+        return;
+      }
+    } catch (error) {
+      console.error('Vertical fill backend error:', error);
+    }
+    setSmartFillProgress({ label:'Backend não encontrou alocação válida para esta coluna.', done:0, total:1, indeterminate:false, error:true });
+    window.setTimeout(() => setSmartFillProgress(null), 1600);
+  }, [capQueueByRequiredBins, handleSmartFill, mode2aLeva, onAllocateMany, onAllocateManyProgressive, queueProductIds, selectedProduct]);
+
+  const buildCollectBatch = useCallback((clickedEscaninhoId, scope, slot) => {
     const parsed = parseEscId(clickedEscaninhoId);
     const candidateIds = scope === 'equipment'
       ? orderedEscaninhos(parsed.equipId, parsed.level, clickedEscaninhoId, 'equipment')
@@ -1404,8 +1353,10 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           : [clickedEscaninhoId];
     return candidateIds.filter((escaninhoId) => {
       const alloc = allocations[escaninhoId] || {};
-      return !!alloc.p1;
-    });
+      if (slot === 2) return !!alloc.p2;
+      if (slot === 1) return !!alloc.p1;
+      return !!alloc.p1 || !!alloc.p2;
+    }).map((escaninhoId)=>({ escaninhoId, slot:slot || null }));
   }, [allocations, orderedEscaninhos]);
 
   // Scroll to highlighted product
@@ -1486,11 +1437,18 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
     const hasShift = !!(e && e.shiftKey);
     const scope = hasCmd && hasShift ? 'street' : hasCmd ? 'equipment' : hasShift ? 'level' : 'single';
     const wantsSecondSlot = !!(e && e.altKey) || !!mode2aLeva;
+    const collectSlot = wantsSecondSlot ? 2 : 1;
     const clicked = parseEscId(escsId);
     const allowClickedTopFill = clicked.level === 1 && (scope === 'equipment' || scope === 'street' || scope === 'level');
+    if (!selectedProduct && wantsSecondSlot && p2) {
+      const collectBatch = buildCollectBatch(escsId, scope, 2);
+      if (collectBatch.length > 1 || scope !== 'single') onCollectMany(collectBatch);
+      else onCollectMany([{ escaninhoId:escsId, slot:2 }]);
+      return;
+    }
     if (p1 && !wantsSecondSlot) {
-      const collectBatch = buildCollectBatch(escsId, scope);
-      if (collectBatch.length > 1) {
+      const collectBatch = buildCollectBatch(escsId, scope, collectSlot);
+      if (collectBatch.length > 1 || scope !== 'single') {
         onCollectMany(collectBatch);
         return;
       }
@@ -1498,63 +1456,32 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       return;
     }
     if (hasAllocationSource) {
-      if ((scope === 'equipment' || scope === 'level' || scope === 'street') && !selectedProduct && (queueProductIds || []).length > 1) {
-        try {
-          const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : 'equipamento';
-          const levaLabel = wantsSecondSlot ? '2ª leva da ' : '';
-          setSmartFillProgress({ label:`Calculando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:1, indeterminate:true });
-          const smartBatch = await handleSmartFill(escsId, scope, { allowSecondSlot:wantsSecondSlot, allowClickedTopLevel:allowClickedTopFill });
-          if (smartBatch && smartBatch.length) {
-            if (typeof onAllocateManyProgressive === 'function') {
-              setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
-              await onAllocateManyProgressive(smartBatch, (done, total) => {
-                setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done, total, indeterminate:false });
-              });
-            } else {
-              onAllocateMany(smartBatch);
-            }
-            setSmartFillProgress({ label:'Alocação concluída.', done:smartBatch.length, total:smartBatch.length, indeterminate:false });
-            window.setTimeout(() => setSmartFillProgress(null), 700);
-            return;
+      try {
+        const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : scope === 'equipment' ? 'equipamento' : 'escaninho';
+        const levaLabel = wantsSecondSlot ? '2ª leva da ' : '';
+        setSmartFillProgress({ label:`Calculando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:1, indeterminate:true });
+        const smartBatch = await handleSmartFill(escsId, scope, { allowSecondSlot:wantsSecondSlot, allowClickedTopLevel:allowClickedTopFill });
+        if (smartBatch && smartBatch.length) {
+          if (typeof onAllocateManyProgressive === 'function') {
+            setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done:0, total:smartBatch.length, indeterminate:false });
+            await onAllocateManyProgressive(smartBatch, (done, total) => {
+              setSmartFillProgress({ label:`Aplicando alocação da ${levaLabel}${scopeLabel}…`, done, total, indeterminate:false });
+            });
+          } else {
+            onAllocateMany(smartBatch);
           }
-	          setSmartFillProgress({ label:explainAllocationFailure(escsId), done:0, total:1, indeterminate:false, error:true });
-	          window.setTimeout(() => setSmartFillProgress(null), 1800);
-	          return;
-        } catch (error) {
-          setSmartFillProgress(null);
-          console.error('Smart fill backend error:', error);
+          setSmartFillProgress({ label:'Alocação concluída.', done:smartBatch.length, total:smartBatch.length, indeterminate:false });
+          window.setTimeout(() => setSmartFillProgress(null), 700);
+          return;
         }
+      } catch (error) {
+        console.error('Smart fill backend error:', error);
       }
-      const allocationBatch = buildAllocationBatch(escsId, { scope, slot:wantsSecondSlot ? 2 : 1, allowClickedTop:allowClickedTopFill });
-      if (allocationBatch.length > 1) {
-        onAllocateMany(allocationBatch);
-        return;
-      }
-	      if (allocationBatch.length === 1) {
-	        const item = allocationBatch[0];
-	        onAllocate(item.escaninhoId, item.productId, item.slot);
-	        return;
-	      }
-	      setSmartFillProgress({ label:explainAllocationFailure(escsId), done:0, total:1, indeterminate:false, error:true });
-	      window.setTimeout(() => setSmartFillProgress(null), 1800);
-	      return;
-	    }
-    if (p1 && !wantsSecondSlot) {
-      const collectBatch = buildCollectBatch(escsId, scope);
-      if (collectBatch.length > 1) {
-        onCollectMany(collectBatch);
-        return;
-      }
-      if (!wantsSecondSlot && p1) onCollect(escsId,p1);
+      setSmartFillProgress({ label:'Backend não encontrou alocação válida para este escopo.', done:0, total:1, indeterminate:false, error:true });
+      window.setTimeout(() => setSmartFillProgress(null), 1800);
       return;
     }
-    if(selectedProduct){
-      if(!p1) onAllocate(escsId,selectedProduct,1);
-      else if(wantsSecondSlot&&!p2&&parseBoardEntryCode(p1.id)!==parseBoardEntryCode(selectedProduct)) onAllocate(escsId,selectedProduct,2);
-    } else {
-      if(p1) onCollect(escsId,p1);
-    }
-  },[selectedProduct,queueProductIds,mode2aLeva,hasAllocationSource,buildAllocationBatch,buildCollectBatch,handleSmartFill,explainAllocationFailure,onAllocate,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
+  },[selectedProduct,mode2aLeva,hasAllocationSource,buildCollectBatch,handleSmartFill,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -1633,6 +1560,9 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
           globalEquipmentFilter={globalEquipmentFilter}
           globalPlanogramMode={globalPlanogramMode}
           pendingEquipmentTypeChanges={pendingEquipmentTypeChanges}
+          verticalLaneLocks={verticalLaneLocks}
+          onToggleVerticalLaneLock={toggleVerticalLaneLock}
+          onFillVerticalLane={handleFillVerticalLane}
         />
       ))}
 

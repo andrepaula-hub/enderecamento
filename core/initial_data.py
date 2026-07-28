@@ -2319,7 +2319,7 @@ def _enrich_base_map_with_master_etl(
                     merged["vol_l_unitario"] = vol_l
 
         categoria_site_norm = normalize_string(merged.get("categoria_site")).lower()
-        if categoria_site_norm:
+        if categoria_site_norm and normalize_string(merged.get("grupo")) == "":
             merged["grupo"] = normalize_string(dic_cat_map.get(categoria_site_norm, merged.get("grupo") or "neutro")).lower()
 
         venda_total_num = parse_number(merged.get("venda_total"))

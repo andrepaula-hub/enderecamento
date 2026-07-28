@@ -85,6 +85,35 @@ function getFlags(product) {
   return flags;
 }
 
+function escaninhoLabel(escaninhoId) {
+  const parts = String(escaninhoId || '').split('-');
+  const pos = parseInt(parts.pop() || '', 10);
+  const level = parseInt(parts.pop() || '', 10);
+  if (!Number.isFinite(level) || !Number.isFinite(pos) || level <= 0 || pos <= 0) return '';
+  return `${level}${String.fromCharCode(64 + pos)}`;
+}
+
+function AddressBadge({ label, locked }) {
+  if (!label) return null;
+  return (
+    <span style={{
+      flexShrink:0,
+      fontSize:8,
+      fontWeight:900,
+      lineHeight:1,
+      color:locked?'#B91C1C':'#475569',
+      background:locked?'rgba(254,226,226,0.96)':'rgba(255,255,255,0.88)',
+      border:`1px solid ${locked?'rgba(239,68,68,0.42)':'rgba(148,163,184,0.28)'}`,
+      borderRadius:3,
+      padding:'2px 4px',
+      fontFamily:'var(--font-numeric)',
+      letterSpacing:0,
+    }}>
+      {label}
+    </span>
+  );
+}
+
 // ── Single product half-cell (used inside slot-duplo) ────────────────────────
 function ProductHalf({ product, compact }) {
   if (!product) return null;
@@ -107,7 +136,7 @@ function ProductHalf({ product, compact }) {
 }
 
 // ── Main Escaninho cell ──────────────────────────────────────────────────────
-const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isHighlighted, isAllocating, equipCap, onClick, onHover, onHoverEnd }) {
+const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product2, isEmpty, isSelected, isHighlighted, isAllocating, isLocked=false, equipCap, onClick, onHover, onHoverEnd }) {
   const [hov, setHov] = useState(false);
   const gs1 = product1 ? (GROUP_STYLE[product1.grupo] || GROUP_STYLE.Neutro) : null;
   const gs2 = product2 ? (GROUP_STYLE[product2.grupo] || GROUP_STYLE.Neutro) : null;
@@ -115,24 +144,35 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
   const flags1 = product1 ? getFlags(product1) : [];
   const isChemical = product1?.quimico || product2?.quimico;
   const isDual = product1 && product2;
+  const addressLabel = escaninhoLabel(escaninhoId);
   // volExceed removed per feedback
 
   const emptyStyle = {
-    background: isAllocating ? 'rgba(13,171,119,0.06)' : 'transparent',
-    border: `1px dashed ${isAllocating ? 'rgba(13,171,119,0.5)' : 'rgba(148,163,184,0.3)'}`,
+    background: isLocked ? 'rgba(254,226,226,0.55)' : (isAllocating ? 'rgba(13,171,119,0.06)' : 'transparent'),
+    border: `1px dashed ${isLocked ? 'rgba(220,38,38,0.55)' : (isAllocating ? 'rgba(13,171,119,0.5)' : 'rgba(148,163,184,0.3)')}`,
     cursor: isAllocating ? 'pointer' : 'default',
   };
 
   const baseStyle = {
     flex: 1, height: 62, borderRadius: 4, position:'relative', overflow:'hidden', flexShrink:0, minWidth:0,
     cursor: onClick ? 'pointer' : 'default', userSelect:'none',
-    transition: 'box-shadow 0.12s, border-color 0.12s, transform 0.1s',
+    transition: 'box-shadow 0.12s, border-color 0.12s, transform 0.1s, filter 0.12s',
+    filter:isLocked?'saturate(0.45) brightness(0.96)':'none',
   };
 
   if (isEmpty || !product1) {
     return (
       <div data-location-id={escaninhoId} style={{ ...baseStyle, ...emptyStyle }}
-        onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseLeave={onHoverEnd} />
+        onClick={e=>onClick&&onClick(escaninhoId,product1,product2,e)} onMouseLeave={onHoverEnd}>
+        <div style={{ position:'absolute', top:4, left:4 }}>
+          <AddressBadge label={addressLabel} locked={isLocked} />
+        </div>
+        {isLocked && (
+          <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none', color:'#B91C1C', fontSize:18, fontWeight:900 }}>
+            ×
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -158,6 +198,10 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
         <div style={{ position:'absolute', top:2, right:2, background:'rgba(255,255,255,0.92)', border:`1px solid ${dualColor}`, borderRadius:3, padding:'1px 4px', lineHeight:1 }} title="Slot duplo — 2 produtos neste escaninho">
           <span style={{ fontSize:8, fontWeight:900, color:dualColor }}>2×</span>
         </div>
+        <div style={{ position:'absolute', bottom:2, right:2 }}>
+          <AddressBadge label={addressLabel} locked={isLocked} />
+        </div>
+        {isLocked && <div style={{ position:'absolute', inset:0, border:'2px solid rgba(220,38,38,0.72)', background:'repeating-linear-gradient(135deg, rgba(220,38,38,0.10) 0 6px, transparent 6px 12px)', pointerEvents:'none' }} />}
       </div>
     );
   }
@@ -177,7 +221,8 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
         {/* Top row: curva + flags */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:2 }}>
           <span style={{ fontSize:11, fontWeight:800, color:cc1, lineHeight:1 }}>{product1.curva}</span>
-          <div style={{ display:'flex', gap:2, alignItems:'center' }}>
+          <div style={{ display:'flex', gap:2, alignItems:'center', minWidth:0 }}>
+            <AddressBadge label={addressLabel} locked={isLocked} />
             {flags.slice(0, 3).map(f => <FlagBadge key={f} type={f} size={9} />)}
           </div>
         </div>
@@ -188,6 +233,7 @@ const DSEEscaninho = memo(function DSEEscaninho({ escaninhoId, product1, product
           {product1.nome}
         </div>
       </div>
+      {isLocked && <div style={{ position:'absolute', inset:0, border:'2px solid rgba(220,38,38,0.72)', background:'repeating-linear-gradient(135deg, rgba(220,38,38,0.10) 0 6px, transparent 6px 12px)', pointerEvents:'none' }} />}
     </div>
   );
 }); // end memo(DSEEscaninho)

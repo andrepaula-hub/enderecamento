@@ -6,10 +6,25 @@ Este documento consolida regras inferidas do frontend/backend atual e decisoes o
 
 ## Fontes Atuais
 
-- `Dahsboard.html`: regras do preenchimento automatico, validacoes de placement, score, slot duplo e painel de regras.
+- `shopper_front/`: UI atual servida em `localhost:8000` via FastAPI (`app.py`) e `/shopper-static/`.
+- `Dahsboard.html`: legado; nao e servido pelo app atual e nao deve ser usado como fonte para novas alteracoes.
 - `core/initial_data.py`: metricas de capacidade, planejamento por curva, planejamento de prateleira e separacao de quimicos.
 - `core/enrichment_pipeline.py`: enriquecimento de `Base_Produtos`, calculo de `is_pesado` por limite de peso e campos de categoria/degelo.
 - `core/gsheets_backend.py` e `core/moves.py`: persistencia de movimentos, equipamentos, slots, filtros e export.
+
+## Fonte Unica Do Motor
+
+Toda decisao de alocacao deve consumir uma unica fonte da verdade: `core/agent_scoring.py`, acessado por use cases/endpoints backend.
+
+O frontend nao deve conter regra propria de escolha de escaninho, score, greedy, penalidade de adjacencia, desempate ou validacao dura. Ele pode:
+
+- mostrar mapa/produtos;
+- coletar filtros e escopo;
+- chamar endpoint backend;
+- aplicar/renderizar os movimentos retornados;
+- destacar violacoes remanescentes como validacao visual.
+
+Nao adicionar novos algoritmos locais em `shopper_front/`. Fluxos como equipamento inteiro, nivel horizontal, coluna vertical, rua e loja inteira devem diferir apenas no escopo enviado ao backend.
 
 ## Classificacao de Severidade
 
@@ -179,44 +194,43 @@ Ambos podem ser inferidos pelo agente na previa:
 
 ## Produtos Multi-Escaninho
 
-Origem: `multiBinRequireSameLevel` no frontend.
+Origem: `core/agent_scoring.py`.
 
-Regra dura/branda conforme fallback.
+Regra dura.
 
-- Produto que exige mais de um escaninho deve priorizar o mesmo nivel e continuidade horizontal.
-- O frontend atual permite fallback quando necessario, mas o agente deve tratar quebra de nivel como decisao condicionada.
+- Produto que exige mais de um escaninho deve receber sempre um bloco contiguo.
+- Preferir bloco horizontal no mesmo nivel.
+- Se nao houver bloco horizontal, permitir apenas bloco contiguo empilhado/alinhado entre niveis adjacentes.
 - Produto parcialmente alocado e proibido por regra dura.
+- Nao usar score para "comprar" uma quebra dessa regra.
 
 Regra especifica de geladeira:
 
 - produto de geladeira que exigiria mais de 4 escaninhos pode ser limitado a no maximo 4 escaninhos quando `degelo = PODE`;
 - se o limite de 4 escaninhos gerar falta operacional, o agente deve explicar na previa.
 
-## Subcategoria e Adjacencia
+## Subcategoria, Familia Visual e Fabricante
 
-Origem: score e reparo por swap no frontend.
+Origem: `core/agent_scoring.py`.
 
-Regra branda, com prioridade forte contra repeticao lado a lado.
+Regra dura para subcategoria especifica.
 
-- Evitar repeticao de subcategoria lado a lado no mesmo nivel; esta e a pior proximidade e deve ter penalidade mais alta.
-- Repeticao no mesmo nivel e aceitavel quando os produtos ficam relativamente longe.
-- Proximidade vertical e aceitavel, mas ainda deve ser evitada quando houver alternativas boas.
-- Aplicar cooldown entre subcategorias.
-- Aplicar reparo por swap depois do preenchimento para reduzir proximidade.
-- Bonus para manter o mesmo SKU adjacente quando o SKU precisa de multiplos escaninhos.
+- Duas SKUs diferentes da mesma subcategoria especifica nao devem ficar no mesmo nivel do mesmo equipamento.
+- A proibicao vale para preenchimento de equipamento, nivel horizontal, coluna vertical, rua inteira e loja inteira.
+- Subcategorias genericas como vazio, `outros`, `geral`, `mercearia` e `limpeza` nao acionam essa regra.
+- Se uma SKU nao couber sem repetir subcategoria no nivel, ela deve ficar nao alocada para que outra SKU do filtro possa ocupar o endereco.
+- O backend deve validar o lote final antes de devolver movimentos; se o lote ainda terminar com repeticao de subcategoria no mesmo nivel, os movimentos responsaveis sao descartados.
 
-Pesos atuais do score:
+Regra media para familia visual.
 
-- adjacencia vertical: `140`
-- adjacencia horizontal: `130`
-- subcategoria ja presente no mesmo nivel: `60`
-- cooldown: `55`
-- streak: `25`
-- boost por saldo restante: `30`
-- diversidade de nivel: `20`
-- mesmo SKU adjacente: `120`
-- lookahead: `0.4`
-- penalidade de violacao dura em fallback: `1000`
+- `familia_visual` deve ser coluna do ETL/base quando existir taxonomia curada.
+- Na falta da coluna, o motor pode inferir uma familia visual pelo nome normalizado para reduzir repeticoes obvias como variantes de uma mesma linha.
+- Familia visual deve evitar concentracao no mesmo nivel/equipamento, mas nao deve bloquear alocacao como regra dura sem aprovacao operacional.
+
+Regra leve para fabricante.
+
+- Evitar concentracao de fabricante no mesmo nivel e, em segunda prioridade, no mesmo equipamento.
+- Fabricante nao deve bloquear por regra dura, porque fabricantes grandes podem ter categorias visualmente muito diferentes.
 
 ## Curva
 

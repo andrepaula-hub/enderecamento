@@ -10,6 +10,10 @@ Automatizar o fluxo que hoje e feito manualmente no site local, usando os recurs
 
 O agente nao deve "clicar a loja inteira" escaninho por escaninho como estrategia principal. Ele deve chamar ferramentas deterministicas do backend, revisar resultados e pedir decisao quando o plano exigir tradeoff operacional.
 
+## Responsabilidade de Aplicacao
+
+Quando o usuario pedir uma mudanca no site/app de enderecamento, o agente e responsavel por aplicar a mudanca ate o ambiente em uso. Isso inclui identificar qual workspace/container esta servindo a tela aberta, reiniciar ou rebuildar o servidor necessario, recarregar caches quando aplicavel e validar que a versao nova esta respondendo antes de encerrar.
+
 ## Entradas que o Agente Deve Pedir
 
 - Janela de vendas.
@@ -125,9 +129,15 @@ Configuracao da ETL mae fixa:
 - Preferencial: `ENDERECAMENTO_MASTER_SHEET`
 - Alternativas aceitas: `ETL_MASTER_SHEET` ou `AGENT_ETL_MASTER_SHEET`
 
+## Regra Arquitetural Obrigatoria
+
+Nao deve existir diferenca entre algoritmos/motores de alocacao. Toda acao que escolha escaninhos deve consumir uma unica fonte da verdade: o motor backend em `core/agent_scoring.py`, exposto por use cases/endpoints em `backend/application/addressing/` e `backend/entrypoints/api/routes.py`.
+
+O frontend atual (`shopper_front/`, servido por `localhost:8000`) deve somente enviar intencao, filtros, escopo e opcoes para o backend. Qualquer scoring/greedy local em JS e legado tecnico a remover.
+
 ## Lacuna Tecnica Principal
 
-O autoenderecamento inteligente com score completo ainda esta principalmente no frontend (`Dahsboard.html`). A primeira versao backend ja faz previa, validacao dura e aplicacao de movimentos, mas ainda precisa evoluir para reproduzir:
+A primeira versao backend ja faz previa, validacao dura e aplicacao de movimentos, mas ainda precisa evoluir para reproduzir ou substituir totalmente:
 
 - score completo de adjacencia;
 - sparse fill;

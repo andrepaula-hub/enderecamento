@@ -96,7 +96,8 @@ def build_base_produtos_map(
         if quantidade <= 0:
             continue
         cat_site = normalize_string(row.get("categoria_site")).lower()
-        row["grupo"] = normalize_string(dic_cat_map.get(cat_site, "neutro")).lower()
+        grupo_planilha = normalize_string(row.get("grupo")).lower()
+        row["grupo"] = grupo_planilha or normalize_string(dic_cat_map.get(cat_site, "neutro")).lower()
 
         altura_val = parse_number(row.get("altura_cm")) or 0.0
         row["is_alto"] = bool(limite_altura and altura_val >= limite_altura)

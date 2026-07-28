@@ -239,6 +239,9 @@ def _name_family(row: dict[str, Any]) -> str:
 
 
 def _visual_family(row: dict[str, Any]) -> str:
+    explicit_family = _normalize_text(row.get("familia_visual") or row.get("familia"))
+    if explicit_family:
+        return explicit_family
     family = row.get("_visual_family")
     if family is not None:
         return str(family)
@@ -248,6 +251,23 @@ def _visual_family(row: dict[str, Any]) -> str:
     group = _group(row) or "neutro"
     category = _category_group(row) or "seco"
     return f"{category}|{group}|{name_family}"
+
+
+_GENERIC_SUBCATEGORIES = {
+    "",
+    "sem subcategoria",
+    "sem categoria",
+    "outros",
+    "outras",
+    "geral",
+    "mercearia",
+    "limpeza",
+}
+
+
+def _actionable_subcategory(row: dict[str, Any]) -> str:
+    subcat = str(row.get("_subcategoria_norm") or _normalize_text(row.get("subcategoria")))
+    return "" if subcat in _GENERIC_SUBCATEGORIES else subcat
 
 
 def _degelo_class(row: dict[str, Any]) -> str:
@@ -397,7 +417,7 @@ def _hard_rule_violations(
     if slot.occupant_count == 1 and not rules.allow_second_slot:
         reasons.append("Segundo produto por endereco nao liberado.")
     if slot.occupant_count == 1:
-        subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+        subcat = _actionable_subcategory(product)
         if subcat and subcat in (slot.occupant_subcategories or set()):
             reasons.append("Subcategoria repetida no mesmo endereco.")
         if slot.capacity_l and slot.capacity_l > 0:
@@ -470,6 +490,11 @@ def _pick_slots_for_product(
         opposite_degelo_units_remaining,
     ):
         for conflict_tier in _conflict_avoidance_tiers(product, candidate_tier, placement_index):
+            conflict_tier = [
+                slot for slot in conflict_tier
+                if not _has_same_level_subcategory_conflict(product, slot, placement_index)
+                and not _has_direct_subcategory_adjacency(product, slot, placement_index)
+            ]
             if not conflict_tier:
                 continue
             if required == 1 and not existing_product_placements:
@@ -624,7 +649,7 @@ def _has_same_level_attribute_conflict(
         return False
 
     checks: list[tuple[Any, ...]] = []
-    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    subcat = _actionable_subcategory(product)
     if subcat:
         checks.append((subcat, slot.equip_id))
     family = _visual_family(product)
@@ -646,6 +671,46 @@ def _has_same_level_attribute_conflict(
     return False
 
 
+def _has_same_level_subcategory_conflict(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None:
+        return False
+    subcat = _actionable_subcategory(product)
+    if not subcat:
+        return False
+    for placement in placement_index.get((subcat, slot.equip_id), []):
+        if _same_product(product, placement):
+            continue
+        try:
+            if int(placement.get("level")) == int(slot.level):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _has_direct_subcategory_adjacency(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None or slot.position is None:
+        return False
+    subcat = _actionable_subcategory(product)
+    if not subcat:
+        return False
+    for placement in placement_index.get((subcat, slot.equip_id), []):
+        if _same_product(product, placement):
+            continue
+        level_distance, pos_distance = _placement_distance(slot, placement)
+        if level_distance == 0 and pos_distance == 1:
+            return True
+    return False
+
+
 def _has_direct_attribute_adjacency(
     product: dict[str, Any],
     slot: Slot,
@@ -655,7 +720,7 @@ def _has_direct_attribute_adjacency(
         return False
 
     checks: list[tuple[Any, ...]] = []
-    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    subcat = _actionable_subcategory(product)
     if subcat:
         checks.append((subcat, slot.equip_id))
     family = _visual_family(product)
@@ -845,31 +910,6 @@ def _score_run(
         _score_slot(product, slot, placement_index, curve_zone_map, degelo_preferred_equips, curve_priority_enabled)
         for slot in run
     )
-    levels = {slot.level for slot in run}
-    equips = {slot.equip_id for slot in run}
-    if len(levels) == 1:
-        score += 500
-    if len(equips) == 1:
-        score += 300
-    positions = sorted(slot.position for slot in run if slot.position is not None)
-    if len(positions) == len(run) and positions == list(range(positions[0], positions[0] + len(run))):
-        score += 400
-    if len(equips) == 1 and len(levels) == 2:
-        numeric_levels = sorted(int(level) for level in levels if level is not None)
-        if len(numeric_levels) == 2 and numeric_levels[1] == numeric_levels[0] + 1:
-            by_level: dict[int, list[int]] = {}
-            for slot in run:
-                if slot.level is None or slot.position is None:
-                    continue
-                by_level.setdefault(int(slot.level), []).append(int(slot.position))
-            level_positions = [sorted(values) for values in by_level.values()]
-            if len(level_positions) == 2:
-                larger = max(level_positions, key=len)
-                smaller = min(level_positions, key=len)
-                if set(smaller).issubset(set(larger)):
-                    score += 250
-                if smaller and larger and smaller[0] in {larger[0], larger[-1]}:
-                    score += 120
     return score
 
 
@@ -884,7 +924,6 @@ def _score_slot(
     score = 0.0
     group = _group(product)
     curve = _curve_value(product)
-    max_level = slot.max_level or max(slot.level or 1, 1)
     if group == "quimico":
         score += 500
     if curve == "A" and not slot.is_top_level:
@@ -892,14 +931,8 @@ def _score_slot(
     if curve == "C" and slot.is_top_level:
         score += 20
     if _is_prateleira(slot):
-        peso = parse_number(product.get("peso_kg_unitario")) or 0
         if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
             score += 30
-        if parse_bool_flag(product.get("is_fragil")) or parse_bool_flag(product.get("is_alto")):
-            if slot.level is not None:
-                score += max(0, max_level - slot.level) * 12
-        if parse_bool_flag(product.get("is_pequeno")) and slot.level is not None:
-            score += slot.level * 6
     if _is_geladeira(slot) and group == "flv" and slot.position is not None:
         wall_positions = {1}
         if slot.max_position and slot.max_position > 1:
@@ -950,7 +983,7 @@ def _placement_distance(slot: Slot, placement: dict[str, Any]) -> tuple[int | No
 
 
 def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dict[tuple[str, str], list[dict[str, Any]]]) -> float:
-    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    subcat = _actionable_subcategory(product)
     penalty = 0.0
     if subcat:
         for placement in placement_index.get((subcat, slot.equip_id), []):
@@ -1121,7 +1154,7 @@ def _build_placement_index(placements: list[dict[str, Any]]) -> dict[tuple[str, 
 
 
 def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], placement: dict[str, Any]) -> None:
-    subcat = _normalize_text(placement.get("subcategoria"))
+    subcat = _actionable_subcategory(placement)
     equip_id = normalize_string(placement.get("equip_id"))
     if not equip_id:
         return
@@ -1165,7 +1198,7 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
 def _commit_product_to_slot(slot: Slot, product: dict[str, Any]) -> None:
     slot.occupant_count += 1
     slot.occupant_codes = (slot.occupant_codes or []) + [normalize_string(product.get("product_code"))]
-    subcat = str(product.get("_subcategoria_norm") or _normalize_text(product.get("subcategoria")))
+    subcat = _actionable_subcategory(product)
     if subcat:
         slot.occupant_subcategories = set(slot.occupant_subcategories or set())
         slot.occupant_subcategories.add(subcat)

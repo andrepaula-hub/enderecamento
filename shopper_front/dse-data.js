@@ -59,6 +59,37 @@
     return raw;
   }
 
+  var VERTICAL_LANE_LOCKS_STORAGE_KEY = 'enderecamento:vertical_lane_locks:v1';
+
+  function verticalLaneKey(equipId, pos) {
+    var normalizedEquip = normalizeText(equipId);
+    var normalizedPos = String(pos == null ? '' : pos).trim();
+    return normalizedEquip && normalizedPos ? normalizedEquip + '|' + normalizedPos : '';
+  }
+
+  function readVerticalLaneLocks() {
+    try {
+      var raw = window.localStorage.getItem(VERTICAL_LANE_LOCKS_STORAGE_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function writeVerticalLaneLocks(locks) {
+    try {
+      window.localStorage.setItem(VERTICAL_LANE_LOCKS_STORAGE_KEY, JSON.stringify(locks || []));
+    } catch (error) {}
+  }
+
+  function isVerticalLaneLocked(equipId, pos, locks) {
+    var key = verticalLaneKey(equipId, pos);
+    if (!key) return false;
+    var list = Array.isArray(locks) ? locks : readVerticalLaneLocks();
+    return list.indexOf(key) >= 0;
+  }
+
   function normalizeGroup(value) {
     var text = normalizeText(value).toLowerCase();
     if (text === 'flv' || text === 'flvs') return 'FLV';
@@ -353,6 +384,7 @@
     postApiAsync: postApiAsync,
     saveVersion: function (name) { return postApi('savePlanoVersion', [name]); },
     saveVersionAsync: function (name) { return postApiAsync('savePlanoVersion', [name]); },
+    saveVersionSnapshotAsync: function (name, locations, expectedEquipments, user) { return postApiAsync('savePlanoVersionSnapshot', [name, locations || [], expectedEquipments || [], user || 'interface']); },
     listVersions: function () { return postApi('listPlanoVersions', []); },
     listVersionsAsync: function () { return postApiAsync('listPlanoVersions', []); },
     restoreVersion: function (versionId) { return postApi('restorePlanoVersion', [versionId]); },
@@ -363,7 +395,7 @@
     getMapLoadStatus: function () { return postApi('getMapLoadStatus', []); },
     connectWorkflowSheets: function (target, master, mix) { return postApi('connectWorkflowSheets', [target, master, mix]); },
     getWorkflowSheets: function () { return postApi('getWorkflowSheets', []); },
-    runEtl: function () { return postApi('runEtlToBaseProducts', []); },
+    runEtl: function (options) { return postApi('runEtlToBaseProducts', options ? [options] : []); },
     sendEtlWarningGroupAsync: function (warningType) { return postApiAsync('sendEtlWarningGroupJob', [warningType]); },
     sendMissingVolumetriaDefaultAsync: function (defaultVolumeCm3) { return postApiAsync('sendMissingVolumetriaDefault', [defaultVolumeCm3]); },
     refreshEtlWarningAsync: function (warningType) { return postApiAsync('refreshEtlWarning', [warningType]); },
@@ -375,6 +407,9 @@
     importCard175MetabaseJobAsync: function (payload) { return postApiAsync('importCard175MetabaseJob', [payload]); },
     saveBatchMoves: function (moves, options) { return postApi('saveBatchMoves', [moves, options || {}]); },
     saveBatchMovesAsync: function (moves, options) { return postApiAsync('saveBatchMoves', [moves, options || {}]); },
+    createNewEquipmentAsync: function (ruaNum, equipNum, equipType, user) { return postApiAsync('createNewEquipment', [ruaNum, equipNum, equipType, user || 'interface']); },
+    deleteEquipmentAndProductsAsync: function (equipId, user) { return postApiAsync('deleteEquipmentAndProducts', [equipId, user || 'interface']); },
+    renameEquipmentAsync: function (oldEquipId, newEquipId, user) { return postApiAsync('renameEquipment', [oldEquipId, newEquipId, user || 'interface']); },
     changeEquipmentTypeAsync: function (equipId, newType, recolherProdutos) { return postApiAsync('changeEquipmentType', [equipId, newType, !!recolherProdutos]); },
     generateLayoutAtual: function () { return postApi('generateLayoutAtual', []); },
     generateLayoutAtualAsync: function () { return postApiAsync('generateLayoutAtual', []); },
@@ -404,5 +439,9 @@
     normalizeText: normalizeText,
     normalizeSearchText: normalizeSearchText,
     parseBoardEntryCode: parseBoardEntryCode,
+    verticalLaneKey: verticalLaneKey,
+    readVerticalLaneLocks: readVerticalLaneLocks,
+    writeVerticalLaneLocks: writeVerticalLaneLocks,
+    isVerticalLaneLocked: isVerticalLaneLocked,
   };
 })();

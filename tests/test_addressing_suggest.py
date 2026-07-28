@@ -59,6 +59,35 @@ def _product(code, **overrides):
     return base
 
 
+def test_suggest_allocations_blocks_same_subcategory_when_only_same_level_exists():
+    result = suggest_allocations(
+        unallocated_codes=["NEW"],
+        products_data=[
+            _product("BASE", sub="Detergentes e Lava Louças"),
+            _product("NEW", sub="Detergentes e Lava Louças"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 4, "cap": 100},
+                ],
+            },
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": None, "p2": None},
+            "R1-E1-1-2": {"p1": "BASE", "p2": None},
+            "R1-E1-1-3": {"p1": None, "p2": None},
+            "R1-E1-1-4": {"p1": None, "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["unallocated"] == ["NEW"]
+
+
 def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level_block():
     result = suggest_allocations(
         unallocated_codes=["LEVE", "PESADO"],
@@ -529,6 +558,71 @@ def test_suggest_allocations_avoids_same_subcategory_on_same_level_when_other_le
     assert result["success"] is True
     assert result["moves"]
     assert not result["moves"][0]["escaninhoId"].startswith("R1-E1-1-")
+
+
+def test_suggest_allocations_keeps_rap10_variants_on_different_levels():
+    result = suggest_allocations(
+        unallocated_codes=["CT189445", "CT189446"],
+        products_data=[
+            _product("CT189445", nome="RAP10 ORIGINAL 297G", sub="Wraps e Tortillas", fabricante="Bimbo"),
+            _product("CT189446", nome="RAP10 INTEGRAL 297G", sub="Wraps e Tortillas", fabricante="Bimbo"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 7, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+            for level in range(1, 6)
+            for pos in range(1, 8)
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert {move["productCode"] for move in result["moves"]} == {"CT189445", "CT189446"}
+    levels = {
+        move["productCode"]: int(move["escaninhoId"].split("-")[-2])
+        for move in result["moves"]
+    }
+    assert levels["CT189445"] != levels["CT189446"]
+
+
+def test_suggest_allocations_spreads_chocolate_trap_mix_across_levels():
+    codes = ["SNICKERS", "CHOC_BRANCO", "KITKAT", "LACTA_AO_LEITE", "TONYS"]
+    result = suggest_allocations(
+        unallocated_codes=codes,
+        products_data=[
+            _product("SNICKERS", nome="Chocolate Snickers 45g", sub="Chocolates e Bombons", fabricante="Mars"),
+            _product("CHOC_BRANCO", nome="Chocolate Branco Laka Lacta 80g", sub="Chocolates e Bombons", fabricante="Mondelez"),
+            _product("KITKAT", nome="Chocolate Kit Kat 41,5g", sub="Chocolates e Bombons", fabricante="Nestle"),
+            _product("LACTA_AO_LEITE", nome="Chocolate ao leite Lacta 80g", sub="Chocolates e Bombons", fabricante="Mondelez"),
+            _product("TONYS", nome="Chocolate Tony's Chocolonely 180g", sub="Chocolates e Bombons", fabricante="Tony's"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 7, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+            for level in range(1, 6)
+            for pos in range(1, 8)
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert {move["productCode"] for move in result["moves"]} == set(codes)
+    levels = [int(move["escaninhoId"].split("-")[-2]) for move in result["moves"]]
+    assert len(levels) == len(set(levels))
 
 
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():

@@ -9,6 +9,7 @@ from core.agent_scoring import (
     AgentRules,
     Slot,
     _add_placement_to_index,
+    _actionable_subcategory,
     _build_placement_index,
     _commit_product_to_slot,
     _group,
@@ -259,6 +260,41 @@ def _drop_invalid_plan_moves(
         if len(slot_ids) != required or not _slot_ids_are_contiguous_block(slot_ids, map_structure):
             invalid_codes.add(code)
 
+    proposed_codes = {_entry_product_code(move.get("productCode")) for move in proposed}
+    final_occupants: list[dict[str, Any]] = []
+    for slot_id, alloc in (allocations or {}).items():
+        if not isinstance(alloc, dict):
+            continue
+        parsed = _parse_front_location_id(slot_id)
+        if not parsed:
+            continue
+        for raw_code in (alloc.get("p1"), alloc.get("p2")):
+            code = _entry_product_code(raw_code)
+            if code and code != BLOCKED_SLOT_CODE:
+                final_occupants.append({**parsed, "code": code, "proposed": False})
+    for move in proposed:
+        code = _entry_product_code(move.get("productCode"))
+        parsed = _parse_front_location_id(move.get("escaninhoId"))
+        if code and parsed:
+            final_occupants.append({**parsed, "code": code, "proposed": True})
+    for idx, left in enumerate(final_occupants):
+        left_product = products_by_code.get(left["code"])
+        left_subcat = _actionable_subcategory(left_product) if left_product else ""
+        if not left_subcat:
+            continue
+        for right in final_occupants[idx + 1:]:
+            if left["code"] == right["code"]:
+                continue
+            if left["equip_id"] != right["equip_id"] or left["level"] != right["level"]:
+                continue
+            right_product = products_by_code.get(right["code"])
+            right_subcat = _actionable_subcategory(right_product) if right_product else ""
+            if left_subcat and left_subcat == right_subcat:
+                if left["proposed"] and left["code"] in proposed_codes:
+                    invalid_codes.add(left["code"])
+                if right["proposed"] and right["code"] in proposed_codes:
+                    invalid_codes.add(right["code"])
+
     mixed_degelo_equips: set[str] = set()
     degelo_by_equip: dict[str, set[str]] = {}
     for code, slot_ids in final_slots_by_code.items():
@@ -357,6 +393,7 @@ def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
         "grupo": str(p.get("grupo") or ""),
         "curva": str(p.get("curva") or ""),
         "subcategoria": str(p.get("sub") or p.get("subcategoria") or ""),
+        "familia_visual": str(p.get("familia_visual") or p.get("familia") or ""),
         "nm_fabricante": str(p.get("fabricante") or p.get("nm_fabricante") or ""),
         "peso_kg_unitario": float(p.get("peso") or p.get("peso_kg") or 0),
         "vol_L_unitario": float(p.get("vol") or p.get("vol_L_unitario") or 0),

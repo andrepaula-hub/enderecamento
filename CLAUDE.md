@@ -2,7 +2,7 @@
 
 ## Repositório
 
-- GitHub: `https://github.com/AndreLobo1/enderecamento-local-20260609`
+- GitHub canonico: `https://github.com/andrepaula-hub/enderecamento.git`
 - Branch de desenvolvimento: `frontend-shopper`
 - Branch estável: `main` (versão antiga, funcional mas lenta — toda lógica rodava no front)
 
@@ -12,6 +12,7 @@
 
 - `localhost:8000` → FastAPI + `shopper_front/` (JSX com Babel Standalone)
 - `localhost:80` → nginx + `frontend/` (React/Vite/TypeScript) — **NÃO É USADO pelo usuário**
+- `Dahsboard.html` → legado. **NAO e servido por este app e nao deve ser editado para pedidos sobre o print.**
 
 ```bash
 # Subir o app
@@ -32,7 +33,7 @@ routes/
   etl.py                        # /api/runEtl
   agent.py                      # /api/agent
 core/
-  agent_scoring.py              # ENGINE de scoring/alocação (regras físico-pesado/FLV/ovos/frágil)
+  agent_scoring.py              # FONTE UNICA do motor de scoring/alocacao
   initial_data.py               # ETL: lê planilha → devolve produtos, mapa, etc.
   gsheets_backend.py
 backend/
@@ -46,7 +47,7 @@ backend/
   adapters/                     # google_sheets, sqlite, filesystem
 shopper_front/                  # Interface JSX (Babel Standalone — é o que o usuário usa)
   index.html
-  dse-map.jsx                   # Mapa principal, lógica de fill/alocação
+  dse-map.jsx                   # Mapa principal; deve enviar intencao/escopo ao backend, nao calcular scoring
   dse-prancheta.jsx             # Sidebar (Prancheta) com lista de produtos e filtros
   dse-data.js                   # Parseia HTML → PRODUCT_MAP, mapStructure, queueProductIds
   dse-styles.css
@@ -86,6 +87,16 @@ const product = window.DSEData.PRODUCT_MAP[productCode];
 
 ## Regras de alocação (`core/agent_scoring.py`)
 
+## Arquitetura obrigatoria do motor de alocacao
+
+Toda acao de alocacao que envolva algoritmo, score, escolha de slot, validacao de regra ou preenchimento em massa deve consumir uma unica fonte da verdade:
+
+- fonte canonica: `core/agent_scoring.py`;
+- use cases/API: `backend/application/addressing/` e endpoints em `backend/entrypoints/api/routes.py`;
+- frontend: apenas coleta intencao, filtros, escopo e opcoes; renderiza resultado e validacoes.
+
+E proibido criar ou manter motores paralelos no frontend. Codigo JS como `scoreSlotForProduct`/greedy local em `shopper_front/dse-map.jsx` deve ser tratado como legado tecnico a remover. A regra operacional e: equipamento, nivel, coluna vertical, rua e loja inteira devem chamar o mesmo motor backend com escopo diferente.
+
 | Condição | Regra |
 |----------|-------|
 | `is_pesado` (>2kg) | Proibido no nível 1. Preferência: nível 4 (+70pts), nível 3 (+50pts) |
@@ -101,27 +112,18 @@ const product = window.DSEData.PRODUCT_MAP[productCode];
 - Shift+click → preenche o nível inteiro (scope=level)
 - Filtro Equipamento na Prancheta usa `p.arm` (categoria_armazenagem), não `p.metodo`
 - Cache-busting Babel via `?v=mtime`
-- `scoreSlotForProduct` em JS com regras pesado/FLV/frágil/pequeno
 - Extração correta do código do produto de `boardEntryId`
 - Endpoint backend `POST /api/addressing/suggest` (usa `suggest_allocations.py` → `agent_scoring.py`)
 
 ### Bugs conhecidos ainda não resolvidos
 
-1. **Ordem greedy (crítico)**: O fill atual processa produtos na ordem da fila (alfabética). Produtos mais restritos (pesado, ovos) chegam depois e não encontram slots disponíveis nos níveis certos.
-   - Fix: ordenar por "mais restrito primeiro" antes do greedy (`_sort_products_for_allocation` já existe em `agent_scoring.py`)
+1. **Motor JS local legado (crítico)**: qualquer acao que ainda use `scoreSlotForProduct`/greedy local em `shopper_front/dse-map.jsx` esta fora da arquitetura alvo. Deve migrar para o backend.
 
-2. **Regra de ovos ausente no JS**: `scoreSlotForProduct` em `dse-map.jsx` não implementa a regra de ovos (níveis 2–4).
-
-3. **nomes dos equipamentos hardcodados**: `dse-data.js` `parseEquipId()` sempre reconstrói `R{rua}-E{equip}` ignorando o ID real do HTML.
+2. **nomes dos equipamentos hardcodados**: `dse-data.js` `parseEquipId()` sempre reconstrói `R{rua}-E{equip}` ignorando o ID real do HTML.
 
 ### Lacuna arquitetural principal
 
-A lógica de alocação existe em dois lugares:
-- **`core/agent_scoring.py`** (backend Python, completo e correto)
-- **`scoreSlotForProduct` em `dse-map.jsx`** (reimplementação parcial em JS, com bugs)
-
-O endpoint `POST /api/addressing/suggest` já chama o Python correto, mas o frontend **não o chama**.
-`buildAllocationBatch` em `dse-map.jsx` ainda usa `scoreSlotForProduct` JS localmente.
+Migrar qualquer acao restante de alocacao do frontend para os endpoints backend, mantendo `core/agent_scoring.py` como unica fonte da verdade.
 
 **O trabalho pendente é**: fazer `buildAllocationBatch` chamar o endpoint backend em vez de calcular localmente.
 

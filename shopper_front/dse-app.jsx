@@ -15,6 +15,8 @@ const { useTweaks } = window;
 const CURVA_COLOR = window.DSE_CURVA_COLOR;
 const GROUP_STYLE = window.DSE_GROUP_STYLE;
 const normalizeSearchText = HELPERS.normalizeSearchText || ((value) => String(value || '').toLowerCase());
+const readVerticalLaneLocks = HELPERS.readVerticalLaneLocks || (() => []);
+const isVerticalLaneLockedHelper = HELPERS.isVerticalLaneLocked || (() => false);
 const DSE_SELECTED_STORE_KEY = 'dse.selectedStore.v1';
 
 function resolveBoardEntryProductCode(entryId) {
@@ -138,6 +140,7 @@ function collectStreetFillTargets(state, options) {
   const equipmentIds = new Set(options && options.equipmentIds || []);
   const levelMode = options && options.levelMode || 'all';
   const mapStructure = (options && options.mapStructure) || state.mapStructure || [];
+  const verticalLaneLocks = (options && options.verticalLaneLocks) || readVerticalLaneLocks();
   const targets = [];
   (mapStructure || []).forEach((street) => {
     if (streetId && street.id !== streetId) return;
@@ -147,6 +150,7 @@ function collectStreetFillTargets(state, options) {
       for (let level = 1; level <= eq.niveis; level += 1) {
         if (levelMode === 'without_top' && level === 1) continue;
         for (let pos = 1; pos <= eq.escsPerNivel; pos += 1) {
+          if (isVerticalLaneLockedHelper(eq.id, pos, verticalLaneLocks)) continue;
           const escaninhoId = `${eq.id}-${level}-${pos}`;
           const alloc = state.allocations[escaninhoId] || {};
           if (!alloc.p1) targets.push(escaninhoId);
@@ -868,6 +872,9 @@ const initState = {
   collected:[], unallocated:[...INITIAL_UNALLOCATED], searchQuery:'',
   mapStructure:initMapStructure, equipCollapsed:{}, streetCollapsed:{},
   pendingEquipmentTypeChanges:{},
+  pendingEquipmentCreates:{},
+  pendingEquipmentDeletes:{},
+  pendingEquipmentRenames:{},
   quickActionMessage:'',
   pendingConfirm:null,
   swapSource:null,
@@ -929,15 +936,35 @@ function collectPlacements(allocations) {
   return placements;
 }
 
-function backendMetaForEscaninho(escaninhoId, mapStructure, pendingEquipmentTypeChanges) {
+function remapEscaninhoForRenames(escaninhoId, pendingEquipmentRenames) {
+  let next = String(escaninhoId || '');
+  Object.entries(pendingEquipmentRenames || {}).forEach(([oldId, rename]) => {
+    const newId = typeof rename === 'string' ? rename : rename?.newId;
+    if (newId && next.startsWith(oldId + '-')) next = newId + next.slice(oldId.length);
+  });
+  return next;
+}
+
+function findOldEquipIdForRename(equipId, pendingEquipmentRenames) {
+  const entry = Object.entries(pendingEquipmentRenames || {}).find(([, rename]) => {
+    const newId = typeof rename === 'string' ? rename : rename?.newId;
+    return newId === equipId;
+  });
+  return entry ? entry[0] : '';
+}
+
+function backendMetaForEscaninho(escaninhoId, mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames) {
   const slotMeta = BOOTSTRAP.SLOT_META || {};
   const existing = slotMeta[escaninhoId];
   const parsed = parseEscaninhoId(escaninhoId);
-  if (!pendingEquipmentTypeChanges || !pendingEquipmentTypeChanges[parsed.equipId]) return existing;
+  const oldRenameId = findOldEquipIdForRename(parsed.equipId, pendingEquipmentRenames);
+  if (existing && !pendingEquipmentTypeChanges?.[parsed.equipId] && !oldRenameId) return existing;
   const eq = findEquip(mapStructure, parsed.equipId);
   if (!eq) return existing;
-  const anyEqMeta = Object.values(slotMeta).find((meta) => meta && meta.equipId === parsed.equipId);
-  const sampleLocation = String(anyEqMeta?.locationId || anyEqMeta?.backendBinId || '');
+  const sourceEquipId = oldRenameId || parsed.equipId;
+  const anyEqMeta = Object.values(slotMeta).find((meta) => meta && meta.equipId === sourceEquipId);
+  const fallbackMeta = anyEqMeta || Object.values(slotMeta).find((meta) => meta && (meta.locationId || meta.backendBinId));
+  const sampleLocation = String(fallbackMeta?.locationId || fallbackMeta?.backendBinId || '');
   const galpaoMatch = sampleLocation.match(/(?:bin-)?([A-Z]{2}\d+)-R/i);
   const galpaoId = galpaoMatch ? galpaoMatch[1] : 'LJ000000';
   const equipNum = parseInt(String(parsed.equipId).split('-').pop() || '', 10);
@@ -945,7 +972,7 @@ function backendMetaForEscaninho(escaninhoId, mapStructure, pendingEquipmentType
   const ruaNum = ruaPart.replace(/^R/i, '');
   if (!ruaNum || !Number.isFinite(equipNum) || !parsed.level || !parsed.pos) return existing;
   const posLetter = String.fromCharCode(64 + parsed.pos);
-  const heightNumber = Math.max(1, (eq.niveis || parsed.level) - parsed.level + 1);
+  const heightNumber = parsed.level;
   const locationId = `${galpaoId}-R${ruaNum}-${String(equipNum).padStart(3, '0')}-${heightNumber}${posLetter}`;
   return {
     escId:escaninhoId,
@@ -959,7 +986,27 @@ function backendMetaForEscaninho(escaninhoId, mapStructure, pendingEquipmentType
   };
 }
 
-function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges) {
+function buildExpectedEquipments(mapStructure) {
+  const expected = [];
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => {
+      const parsed = parseEscaninhoId(`${eq.id}-1-1`);
+      const levels = Number(eq.niveis || 0);
+      const slotsPerLevel = Number(eq.escsPerNivel || 0);
+      if (!parsed.equipId || !parsed.ruaNum || !parsed.equipNum || levels <= 0 || slotsPerLevel <= 0) return;
+      expected.push({
+        equip_id: parsed.equipId,
+        rua_num: parsed.ruaNum,
+        equipamento_num: parsed.equipNum,
+        expected_slots: levels * slotsPerLevel,
+        tipo_equipamento: eq.tipo || '',
+      });
+    });
+  });
+  return expected;
+}
+
+function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames) {
   const original = BOOTSTRAP.INITIAL_PLACEMENTS || {};
   const current = collectPlacements(currentAllocations);
   const rawMap = BOOTSTRAP.RAW_PRODUCT_DATA_MAP || {};
@@ -967,7 +1014,7 @@ function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges
   const moves = [];
 
   allCodes.forEach((code) => {
-    const originalList = [...(original[code] || [])];
+    const originalList = [...(original[code] || [])].map((escId)=>remapEscaninhoForRenames(escId, pendingEquipmentRenames));
     const currentList = [...(current[code] || [])];
     const currentSet = new Set(currentList);
     const kept = new Set();
@@ -981,8 +1028,8 @@ function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges
     const pairs = Math.min(remainingOriginal.length, remainingCurrent.length);
 
     for (let i = 0; i < pairs; i += 1) {
-      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges);
-      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges);
+      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames);
+      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames);
       if (!src || !dst) continue;
       moves.push({
         productCode: code,
@@ -994,7 +1041,7 @@ function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges
     }
 
     for (let i = pairs; i < remainingOriginal.length; i += 1) {
-      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges);
+      const src = backendMetaForEscaninho(remainingOriginal[i], mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames);
       if (!src) continue;
       moves.push({
         productCode: code,
@@ -1006,7 +1053,7 @@ function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges
     }
 
     for (let i = pairs; i < remainingCurrent.length; i += 1) {
-      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges);
+      const dst = backendMetaForEscaninho(remainingCurrent[i], mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames);
       if (!dst) continue;
       moves.push({
         productCode: code,
@@ -1019,6 +1066,48 @@ function diffMoves(currentAllocations, mapStructure, pendingEquipmentTypeChanges
   });
 
   return moves;
+}
+
+function buildVersionSnapshotLocations(currentAllocations, mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames) {
+  const rawMap = BOOTSTRAP.RAW_PRODUCT_DATA_MAP || {};
+  const locations = [];
+  (mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => {
+      const levels = Number(eq.niveis || 0);
+      const slotsPerLevel = Number(eq.escsPerNivel || 0);
+      for (let level = 1; level <= levels; level += 1) {
+        for (let pos = 1; pos <= slotsPerLevel; pos += 1) {
+          const escId = `${eq.id}-${level}-${pos}`;
+          const meta = backendMetaForEscaninho(escId, mapStructure, pendingEquipmentTypeChanges, pendingEquipmentRenames);
+          if (!meta || !meta.locationId) continue;
+          const alloc = currentAllocations[escId] || {};
+          const occupants = ['p1', 'p2'].map((slotKey) => alloc[slotKey]).filter(Boolean).slice(0, 2).map((code) => {
+            const productCode = String(code || '').trim();
+            const full = rawMap[productCode] || rawMap[productCode.toUpperCase()] || rawMap[productCode.toLowerCase()] || {};
+            return {
+              ...full,
+              product_code: productCode,
+              product_name: full.product_name || full.nome || (PRODUCT_MAP[productCode] ? PRODUCT_MAP[productCode].nome : productCode),
+              grupo: full.grupo || '',
+              categoria_armazenagem: full.categoria_armazenagem || full.cat_armz || '',
+              subcategoria: full.subcategoria || '',
+            };
+          });
+          locations.push({
+            location_id: meta.locationId,
+            rua_num: meta.ruaNum,
+            equipamento_num: meta.equipNum,
+            tipo_equipamento: eq.tipo || '',
+            nivel: meta.level,
+            escaninho_num_no_nivel: meta.pos,
+            capacidade_l: eq.cap || '',
+            occupants,
+          });
+        }
+      }
+    });
+  });
+  return locations;
 }
 
 function collectAllocationKeys(state, shouldCollectKey) {
@@ -1078,16 +1167,16 @@ function reducer(state, action) {
     case 'TOGGLE_2A_LEVA':  return {...state, mode2aLeva:!state.mode2aLeva};
     case 'SET_SEARCH':      return {...state, searchQuery:action.query};
     case 'SET_SUBCAT_FILTERS': return {...state, subcatFilters:action.filters};
-    case 'SET_GLOBAL_EQUIP_FILTER': return {...state, globalEquipmentFilter:action.filter || 'all'};
+    case 'SET_GLOBAL_EQUIP_FILTER': return {...state, globalEquipmentFilter:normalizeEquipmentFilterList(action.filter)};
     case 'SET_CONFIRM':     return {...state, pendingConfirm:action.dialog};
     case 'CLEAR_CONFIRM':   return {...state, pendingConfirm:null};
     case 'TOGGLE_EQUIP':    return {...state, equipCollapsed:{...state.equipCollapsed,[action.id]:!state.equipCollapsed[action.id]}};
     case 'TOGGLE_STREET':   return {...state, streetCollapsed:{...state.streetCollapsed,[action.id]:!state.streetCollapsed[action.id]}};
     case 'EXPAND_ALL':      return {...state, equipCollapsed:{}, streetCollapsed:{}};
     case 'COLLAPSE_ALL': {
-      const ec={},sc={};
-      state.mapStructure.forEach(st=>{ sc[st.id]=true; st.equipment.forEach(eq=>{ec[eq.id]=true;}); });
-      return {...state, equipCollapsed:ec, streetCollapsed:sc};
+      const ec={};
+      state.mapStructure.forEach(st=>{ st.equipment.forEach(eq=>{ec[eq.id]=true;}); });
+      return {...state, equipCollapsed:ec};
     }
     case 'SET_SWAP_SOURCE':  return {...state, swapSource:action.equipId};
     case 'CLEAR_SWAP_SOURCE':return {...state, swapSource:null};
@@ -1191,12 +1280,29 @@ function reducer(state, action) {
       };
     }
     case 'COLLECT_MANY': {
-      const escaninhoIds = Array.isArray(action.escaninhoIds) ? action.escaninhoIds : [];
-      if (!escaninhoIds.length) return state;
+      const entries = Array.isArray(action.escaninhoIds) ? action.escaninhoIds : [];
+      if (!entries.length) return state;
       const newA = { ...state.allocations };
       const newCollected = [...state.collected];
-      escaninhoIds.forEach((escaninhoId) => {
+      entries.forEach((entry) => {
+        const escaninhoId = typeof entry === 'string' ? entry : entry?.escaninhoId;
+        const slot = typeof entry === 'string' ? null : Number(entry?.slot || 0);
+        if (!escaninhoId) return;
         const prev = newA[escaninhoId] || { p1:null, p2:null };
+        if (slot === 2) {
+          if (prev.p2) newCollected.push(createCollectedEntryId(prev.p2, newCollected));
+          const next = { p1:prev.p1 || null, p2:null };
+          if (next.p1) newA[escaninhoId] = next;
+          else delete newA[escaninhoId];
+          return;
+        }
+        if (slot === 1) {
+          if (prev.p1) newCollected.push(createCollectedEntryId(prev.p1, newCollected));
+          const next = prev.p2 ? { p1:prev.p2, p2:null } : { p1:null, p2:null };
+          if (next.p1) newA[escaninhoId] = next;
+          else delete newA[escaninhoId];
+          return;
+        }
         if (prev.p1) newCollected.push(createCollectedEntryId(prev.p1, newCollected));
         if (prev.p2) newCollected.push(createCollectedEntryId(prev.p2, newCollected));
         delete newA[escaninhoId];
@@ -1214,6 +1320,31 @@ function reducer(state, action) {
         selectedProduct:null,
       };
     }
+    case 'COLLECT_EQUIP_SLOT': {
+      const slot = Number(action.slot || 0);
+      if (slot !== 2) return state;
+      const newA = { ...state.allocations };
+      const newCollected = [ ...state.collected ];
+      let changed = false;
+      Object.keys(newA).forEach((key) => {
+        if (!key.startsWith(action.equipId + '-')) return;
+        const prev = newA[key] || {};
+        if (!prev.p2) return;
+        newCollected.push(createCollectedEntryId(prev.p2, newCollected));
+        const next = { p1:prev.p1 || null, p2:null };
+        if (next.p1) newA[key] = next;
+        else delete newA[key];
+        changed = true;
+      });
+      if (!changed) return state;
+      return {
+        ...commitAllocs(state,newA,null,{ collected:newCollected, unallocated:state.unallocated }),
+        selectedProduct:null,
+        quickActionMessage:`2º slot recolhido de ${action.equipId}.`,
+      };
+    }
+    case 'COLLECT_SECOND_SLOT_BY_FILTER':
+      return collectSecondSlotForEquipmentFilter(state, action.filter);
     case 'REGROUP_PARTIAL_PRODUCTS': {
       const codes = new Set((action.productCodes || []).map(code=>String(code || '').trim().toUpperCase()).filter(Boolean));
       if (!codes.size) return state;
@@ -1381,23 +1512,48 @@ function reducer(state, action) {
     case 'CLEAR_PENDING_EQUIP_TYPE_CHANGES': {
       return {...state,pendingEquipmentTypeChanges:{}};
     }
+    case 'CLEAR_PENDING_EQUIP_CREATES': {
+      return {...state,pendingEquipmentCreates:{}};
+    }
+    case 'CLEAR_PENDING_EQUIP_DELETES': {
+      return {...state,pendingEquipmentDeletes:{}};
+    }
+    case 'CLEAR_PENDING_EQUIP_RENAMES': {
+      return {...state,pendingEquipmentRenames:{}};
+    }
     case 'REMOVE_EQUIP': {
       const ms=state.mapStructure.map(st=>({...st,equipment:st.equipment.filter(eq=>eq.id!==action.equipId)}));
       const result = collectAllocationKeys(state, key=>key.startsWith(action.equipId + '-'));
       const snapshot = historySnapshot(state, result.allocations, state.unallocated, result.collected);
-      return {...state,mapStructure:ms,allocations:result.allocations,collected:result.collected,selectedProduct:null,history:[snapshot],histIdx:0,lastHistoryGroup:null};
+      const pendingCreates = {...(state.pendingEquipmentCreates || {})};
+      const pendingDeletes = {...(state.pendingEquipmentDeletes || {})};
+      if (pendingCreates[action.equipId]) delete pendingCreates[action.equipId];
+      else pendingDeletes[action.equipId] = true;
+      return {...state,mapStructure:ms,allocations:result.allocations,collected:result.collected,selectedProduct:null,history:[snapshot],histIdx:0,lastHistoryGroup:null,pendingEquipmentCreates:pendingCreates,pendingEquipmentDeletes:pendingDeletes};
     }
     case 'ADD_EQUIP': {
+      let created = null;
       const ms=state.mapStructure.map(st=>{
         if(st.id!==action.streetId) return st;
         const ai=action.afterEquipId?st.equipment.findIndex(eq=>eq.id===action.afterEquipId):st.equipment.length-1;
         const mx=Math.max(0,...st.equipment.map(eq=>parseInt(eq.id.split('-')[1]||'0')));
         const nid=`${st.id}-${String(mx+1).padStart(3,'0')}`;
+        const tipo=action.tipo||'prateleira';
+        const shape={...getEquipShapeForType(state.mapStructure,tipo,nid)};
+        ['niveis','escsPerNivel','cap'].forEach((field)=>{
+          const value = Number(action[field]);
+          if (Number.isFinite(value) && value > 0) shape[field] = value;
+        });
+        if (action.card175Only) shape.card175Only = true;
         const arr=[...st.equipment];
-        arr.splice(ai+1,0,{id:nid,tipo:action.tipo||'prateleira',niveis:5,escsPerNivel:7,cap:25.92});
+        arr.splice(ai+1,0,{id:nid,tipo,...shape});
+        created = { equipId:nid, ruaNum:parseInt(String(st.id).replace(/\D/g,''),10), equipNum:mx+1, tipo };
         return {...st,equipment:arr};
       });
-      return {...state,mapStructure:ms};
+      const pendingCreates = created
+        ? {...(state.pendingEquipmentCreates||{}), [created.equipId]:created}
+        : state.pendingEquipmentCreates;
+      return {...state,mapStructure:ms,pendingEquipmentCreates:pendingCreates};
     }
     case 'ADD_STREET': {
       const streetNums=state.mapStructure.map(st=>parseInt(st.id.replace('R',''))).filter(Number.isFinite);
@@ -1440,7 +1596,20 @@ function reducer(state, action) {
       // Remap equipCollapsed
       const ec={...state.equipCollapsed};
       if(ec[oldId]!==undefined){ec[newId]=ec[oldId];delete ec[oldId];}
-      return {...state,mapStructure:ms,allocations:na,equipCollapsed:ec};
+      const pendingCreates = {...(state.pendingEquipmentCreates || {})};
+      const pendingRenames = {...(state.pendingEquipmentRenames || {})};
+      const pendingTypes = {...(state.pendingEquipmentTypeChanges || {})};
+      if (pendingTypes[oldId]) {
+        pendingTypes[newId] = pendingTypes[oldId];
+        delete pendingTypes[oldId];
+      }
+      if (pendingCreates[oldId]) {
+        pendingCreates[newId] = {...pendingCreates[oldId], equipId:newId, ruaNum:parseInt(String(newId).split('-')[0].replace(/\D/g,''),10), equipNum:parseInt(String(newId).split('-').pop()||'0',10)};
+        delete pendingCreates[oldId];
+      } else {
+        pendingRenames[oldId] = { oldId, newId };
+      }
+      return {...state,mapStructure:ms,allocations:na,equipCollapsed:ec,pendingEquipmentCreates:pendingCreates,pendingEquipmentRenames:pendingRenames,pendingEquipmentTypeChanges:pendingTypes};
     }
 
     default: return state;
@@ -1541,6 +1710,11 @@ function SaveModal({ onClose, onSaved, onSave }) {
               <div style={{ fontSize:14, fontWeight:800, color:'var(--shopper-green)' }}>Versão salva com sucesso!</div>
               <div style={{ fontSize:10, color:'var(--cfg-text-muted)', marginTop:10, textTransform:'uppercase', letterSpacing:'0.08em', fontWeight:700 }}>Nome da versão</div>
               <div style={{ fontSize:18, color:'var(--cfg-text)', marginTop:4, fontWeight:800, lineHeight:1.35, wordBreak:'break-word' }}>{name}</div>
+              {saveResult?.warning && (
+                <div style={{ marginTop:12, fontSize:11, lineHeight:1.45, color:'#F59E0B', fontWeight:700 }}>
+                  {saveResult.warning}
+                </div>
+              )}
             </div>
             {(versionSheetUrl || planoSheetUrl) && (
               <div style={{ marginTop:18, background:'rgba(13,171,119,0.08)', border:'1px solid rgba(13,171,119,0.22)', borderRadius:8, padding:'12px 14px' }}>
@@ -1614,17 +1788,55 @@ const GLOBAL_EQUIP_FILTERS = [
   { id:'freezer', label:'Freezers', short:'Freezers' },
 ];
 
+function normalizeEquipmentFilterList(filter) {
+  if (Array.isArray(filter)) return [...new Set(filter.filter((item)=>item && item !== 'all'))];
+  if (!filter || filter === 'all') return [];
+  return [filter];
+}
+
 function equipmentMatchesGlobalFilter(eq, filter) {
-  if (!filter || filter === 'all') return true;
+  const filters = normalizeEquipmentFilterList(filter);
+  if (!filters.length) return true;
   const tipo = String(eq?.tipo || '').toLowerCase();
   const tipoAnterior = String(eq?.tipoAnterior || '').toLowerCase();
-  const matches = (value) => {
-    if (filter === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
-    if (filter === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
-    if (filter === 'freezer') return value.includes('freezer');
-    return value === filter;
+  const matches = (value, filterId) => {
+    if (filterId === 'prateleira') return value.includes('prateleira') || value.includes('pamplona') || value.includes('lateral');
+    if (filterId === 'geladeira') return value.includes('geladeira') || value.includes('refriger');
+    if (filterId === 'freezer') return value.includes('freezer');
+    return value === filterId;
   };
-  return matches(tipo) || matches(tipoAnterior);
+  return filters.some((filterId)=>matches(tipo, filterId) || matches(tipoAnterior, filterId));
+}
+
+function collectSecondSlotForEquipmentFilter(state, filter) {
+  const targetEquipment = new Set();
+  (state.mapStructure || []).forEach((street) => {
+    (street.equipment || []).forEach((eq) => {
+      if (equipmentMatchesGlobalFilter(eq, filter)) targetEquipment.add(eq.id);
+    });
+  });
+  if (!targetEquipment.size) return state;
+  const newA = { ...state.allocations };
+  const newCollected = [ ...state.collected ];
+  let changed = false;
+  Object.keys(newA).forEach((key) => {
+    const equipId = String(key).split('-').slice(0, 2).join('-');
+    if (!targetEquipment.has(equipId)) return;
+    const prev = newA[key] || {};
+    if (!prev.p2) return;
+    newCollected.push(createCollectedEntryId(prev.p2, newCollected));
+    const next = { p1:prev.p1 || null, p2:null };
+    if (next.p1) newA[key] = next;
+    else delete newA[key];
+    changed = true;
+  });
+  if (!changed) return state;
+  const filterLabel = filter === 'prateleira' ? 'prateleiras' : filter === 'geladeira' ? 'geladeiras' : filter === 'freezer' ? 'freezers' : 'equipamentos';
+  return {
+    ...commitAllocs(state,newA,null,{ collected:newCollected, unallocated:state.unallocated }),
+    selectedProduct:null,
+    quickActionMessage:`2º slot recolhido de ${filterLabel}.`,
+  };
 }
 
 function GlobalEquipmentFilter({ state, dispatch }) {
@@ -1641,25 +1853,41 @@ function GlobalEquipmentFilter({ state, dispatch }) {
     });
     return next;
   }, [state.mapStructure]);
-  const active = state.globalEquipmentFilter || 'all';
-  const activeConfig = GLOBAL_EQUIP_FILTERS.find((item) => item.id === active) || GLOBAL_EQUIP_FILTERS[0];
+  const activeFilters = normalizeEquipmentFilterList(state.globalEquipmentFilter);
+  const activeConfig = activeFilters.length === 1
+    ? GLOBAL_EQUIP_FILTERS.find((item) => item.id === activeFilters[0])
+    : null;
+  const buttonLabel = activeFilters.length === 0 ? 'Equip.' : activeFilters.length === 1 ? (activeConfig?.short || 'Equip.') : `${activeFilters.length} tipos`;
+  const toggleFilter = (filterId) => {
+    if (filterId === 'all') {
+      dispatch({ type:'SET_GLOBAL_EQUIP_FILTER', filter:[] });
+      return;
+    }
+    const next = activeFilters.includes(filterId)
+      ? activeFilters.filter((item)=>item !== filterId)
+      : [...activeFilters, filterId];
+    dispatch({ type:'SET_GLOBAL_EQUIP_FILTER', filter:next });
+  };
   return (
     <div style={{ position:'relative' }}>
-      <TBtn label={active === 'all' ? 'Equip.' : activeConfig.short} icon={<FilterIcon />} active={open || active !== 'all'} onClick={()=>setOpen(v=>!v)} title="Filtro global de equipamentos" />
+      <TBtn label={buttonLabel} icon={<FilterIcon />} active={open || activeFilters.length > 0} onClick={()=>setOpen(v=>!v)} title="Filtro global de equipamentos" />
       {open&&(<>
         <div onClick={()=>setOpen(false)} style={{ position:'fixed', inset:0, zIndex:50 }} />
         <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:100, background:'var(--dropdown-bg)', border:'1px solid var(--dropdown-border)', borderRadius:8, padding:'6px', minWidth:190, boxShadow:'0 12px 40px rgba(0,0,0,0.35)' }}>
           <div style={{ padding:'4px 8px 7px', fontSize:9, fontWeight:800, color:'var(--map-text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>Equipamentos no mapa</div>
-          {GLOBAL_EQUIP_FILTERS.map((item) => (
-            <button key={item.id} onClick={()=>{ dispatch({ type:'SET_GLOBAL_EQUIP_FILTER', filter:item.id }); setOpen(false); }}
-              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'6px 9px', borderRadius:5, border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:active===item.id?'rgba(13,171,119,0.12)':'transparent', color:active===item.id?'var(--shopper-green)':'var(--dropdown-text)', fontSize:11, fontWeight:700 }}
-              onMouseEnter={e=>{ if (active!==item.id) e.currentTarget.style.background='var(--dropdown-hover)'; }}
-              onMouseLeave={e=>{ if (active!==item.id) e.currentTarget.style.background='transparent'; }}>
-              <span style={{ width:8, height:8, borderRadius:999, background:active===item.id?'var(--shopper-green)':'var(--dropdown-border)', flexShrink:0 }} />
+          {GLOBAL_EQUIP_FILTERS.map((item) => {
+            const selected = item.id === 'all' ? activeFilters.length === 0 : activeFilters.includes(item.id);
+            return (
+            <button key={item.id} onClick={()=>toggleFilter(item.id)}
+              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'6px 9px', borderRadius:5, border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:selected?'rgba(13,171,119,0.12)':'transparent', color:selected?'var(--shopper-green)':'var(--dropdown-text)', fontSize:11, fontWeight:700 }}
+              onMouseEnter={e=>{ if (!selected) e.currentTarget.style.background='var(--dropdown-hover)'; }}
+              onMouseLeave={e=>{ if (!selected) e.currentTarget.style.background='transparent'; }}>
+              <span style={{ width:8, height:8, borderRadius:999, background:selected?'var(--shopper-green)':'var(--dropdown-border)', flexShrink:0 }} />
               <span style={{ flex:1 }}>{item.label}</span>
               <span style={{ color:'var(--map-text-muted)', fontFamily:'var(--font-numeric)', fontSize:10 }}>{counts[item.id] || 0}</span>
             </button>
-          ))}
+            );
+          })}
         </div>
       </>)}
     </div>
@@ -1948,9 +2176,37 @@ function App() {
       ...collectEquipmentTypeChangesForSave(state.mapStructure),
       ...(state.pendingEquipmentTypeChanges || {}),
     };
+    const equipmentCreates = Object.values(state.pendingEquipmentCreates || {});
+    const equipmentDeletes = Object.keys(state.pendingEquipmentDeletes || {});
+    const equipmentRenames = Object.values(state.pendingEquipmentRenames || {});
+    equipmentCreates.forEach((create) => { delete typeChangesForSave[create.equipId]; });
     const equipmentTypeChanges = Object.entries(typeChangesForSave);
     const pendingTypeChangesForSave = { ...typeChangesForSave };
-    const moves = diffMoves(state.allocations, state.mapStructure, pendingTypeChangesForSave);
+    const pendingRenamesForSave = { ...(state.pendingEquipmentRenames || {}) };
+    const snapshotLocations = buildVersionSnapshotLocations(state.allocations, state.mapStructure, pendingTypeChangesForSave, pendingRenamesForSave);
+    const expectedEquipments = buildExpectedEquipments(state.mapStructure);
+    if (equipmentCreates.length > 0) {
+      for (let index = 0; index < equipmentCreates.length; index += 1) {
+        const create = equipmentCreates[index];
+        if (setStatus) setStatus(`Criando equipamento ${create.equipId} na planilha…`);
+        setProgress(12 + Math.round(((index + 1) / equipmentCreates.length) * 18));
+        const createResponse = await API.createNewEquipmentAsync(create.ruaNum, create.equipNum, create.tipo, 'interface');
+        if (!createResponse || !createResponse.success) {
+          throw new Error((createResponse && createResponse.error) || `Não foi possível criar ${create.equipId}.`);
+        }
+      }
+    }
+    if (equipmentRenames.length > 0) {
+      for (let index = 0; index < equipmentRenames.length; index += 1) {
+        const rename = equipmentRenames[index];
+        if (setStatus) setStatus(`Renomeando equipamento ${rename.oldId} para ${rename.newId} na planilha…`);
+        setProgress(24 + Math.round(((index + 1) / equipmentRenames.length) * 16));
+        const renameResponse = await API.renameEquipmentAsync(rename.oldId, rename.newId, 'interface');
+        if (!renameResponse || !renameResponse.success) {
+          throw new Error((renameResponse && renameResponse.error) || `Não foi possível renomear ${rename.oldId}.`);
+        }
+      }
+    }
     if (equipmentTypeChanges.length > 0) {
       for (let index = 0; index < equipmentTypeChanges.length; index += 1) {
         const [equipId, newType] = equipmentTypeChanges[index];
@@ -1962,34 +2218,41 @@ function App() {
         }
       }
     }
-    if (moves.length > 0) {
-      if (setStatus) setStatus('Salvando movimentos pendentes…');
-      setProgress(equipmentTypeChanges.length ? 58 : 45);
-      const movesResponse = await API.saveBatchMovesAsync(moves, { allowSecondSlot: !!state.mode2aLeva });
-      if (!movesResponse || !movesResponse.success) {
-        throw new Error((movesResponse && movesResponse.error) || 'Não foi possível salvar os movimentos.');
+    if (equipmentDeletes.length > 0) {
+      for (let index = 0; index < equipmentDeletes.length; index += 1) {
+        const equipId = equipmentDeletes[index];
+        if (setStatus) setStatus(`Removendo equipamento ${equipId} da planilha…`);
+        setProgress(68 + Math.round(((index + 1) / equipmentDeletes.length) * 10));
+        const deleteResponse = await API.deleteEquipmentAndProductsAsync(equipId, 'interface');
+        if (!deleteResponse || !deleteResponse.success) {
+          throw new Error((deleteResponse && deleteResponse.error) || `Não foi possível remover ${equipId}.`);
+        }
       }
     }
-    if (setStatus) setStatus('Criando aba da versão…');
+    if (setStatus) setStatus('Gravando Plano_Enderecamento_Final e criando aba da versão…');
     setProgress(80);
-    const versionResponse = await API.saveVersionAsync(name);
+    const versionResponse = await API.saveVersionSnapshotAsync(name, snapshotLocations, expectedEquipments, 'interface');
     if (!versionResponse || !versionResponse.success) {
       throw new Error((versionResponse && versionResponse.error) || 'Não foi possível salvar a versão.');
     }
     if (equipmentTypeChanges.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_TYPE_CHANGES'});
+    if (equipmentCreates.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_CREATES'});
+    if (equipmentDeletes.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_DELETES'});
+    if (equipmentRenames.length > 0) dispatch({type:'CLEAR_PENDING_EQUIP_RENAMES'});
     markInitialEquipTypesSaved(state.mapStructure);
     BOOTSTRAP.INITIAL_PLACEMENTS = collectPlacements(state.allocations);
     savedFingerprintRef.current = pendingFingerprint;
     setProgress(95);
     if (setStatus) setStatus('Finalizando…');
     return versionResponse;
-  }, [state.allocations, state.mapStructure, state.pendingEquipmentTypeChanges, state.mode2aLeva, pendingFingerprint]);
+  }, [state.allocations, state.mapStructure, state.pendingEquipmentTypeChanges, state.pendingEquipmentCreates, state.pendingEquipmentDeletes, state.pendingEquipmentRenames, state.mode2aLeva, pendingFingerprint]);
 
   const yieldToBrowser = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 
   const handleFillStreet = useCallback(async ({ streetId, equipmentIds, levelMode, onProgress }) => {
     const remainingEntries = prioritizeStreetFillEntries(capQueueByRemainingBins(visibleQueue.productIds || [], state.allocations));
     if (!remainingEntries.length) throw new Error('Nenhum produto elegível na lista atual.');
+    const verticalLaneLocks = readVerticalLaneLocks();
 
     const orderedEquipmentIds = Array.isArray(equipmentIds) ? equipmentIds.filter(Boolean) : [];
     if (!orderedEquipmentIds.length) throw new Error('Nenhum equipamento visível nesta rua.');
@@ -2004,6 +2267,7 @@ function App() {
         equipmentIds:[candidateId],
         levelMode,
         mapStructure:plannedMapStructure,
+        verticalLaneLocks,
       });
       return { equipmentId:candidateId, targets };
     }).filter((item) => item.targets.length > 0);
@@ -2144,6 +2408,7 @@ function App() {
                 confirmLabel:'Reagrupar',
                 onConfirm:()=>dispatch({type:'REGROUP_PARTIAL_PRODUCTS',productCodes}),
               }})}
+              onCollectSecondSlotByFilter={(filter)=>dispatch({type:'COLLECT_SECOND_SLOT_BY_FILTER',filter})}
               quickActionMessage={state.quickActionMessage}
               onVisibleProductsChange={setVisibleQueue}/>
           )}
