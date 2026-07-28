@@ -28,6 +28,7 @@ BASE_OUTPUT_HEADERS = [
     "subcategoria",
     "categoria_site",
     "grupo",
+    "familia_visual",
     "altura_cm",
     "vol_L_unitario",
     "quantidade",
@@ -70,6 +71,7 @@ PRESERVED_ALLOCATED_OVERRIDES = {
     "escaninhos_necessarios_geladeira_alta",
     "escaninhos_necessarios_prateleira",
     "escaninhos_necessarios_prateleira_lateral",
+    "familia_visual",
     "photo_url",
 }
 
@@ -658,6 +660,23 @@ def _extract_category_group_map(df_dic_cat: pd.DataFrame) -> dict[str, str]:
     return output
 
 
+def _extract_visual_family_map(df_family: pd.DataFrame) -> dict[str, str]:
+    df = _normalize_columns(df_family)
+    if df.empty:
+        return {}
+    code_col = _pick_col(df, ["product_code", "cod_produto", "codigo_produto", "codigo", "sku"])
+    family_col = _pick_col(df, ["familia_visual", "família_visual", "familia", "família", "familia visual"])
+    if not code_col or not family_col:
+        return {}
+    output: dict[str, str] = {}
+    for _, row in df.iterrows():
+        code = _norm_code(_row_value(row, code_col))
+        family = normalize_string(_row_value(row, family_col)).strip()
+        if code and family:
+            output[code] = family
+    return output
+
+
 def _extract_subcategory_group_map(
     map_subcat: dict[str, dict[str, Any]],
     map_categoria_site: dict[str, dict[str, Any]],
@@ -1021,6 +1040,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     dic_cat_name = _find_sheet_name(master, ["Dicionario_Categorias"], required=False)
     barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
     fotos_name = _find_sheet_name(master, ["Fotos_Produtos", "Fotos Produtos"], required=False)
+    familia_visual_name = _find_sheet_name(master, ["Familia Visual", "Família Visual", "Familia_Visual"], required=False)
 
     df_degelo = _normalize_columns(_safe_df(master.read_values(degelo_name)))
     df_categoria_gpt = _normalize_columns(_safe_df(master.read_values(categoria_gpt_name)))
@@ -1039,6 +1059,9 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     df_dic_cat = _normalize_columns(_safe_df(master.read_values(dic_cat_name))) if dic_cat_name else pd.DataFrame()
     df_barcode = _normalize_columns(_safe_df(master.read_values(barcode_name))) if barcode_name else pd.DataFrame()
     df_fotos = _normalize_columns(_safe_df(master.read_values(fotos_name))) if fotos_name else pd.DataFrame()
+    df_familia_visual = (
+        _normalize_columns(_safe_df(master.read_values(familia_visual_name))) if familia_visual_name else pd.DataFrame()
+    )
 
     map_degelo = _build_map_from_df(
         df_degelo,
@@ -1068,6 +1091,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     caixaria_map = _extract_caixaria_map(df_caixaria, values_caixaria_nova)
     barcode_codes = _extract_barcode_set(df_barcode)
     photo_map = _build_photo_map(df_fotos)
+    visual_family_map = _extract_visual_family_map(df_familia_visual)
     limite_peso_kg = _extract_limite_peso(df_config)
     capacity_map = _extract_capacity_map(df_vol_eq)
     dic_cat_map = _extract_category_group_map(df_dic_cat)
@@ -1088,6 +1112,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
         subcat_data = map_subcat.get(code, {})
         vol_sec_data = map_vol_sec.get(code, {})
         photo_url = photo_map.get(code, "")
+        familia_visual = visual_family_map.get(code, "")
 
         categoria_armz = str(gpt_data.get("Categoria_Correta") or "").strip()
         categoria_site = str(site_data.get("categoria") or "").strip()
@@ -1179,6 +1204,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
             "subcategoria": subcategoria,
             "categoria_site": categoria_site,
             "grupo": grupo,
+            "familia_visual": familia_visual,
             "altura_cm": round(altura_cm, 2) if altura_cm else "",
             "vol_L_unitario": round(vol_l_unitario, 4) if vol_l_unitario else "",
             "quantidade": qtd,
@@ -1328,6 +1354,7 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
             "master_subcategorias": master.get_sheet_url(subcategorias_name),
             "master_categoria_site": master.get_sheet_url(categoria_site_name),
             "master_degelo": master.get_sheet_url(degelo_name),
+            "master_familia_visual": master.get_sheet_url(familia_visual_name) if familia_visual_name else "",
         },
     }
 

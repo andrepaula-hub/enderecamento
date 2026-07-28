@@ -2183,6 +2183,7 @@ def _enrich_base_map_with_master_etl(
             "categoria_site": ["Categoria Site", "Categoria_Site"],
             "volumetria": ["volumetria e fabricantes", "Volumetria e fabricantes", "Volumetria", "volumetria"],
             "fotos": ["Fotos_Produtos", "Fotos Produtos"],
+            "familia_visual": ["Familia Visual", "Família Visual", "Familia_Visual"],
         },
     )
     degelo_rows = sheets["degelo"]
@@ -2191,6 +2192,7 @@ def _enrich_base_map_with_master_etl(
     categoria_site_rows = sheets["categoria_site"]
     volumetria_rows = sheets["volumetria"]
     fotos_rows = sheets["fotos"]
+    familia_visual_rows = sheets["familia_visual"]
     vendas_raw_values = _read_values_first_available_sheet(source, ["Vendas Alvo", "Vendas Pamplona"])
 
     map_degelo = _build_lookup_by_code(
@@ -2247,6 +2249,11 @@ def _enrich_base_map_with_master_etl(
         ["product_code", "cod_produto", "codigo_produto", "sku"],
         {"photo_url": ["photo_url", "url_foto", "URL Foto", "foto", "imagem"]},
     )
+    map_familia_visual = _build_lookup_by_code(
+        familia_visual_rows,
+        ["product_code", "cod_produto", "codigo_produto", "codigo", "sku"],
+        {"familia_visual": ["familia_visual", "família_visual", "familia", "família", "familia visual"]},
+    )
     sales_by_code, sales_by_name = _extract_sales_maps_from_raw_values(vendas_raw_values)
 
     if (
@@ -2256,6 +2263,7 @@ def _enrich_base_map_with_master_etl(
         and not map_categoria_site
         and not map_vol
         and not map_fotos
+        and not map_familia_visual
         and not sales_by_code
         and not sales_by_name
     ):
@@ -2270,6 +2278,7 @@ def _enrich_base_map_with_master_etl(
         cat = map_categoria_site.get(code, {})
         vol = map_vol.get(code, {})
         foto = map_fotos.get(code, {})
+        familia_visual = map_familia_visual.get(code, {})
 
         if normalize_string(merged.get("categoria_armazenagem")) == "":
             merged["categoria_armazenagem"] = (
@@ -2305,6 +2314,8 @@ def _enrich_base_map_with_master_etl(
             photo_url = normalize_string(foto.get("photo_url"))
             if photo_url and photo_url.lower() not in {"sem foto", "n/a", "na", "none", "null", "nan"}:
                 merged["photo_url"] = photo_url
+        if normalize_string(merged.get("familia_visual")) == "":
+            merged["familia_visual"] = familia_visual.get("familia_visual") or merged.get("familia_visual")
 
         if normalize_string(merged.get("vol_L_unitario")) == "" and normalize_string(merged.get("vol_l_unitario")) == "":
             deg_vol = parse_number(deg.get("vol_L_unitario") or deg.get("vol_l_unitario"))

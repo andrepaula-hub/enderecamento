@@ -121,6 +121,70 @@ def test_master_etl_enrichment_sets_categoria_vendas_e_curva_d():
     assert float(no_sales["venda_total"]) == 0.0
 
 
+def test_master_etl_enrichment_reads_familia_visual_sheet():
+    source = _FakeSource(
+        rows_by_sheet={
+            "Familia Visual": [
+                {"cod_produto": "RAP10_ORIGINAL", "familia_visual": "wrap_rap10"},
+            ],
+        },
+        values_by_sheet={},
+    )
+    base_map = {
+        "RAP10_ORIGINAL": {
+            "product_code": "RAP10_ORIGINAL",
+            "product_name": "RAP10 ORIGINAL 297G",
+            "familia_visual": "",
+        }
+    }
+
+    enriched = _enrich_base_map_with_master_etl(
+        source=source,
+        base_produtos_map=base_map,
+        dic_cat_map={},
+        limite_altura=28.0,
+        limite_altura_baixo=12.5,
+    )
+
+    assert enriched["RAP10_ORIGINAL"]["familia_visual"] == "wrap_rap10"
+
+
+def test_run_etl_writes_familia_visual_from_master_sheet():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo"], ["RAP10_ORIGINAL", ""]],
+        "Categoria ChatGPT": [["cod_produto", "Categoria_Correta"], ["RAP10_ORIGINAL", "Itens de prateleira"]],
+        "Categoria Site": [["cod_produto", "categoria"], ["RAP10_ORIGINAL", "Mercearia"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["RAP10_ORIGINAL", "Wraps e Tortillas"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["RAP10_ORIGINAL", 1000, 10, "Bimbo"],
+        ],
+        "Familia Visual": [["cod_produto", "familia_visual"], ["RAP10_ORIGINAL", "wrap_rap10"]],
+        "Vendas Alvo": [["cod_produto", "desc_produto", "qtd_total"], ["RAP10_ORIGINAL", "RAP10 ORIGINAL 297G", 10]],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["Mercearia", "alimento"]],
+    }
+    mix_values = {
+        "MIX": [["product_code", "product_name", "quantidade"], ["RAP10_ORIGINAL", "RAP10 ORIGINAL 297G", 3]],
+    }
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    assert output[1][headers.index("familia_visual")] == "wrap_rap10"
+    assert result["links"]["master_familia_visual"] == "https://fake/Familia Visual"
+
+
 def test_card175_marks_product_when_missing_bins():
     base_map = {
         "SKU1": {
