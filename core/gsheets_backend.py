@@ -2393,6 +2393,43 @@ def _empty_row_for_headers(headers: list[str]) -> list[Any]:
     return row
 
 
+SLOT_STRUCTURAL_KEYS = {
+    "location_id",
+    "galpao_id",
+    "rua_num",
+    "equipamento_num",
+    "tipo_equipamento",
+    "tipo_equipamento_final",
+    "nivel",
+    "escaninho_num_no_nivel",
+    "capacidade_l",
+    "is_hot_zone",
+    "is_nivel_alto",
+    "is_nivel_inferior",
+}
+
+
+def _copy_slot_payload_preserving_structure(
+    target_row: list[Any],
+    source_row: list[Any],
+    headers: list[str],
+) -> None:
+    for idx, header in enumerate(headers):
+        if _normalize_header(header) not in SLOT_STRUCTURAL_KEYS and idx < len(source_row):
+            target_row[idx] = source_row[idx]
+
+
+def _row_has_allocated_product(row: list[Any], headers: list[str]) -> bool:
+    for key in ("product_code", "produto_alocado_code"):
+        product_idx = _find_header_index(headers, key)
+        if product_idx < 0 or product_idx >= len(row):
+            continue
+        code = normalize_string(row[product_idx]).strip()
+        if code and code.lower() != "vazio":
+            return True
+    return False
+
+
 def _set_slot_defaults(
     row: list[Any],
     headers: list[str],
@@ -2673,14 +2710,16 @@ def generate_slots_from_cadastro_gsheet(
     candidate_slots = 0
     equipment_with_new_slots: set[tuple[int, int]] = set()
     existing_location_ids: set[str] = set()
+    existing_rows_by_location: dict[str, list[Any]] = {}
+    loc_idx = _find_header_index(plan_headers, "location_id")
+    if loc_idx >= 0:
+        for row in plano_values[1:]:
+            if loc_idx < len(row):
+                location_id = normalize_string(row[loc_idx]).strip()
+                if location_id:
+                    existing_rows_by_location[location_id] = row + [None] * (len(plan_headers) - len(row))
     if not clear_existing:
-        loc_idx = _find_header_index(plan_headers, "location_id")
-        if loc_idx >= 0:
-            for row in plano_values[1:]:
-                if loc_idx < len(row):
-                    location_id = normalize_string(row[loc_idx]).strip()
-                    if location_id:
-                        existing_location_ids.add(location_id)
+        existing_location_ids = set(existing_rows_by_location)
 
     def _safe_to_int(value: Any) -> int:
         text = normalize_string(value).replace(",", ".")
@@ -2754,6 +2793,12 @@ def generate_slots_from_cadastro_gsheet(
                     is_nivel_alto=nivel_letra == nivel_alto,
                     is_nivel_inferior=nivel_letra == nivel_inf,
                 )
+                if clear_existing and location_id in existing_rows_by_location:
+                    _copy_slot_payload_preserving_structure(
+                        row_new,
+                        existing_rows_by_location[location_id],
+                        plan_headers,
+                    )
                 generated_rows.append(row_new)
                 equipment_with_new_slots.add((rua_num, equip_num))
 
@@ -2801,6 +2846,22 @@ def generate_slots_from_cadastro_gsheet(
         "mode": "full" if clear_existing else "incremental",
         "plano_sheet_url": client.get_sheet_url(SHEET_PLANO_FINAL),
     }
+    if clear_existing:
+        generated_location_ids = {
+            normalize_string(row[loc_idx]).strip()
+            for row in generated_rows
+            if loc_idx >= 0 and loc_idx < len(row) and normalize_string(row[loc_idx]).strip()
+        }
+        result["allocations_preserved"] = sum(
+            1
+            for location_id, row in existing_rows_by_location.items()
+            if location_id in generated_location_ids and _row_has_allocated_product(row, plan_headers)
+        )
+        result["allocations_unmapped"] = sum(
+            1
+            for location_id, row in existing_rows_by_location.items()
+            if location_id not in generated_location_ids and _row_has_allocated_product(row, plan_headers)
+        )
     if missing_types:
         result["missing_types"] = sorted(missing_types)
     return result
