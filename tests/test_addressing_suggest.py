@@ -773,6 +773,57 @@ def test_suggest_allocations_can_skip_concentrated_manufacturer_for_better_queue
     assert result["moves"][0]["productCode"] == "OTHER"
 
 
+def test_suggest_allocations_does_not_group_same_curve_over_family_concentration():
+    result = suggest_allocations(
+        unallocated_codes=["CAFE2"],
+        products_data=[
+            _product(
+                "CAFE1",
+                nome="Cafe torrado e moido 3 coracoes tradicional 500g",
+                sub="Cafes",
+                fabricante="3 CORACOES",
+                familia_visual="cafes|3_coracoes",
+                curva="A",
+            ),
+            _product(
+                "CAFE2",
+                nome="Cafe soluvel 3 coracoes tradicional refil 40g",
+                sub="Cafes",
+                fabricante="3 CORACOES",
+                familia_visual="cafes|3_coracoes",
+                curva="A",
+            ),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 2, "escsPerNivel": 2, "cap": 100},
+                    {"id": "R1-E2", "tipo": "prateleira", "niveis": 2, "escsPerNivel": 2, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 3)
+                for pos in range(1, 3)
+            },
+            **{
+                f"R1-E2-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 3)
+                for pos in range(1, 3)
+            },
+            "R1-E1-1-1": {"p1": "CAFE1", "p2": None},
+        },
+        options={"allow_top_level": True, "whole_street": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["escaninhoId"].startswith("R1-E2-")
+
+
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():
     result = suggest_allocations(
         unallocated_codes=["SNICKERS2"],

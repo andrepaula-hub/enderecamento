@@ -185,6 +185,41 @@ def test_run_etl_writes_familia_visual_from_master_sheet():
     assert result["links"]["master_familia_visual"] == "https://fake/Familia Visual"
 
 
+def test_run_etl_replaces_invalid_measure_visual_family_from_master_sheet():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo"], ["BANANA1", ""]],
+        "Categoria ChatGPT": [["cod_produto", "Categoria_Correta"], ["BANANA1", "Itens de prateleira"]],
+        "Categoria Site": [["cod_produto", "categoria"], ["BANANA1", "FLV"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["BANANA1", "Frutas, Legumes e Verduras"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["BANANA1", 1000, 10, "FRUTAS"],
+        ],
+        "Familia Visual": [["cod_produto", "familia_visual"], ["BANANA1", "frutas, legumes e verduras|500g"]],
+        "Vendas Alvo": [["cod_produto", "desc_produto", "qtd_total"], ["BANANA1", "BANANA PRATA MADURA ORGÂNICA 500G", 10]],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["FLV", "flv"]],
+    }
+    mix_values = {
+        "MIX": [["product_code", "product_name", "quantidade"], ["BANANA1", "BANANA PRATA MADURA ORGÂNICA 500G", 3]],
+    }
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    assert output[1][headers.index("familia_visual")] == "frutas, legumes e verduras|banana"
+
+
 def test_run_etl_creates_and_populates_familia_visual_sheet_when_missing():
     master_values = {
         "Degelo": [["cod_produto", "degelo"], ["CT189445", ""]],
@@ -275,6 +310,22 @@ def test_suggest_visual_family_never_uses_measure_as_family_token():
             "Bimbo",
         )
         == "wraps e tortillas|rap10"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "CAFÉ TORRADO E MOÍDO 3 CORAÇÕES TRADICIONAL 500G",
+            "Cafés",
+            "3 CORAÇÕES",
+        )
+        == "cafes|3_coracoes"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "CAFÉ SOLÚVEL 3 CORAÇÕES TRADICIONAL REFIL 50G",
+            "Cafés",
+            "3 CORAÇÕES",
+        )
+        == "cafes|3_coracoes"
     )
 
 

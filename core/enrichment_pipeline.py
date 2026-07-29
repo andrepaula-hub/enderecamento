@@ -55,8 +55,11 @@ FAMILIA_VISUAL_STOPWORDS = {
     "produto",
     "sabonete",
     "sem",
+    "soluvel",
     "suco",
+    "torrado",
     "tradicional",
+    "vendido",
 }
 SUBCATEGORIA_NIVEL_2_HEADERS = ["subcategoria", "subcategoria_nivel_2", "observacao"]
 DEFAULT_SUBCATEGORIA_NIVEL_2_ROWS = [
@@ -868,7 +871,7 @@ def _extract_visual_family_map(df_family: pd.DataFrame) -> dict[str, str]:
     for _, row in df.iterrows():
         code = _norm_code(_row_value(row, code_col))
         family = normalize_string(_row_value(row, family_col)).strip()
-        if code and family:
+        if code and family and not _is_invalid_visual_family(family):
             output[code] = family
     return output
 
@@ -949,10 +952,39 @@ def _is_measure_token(token: str) -> bool:
     return bool(re.fullmatch(r"\d+(?:[.,]\d+)?(?:ml|l|g|kg|mg|cm|mm|m|un|und|unds|unid|unidade|unidades)", token))
 
 
+def _visual_family_tail(value: Any) -> str:
+    family = _norm(value)
+    return family.split("|")[-1].strip() if family else ""
+
+
+def _is_invalid_visual_family(value: Any) -> bool:
+    tail = _visual_family_tail(value)
+    if not tail:
+        return True
+    return (
+        _is_measure_token(tail)
+        or tail.isdigit()
+        or tail in FAMILIA_VISUAL_STOPWORDS
+        or tail in {"brinde", "nao", "não"}
+    )
+
+
+def _phrase_token_family(name: str) -> str:
+    if re.search(r"\b3\s*coracoes\b", name):
+        return "3_coracoes"
+    if re.search(r"\b3\s*cora[cç][oõ]es\b", name):
+        return "3_coracoes"
+    return ""
+
+
 def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante: Any = "") -> str:
     name = _norm(product_name)
     subcat = _norm(subcategoria)
     maker = _norm(fabricante)
+    phrase_family = _phrase_token_family(name)
+    if phrase_family:
+        prefix = subcat or maker
+        return f"{prefix}|{phrase_family}" if prefix else phrase_family
     raw_tokens = [token for token in re.split(r"[^a-z0-9]+", name) if token]
     token = ""
     for candidate in raw_tokens:
@@ -1617,6 +1649,9 @@ def run_etl_to_base_products(
         if tipo_equip_base == "prateleira":
             escaninhos_necessarios = min(escaninhos_necessarios, 7)
         escaninhos_necessarios = max(escaninhos_necessarios, 1 if qtd > 0 else 0)
+
+        if not familia_visual or _is_invalid_visual_family(familia_visual):
+            familia_visual = _suggest_visual_family(name, subcategoria, fabricante)
 
         record = {
             "product_code": code,
