@@ -625,6 +625,35 @@ def test_suggest_allocations_spreads_chocolate_trap_mix_across_levels():
     assert len(levels) == len(set(levels))
 
 
+def test_suggest_allocations_blocks_same_subcategory_level2_on_same_level():
+    result = suggest_allocations(
+        unallocated_codes=["FESTIVAL"],
+        products_data=[
+            _product("BOMBOM", nome="Bombom sortido", sub="Chocolates e Bombons", subNivel2="chocolates"),
+            _product("FESTIVAL", nome="Chocolate sazonal", sub="Festival de Chocolates", subNivel2="chocolates"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 1, "escsPerNivel": 4, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": None, "p2": None},
+            "R1-E1-1-2": {"p1": "BOMBOM", "p2": None},
+            "R1-E1-1-3": {"p1": None, "p2": None},
+            "R1-E1-1-4": {"p1": None, "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"] == []
+    assert result["unallocated"] == ["FESTIVAL"]
+
+
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():
     result = suggest_allocations(
         unallocated_codes=["SNICKERS2"],

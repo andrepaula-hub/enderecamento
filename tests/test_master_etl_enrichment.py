@@ -222,6 +222,43 @@ def test_run_etl_creates_and_populates_familia_visual_sheet_when_missing():
     assert output[1][headers.index("familia_visual")] == "wraps e tortillas|rap10"
 
 
+def test_run_etl_creates_subcategory_level2_sheet_and_writes_output_column():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo"], ["CHOC1", ""]],
+        "Categoria ChatGPT": [["cod_produto", "Categoria_Correta"], ["CHOC1", "Itens de prateleira"]],
+        "Categoria Site": [["cod_produto", "categoria"], ["CHOC1", "Guloseimas"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["CHOC1", "Festival de Chocolates"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["CHOC1", 1000, 10, "Mars"],
+        ],
+        "Vendas Alvo": [["cod_produto", "desc_produto", "qtd_total"], ["CHOC1", "SNICKERS 45G", 10]],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["Guloseimas", "alimento"]],
+    }
+    mix_values = {"MIX": [["product_code", "product_name", "quantidade"], ["CHOC1", "SNICKERS 45G", 3]]}
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    level2_sheet = clients["master"].read_values("Subcategorias Nivel 2")
+    assert level2_sheet[0] == enrichment_pipeline.SUBCATEGORIA_NIVEL_2_HEADERS
+    assert ["Festival de Chocolates", "chocolates", "seed propostaNivel2"] in level2_sheet
+
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    assert output[1][headers.index("subcategoria_nivel_2")] == "chocolates"
+    assert result["links"]["master_subcategorias_nivel_2"] == "https://fake/Subcategorias Nivel 2"
+
+
 def test_suggest_visual_family_never_uses_measure_as_family_token():
     assert (
         enrichment_pipeline._suggest_visual_family(

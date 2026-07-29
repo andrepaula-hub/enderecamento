@@ -187,6 +187,7 @@
           nome: normalizeText(row.product_name || (searchByCode[code] || {}).name || code),
           grupo: normalizeGroup(row.grupo || row.grupo_alocado),
           sub: normalizeText(row.subcategoria || 'Sem subcategoria'),
+          subNivel2: normalizeText(row.subcategoria_nivel_2 || row.subcategoria_nivel2 || ''),
           fabricante: normalizeText(row.nm_fabricante || row.fabricante || row.marca || ''),
           curva: normalizeCurve(row.curva, row.nm_fabricante),
           altura: toNumber(row.altura_cm, 0),

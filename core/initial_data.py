@@ -2184,6 +2184,12 @@ def _enrich_base_map_with_master_etl(
             "volumetria": ["volumetria e fabricantes", "Volumetria e fabricantes", "Volumetria", "volumetria"],
             "fotos": ["Fotos_Produtos", "Fotos Produtos"],
             "familia_visual": ["Familia Visual", "Família Visual", "Familia_Visual"],
+            "subcategoria_nivel2": [
+                "Subcategorias Nivel 2",
+                "Subcategorias Nível 2",
+                "Subcategoria Nivel 2",
+                "Subcategoria Nível 2",
+            ],
         },
     )
     degelo_rows = sheets["degelo"]
@@ -2193,6 +2199,7 @@ def _enrich_base_map_with_master_etl(
     volumetria_rows = sheets["volumetria"]
     fotos_rows = sheets["fotos"]
     familia_visual_rows = sheets["familia_visual"]
+    subcategoria_nivel2_rows = sheets["subcategoria_nivel2"]
     vendas_raw_values = _read_values_first_available_sheet(source, ["Vendas Alvo", "Vendas Pamplona"])
 
     map_degelo = _build_lookup_by_code(
@@ -2254,6 +2261,18 @@ def _enrich_base_map_with_master_etl(
         ["product_code", "cod_produto", "codigo_produto", "codigo", "sku"],
         {"familia_visual": ["familia_visual", "família_visual", "familia", "família", "familia visual"]},
     )
+    map_subcategoria_nivel2 = {
+        normalize_string(row.get("subcategoria")).lower(): normalize_string(
+            row.get("subcategoria_nivel_2")
+            or row.get("subcategoria nível 2")
+            or row.get("subcategoria nivel 2")
+            or row.get("nivel_2")
+            or row.get("nível_2")
+            or row.get("nivel 2")
+        )
+        for row in subcategoria_nivel2_rows
+        if normalize_string(row.get("subcategoria"))
+    }
     sales_by_code, sales_by_name = _extract_sales_maps_from_raw_values(vendas_raw_values)
 
     if (
@@ -2264,6 +2283,7 @@ def _enrich_base_map_with_master_etl(
         and not map_vol
         and not map_fotos
         and not map_familia_visual
+        and not map_subcategoria_nivel2
         and not sales_by_code
         and not sales_by_name
     ):
@@ -2288,6 +2308,9 @@ def _enrich_base_map_with_master_etl(
             )
         if normalize_string(merged.get("subcategoria")) == "":
             merged["subcategoria"] = sub.get("subcategoria") or deg.get("subcategoria") or merged.get("subcategoria")
+        if normalize_string(merged.get("subcategoria_nivel_2")) == "":
+            subcat_norm = normalize_string(merged.get("subcategoria")).lower()
+            merged["subcategoria_nivel_2"] = map_subcategoria_nivel2.get(subcat_norm) or merged.get("subcategoria_nivel_2")
         if normalize_string(merged.get("categoria_site")) == "":
             merged["categoria_site"] = cat.get("categoria_site") or deg.get("categoria_site") or merged.get("categoria_site")
         if normalize_string(merged.get("nm_fabricante")) == "":
@@ -2405,6 +2428,7 @@ def _enrich_base_map_with_plano_rows(
         "grupo_alocado",
         "categoria_armazenagem",
         "subcategoria",
+        "subcategoria_nivel_2",
         "nm_fabricante",
         "venda_total",
         "altura_cm",
@@ -2434,6 +2458,7 @@ def _enrich_base_map_with_plano_rows(
             "grupo_alocado": row.get("grupo_alocado"),
             "categoria_armazenagem": row.get("categoria_armazenagem"),
             "subcategoria": row.get("subcategoria"),
+            "subcategoria_nivel_2": row.get("subcategoria_nivel_2"),
             "nm_fabricante": row.get("nm_fabricante"),
             "venda_total": row.get("venda_total"),
             "altura_cm": row.get("altura_cm"),

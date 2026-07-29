@@ -393,6 +393,12 @@ def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
         "grupo": str(p.get("grupo") or ""),
         "curva": str(p.get("curva") or ""),
         "subcategoria": str(p.get("sub") or p.get("subcategoria") or ""),
+        "subcategoria_nivel_2": str(
+            p.get("subNivel2")
+            or p.get("subcategoria_nivel_2")
+            or p.get("subcategoria_nivel2")
+            or ""
+        ),
         "familia_visual": str(p.get("familia_visual") or p.get("familia") or ""),
         "nm_fabricante": str(p.get("fabricante") or p.get("nm_fabricante") or ""),
         "peso_kg_unitario": float(p.get("peso") or p.get("peso_kg") or 0),

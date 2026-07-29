@@ -20,6 +20,7 @@ SHEET_BARCODE_TARGET = "Código de barras produtos"
 SHEET_EDICOES_MANUAIS = "Edicoes_Manuais"
 SHEET_MIX_INPUT = "MIX"
 SHEET_FAMILIA_VISUAL = "Familia Visual"
+SHEET_SUBCATEGORIA_NIVEL_2 = "Subcategorias Nivel 2"
 MIX_QTY_COLUMN_CANDIDATES = ["Quantidade", "quantidade", "qtd", "qtd_total", "par_level"]
 MIX_REQUIRED_COLUMNS_ERROR = "Não encontrei a aba MIX com colunas product_code, product_name e quantidade/par_level."
 FAMILIA_VISUAL_HEADERS = [
@@ -57,6 +58,162 @@ FAMILIA_VISUAL_STOPWORDS = {
     "suco",
     "tradicional",
 }
+SUBCATEGORIA_NIVEL_2_HEADERS = ["subcategoria", "subcategoria_nivel_2", "observacao"]
+DEFAULT_SUBCATEGORIA_NIVEL_2_ROWS = [
+    ("Chocolates e Bombons", "chocolates"),
+    ("Festival de Chocolates", "chocolates"),
+    ("Frutas, Legumes e Verduras", "flv_geral"),
+    ("Hortifruti", "flv_geral"),
+    ("Legumes", "legumes"),
+    ("Verduras", "verduras"),
+    ("Legumes Higienizados", "legumes"),
+    ("Verduras Higienizadas", "verduras"),
+    ("Abacaxi", "frutas"),
+    ("Kiwi", "frutas"),
+    ("Laranja", "frutas"),
+    ("Limão", "frutas"),
+    ("Maçãs", "frutas"),
+    ("Mamão", "frutas"),
+    ("Manga", "frutas"),
+    ("Maracujá", "frutas"),
+    ("Melancia", "frutas"),
+    ("Melão", "frutas"),
+    ("Mexericas", "frutas"),
+    ("Pera", "frutas"),
+    ("Uva", "frutas"),
+    ("Mirtilo", "frutas"),
+    ("Alho", "legumes"),
+    ("Batata", "legumes"),
+    ("Berinjela", "legumes"),
+    ("Brócolis", "legumes"),
+    ("Cebola", "legumes"),
+    ("Cenoura", "legumes"),
+    ("Chuchu", "legumes"),
+    ("Couve", "legumes"),
+    ("Ervilha", "legumes"),
+    ("Espinafre", "legumes"),
+    ("Gengibre", "legumes"),
+    ("Mandioca", "legumes"),
+    ("Milho", "legumes"),
+    ("Pepino", "legumes"),
+    ("Pimenta", "legumes"),
+    ("Pimentão", "legumes"),
+    ("Quiabo", "legumes"),
+    ("Repolho", "legumes"),
+    ("Tomate", "legumes"),
+    ("Vagem", "legumes"),
+    ("Carnes", "carnes_proteinas"),
+    ("Carnes Congeladas", "carnes_proteinas"),
+    ("Proteínas do Dia a Dia", "carnes_proteinas"),
+    ("Frangos", "carnes_proteinas"),
+    ("Suínos", "carnes_proteinas"),
+    ("Peixes", "carnes_proteinas"),
+    ("Bebidas", "bebidas"),
+    ("Bebidas Lácteas", "bebidas"),
+    ("Bebidas Proteicas", "bebidas"),
+    ("Pães", "paes_panificacao"),
+    ("Pão de Forma", "paes_panificacao"),
+    ("Pães Artesanais", "paes_panificacao"),
+    ("Pães Congelados", "paes_panificacao"),
+    ("Pães Integrais", "paes_panificacao"),
+    ("Padaria", "paes_panificacao"),
+    ("Massas", "massas_molhos"),
+    ("Massas e Molhos", "massas_molhos"),
+    ("Massas e Molhos de Tomate", "massas_molhos"),
+    ("Molhos", "massas_molhos"),
+    ("Molhos Diversos", "massas_molhos"),
+    ("Molho de Tomate Pronto", "massas_molhos"),
+    ("Óleos", "oleos_azeites"),
+    ("Azeites", "oleos_azeites"),
+    ("Óleos e Azeites", "oleos_azeites"),
+    ("Sorvetes", "sorvetes_sobremesas"),
+    ("Sorvetes e Sobremesas", "sorvetes_sobremesas"),
+    ("Sorvetes, Açaís e Sobremesas", "sorvetes_sobremesas"),
+    ("Sobremesas", "sorvetes_sobremesas"),
+    ("Picolés", "sorvetes_sobremesas"),
+    ("Doces", "doces_pastas"),
+    ("Doces e Pastas Cremosas", "doces_pastas"),
+    ("Biscoitos", "biscoitos_bolachas_cookies"),
+    ("Bolachas", "biscoitos_bolachas_cookies"),
+    ("Cookies", "biscoitos_bolachas_cookies"),
+    ("Torradas", "biscoitos_bolachas_cookies"),
+    ("Salgados", "salgados_snacks"),
+    ("Salgadinhos e Snacks", "salgados_snacks"),
+    ("Snacks Saudáveis", "salgados_snacks"),
+    ("Snacks Premium", "salgados_snacks"),
+    ("Pipoca", "pipoca"),
+    ("Pipocas", "pipoca"),
+    ("Farinhas e Farofas", "farinhas_graos"),
+    ("Farinhas e Grãos", "farinhas_graos"),
+    ("Arroz", "arroz_feijao_graos"),
+    ("Feijão", "arroz_feijao_graos"),
+    ("Arroz, Feijão e Grãos", "arroz_feijao_graos"),
+    ("Leites", "leites_derivados"),
+    ("Leites Especiais", "leites_derivados"),
+    ("Leites Vegetais", "leites_derivados"),
+    ("Iogurtes", "iogurtes"),
+    ("Iogurtes Proteicos", "iogurtes"),
+    ("Queijos", "queijos_frios_embutidos"),
+    ("Frios", "queijos_frios_embutidos"),
+    ("Embutidos", "queijos_frios_embutidos"),
+    ("Queijos, Frios e Embutidos", "queijos_frios_embutidos"),
+    ("Cafés", "cafes_chas_capsulas"),
+    ("Chás", "cafes_chas_capsulas"),
+    ("Chás e Mates", "cafes_chas_capsulas"),
+    ("Chás e Cafés em Cápsula", "cafes_chas_capsulas"),
+    ("Cápsulas Dolce Gusto", "cafes_chas_capsulas"),
+    ("Cápsulas para Nespresso", "cafes_chas_capsulas"),
+    ("Vinhos", "vinhos_alcoolicas"),
+    ("Vinhos e Espumantes", "vinhos_alcoolicas"),
+    ("Vinhos, Destilados e Drinks", "vinhos_alcoolicas"),
+    ("Cervejas", "cervejas"),
+    ("Cervejas Especiais", "cervejas"),
+    ("Destilados", "vinhos_alcoolicas"),
+    ("Sucos", "sucos_aguas"),
+    ("Sucos e Refrescos", "sucos_aguas"),
+    ("Sucos e Água de Coco", "sucos_aguas"),
+    ("Sucos e Chás", "sucos_aguas"),
+    ("Águas", "sucos_aguas"),
+    ("Suplementos", "suplementos_vitaminas"),
+    ("Vitaminas e Bem Estar", "suplementos_vitaminas"),
+    ("Pré Treino e Carboidratos", "suplementos_vitaminas"),
+    ("Whey e Proteínas Vegetais", "suplementos_vitaminas"),
+    ("Barras Proteicas", "suplementos_vitaminas"),
+    ("Performance Esportiva", "suplementos_vitaminas"),
+    ("Higiene", "higiene_cuidados"),
+    ("Higiene Bucal", "higiene_cuidados"),
+    ("Higiene Bucal Infantil", "higiene_cuidados"),
+    ("Cabelo", "higiene_cuidados"),
+    ("Barba", "higiene_cuidados"),
+    ("Desodorantes", "higiene_cuidados"),
+    ("Sabonetes", "higiene_cuidados"),
+    ("Mãos e Pés", "higiene_cuidados"),
+    ("Limpeza", "limpeza"),
+    ("Limpeza Verde", "limpeza"),
+    ("Desinfetantes", "limpeza"),
+    ("Detergentes e Lava Louças", "limpeza"),
+    ("Lava Roupas", "limpeza"),
+    ("Alvejantes e Água Sanitária", "limpeza"),
+    ("Limpadores Multiuso e Perfumados", "limpeza"),
+    ("Pets", "pets"),
+    ("Petiscos para Cães", "pets"),
+    ("Petiscos para Gatos", "pets"),
+    ("Rações Secas para Cães", "pets"),
+    ("Rações Secas para Gatos", "pets"),
+    ("Rações Úmidas para Cães", "pets"),
+    ("Rações Úmidas para Gatos", "pets"),
+    ("Higiene e Beleza Pet", "pets"),
+    ("Tapetes e Areias", "pets"),
+    ("Bebês", "bebes_infantil"),
+    ("Hora da Troca", "bebes_infantil"),
+    ("Hora do Banho", "bebes_infantil"),
+    ("Cuidado Infantil", "bebes_infantil"),
+    ("Fraldas", "bebes_infantil"),
+    ("Utilidades", "utilidades_descartaveis"),
+    ("Utilidades Basicas", "utilidades_descartaveis"),
+    ("Descartáveis", "utilidades_descartaveis"),
+    ("Papelaria", "utilidades_descartaveis"),
+]
 
 BASE_OUTPUT_HEADERS = [
     "product_code",
@@ -64,6 +221,7 @@ BASE_OUTPUT_HEADERS = [
     "nm_fabricante",
     "categoria_armazenagem",
     "subcategoria",
+    "subcategoria_nivel_2",
     "categoria_site",
     "grupo",
     "familia_visual",
@@ -715,6 +873,78 @@ def _extract_visual_family_map(df_family: pd.DataFrame) -> dict[str, str]:
     return output
 
 
+def _extract_subcategory_level2_map(df_level2: pd.DataFrame) -> dict[str, str]:
+    df = _normalize_columns(df_level2)
+    if df.empty:
+        return {}
+    subcat_col = _pick_col(df, ["subcategoria", "subcategoria_original", "subcategoria original"])
+    level2_col = _pick_col(df, ["subcategoria_nivel_2", "subcategoria nível 2", "subcategoria nivel 2", "nivel_2", "nível_2", "nivel 2"])
+    if not subcat_col or not level2_col:
+        return {}
+    output: dict[str, str] = {}
+    for _, row in df.iterrows():
+        subcat = _norm(_row_value(row, subcat_col))
+        level2 = _norm(_row_value(row, level2_col))
+        if subcat and level2:
+            output[subcat] = level2
+    return output
+
+
+def _subcategory_level2_rows(headers: list[str]) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    seen: set[str] = set()
+    for subcategoria, level2 in DEFAULT_SUBCATEGORIA_NIVEL_2_ROWS:
+        key = _norm(subcategoria)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        values = {
+            "subcategoria": subcategoria,
+            "subcategoria_original": subcategoria,
+            "subcategoria_nivel_2": level2,
+            "nivel_2": level2,
+            "observacao": "seed propostaNivel2",
+        }
+        rows.append([values.get(header, "") for header in headers])
+    return rows
+
+
+def _ensure_subcategory_level2_sheet(master: GSheetsClient, existing_name: str | None) -> str:
+    sheet_name = existing_name or SHEET_SUBCATEGORIA_NIVEL_2
+    sheet_names = master.list_sheet_names()
+    if sheet_name not in sheet_names:
+        rows = [SUBCATEGORIA_NIVEL_2_HEADERS] + _subcategory_level2_rows(SUBCATEGORIA_NIVEL_2_HEADERS)
+        try:
+            master.ensure_sheet(sheet_name, row_count=max(1000, len(rows)), column_count=len(SUBCATEGORIA_NIVEL_2_HEADERS))
+        except TypeError:
+            master.ensure_sheet(sheet_name)
+        master.append_rows(sheet_name, rows)
+        return sheet_name
+
+    values = master.read_values(sheet_name)
+    if not values or not any(normalize_string(cell) for cell in values[0]):
+        rows = [SUBCATEGORIA_NIVEL_2_HEADERS] + _subcategory_level2_rows(SUBCATEGORIA_NIVEL_2_HEADERS)
+        master.clear_sheet(sheet_name)
+        master.append_rows(sheet_name, rows)
+        return sheet_name
+
+    headers = [str(header or "").strip() for header in values[0]]
+    subcat_col = _find_header_index(headers, ["subcategoria", "subcategoria_original", "subcategoria original"])
+    existing_subcats = {
+        _norm(row[subcat_col] if subcat_col < len(row) else "")
+        for row in values[1:]
+        if subcat_col != -1
+    }
+    missing_rows = [
+        row
+        for row in _subcategory_level2_rows(headers)
+        if subcat_col != -1 and _norm(row[subcat_col] if subcat_col < len(row) else "") not in existing_subcats
+    ]
+    if missing_rows:
+        master.append_rows(sheet_name, missing_rows)
+    return sheet_name
+
+
 def _is_measure_token(token: str) -> bool:
     return bool(re.fullmatch(r"\d+(?:[.,]\d+)?(?:ml|l|g|kg|mg|cm|mm|m|un|und|unds|unid|unidade|unidades)", token))
 
@@ -1212,6 +1442,11 @@ def run_etl_to_base_products(
     barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
     fotos_name = _find_sheet_name(master, ["Fotos_Produtos", "Fotos Produtos"], required=False)
     familia_visual_name = _find_sheet_name(master, ["Familia Visual", "Família Visual", "Familia_Visual"], required=False)
+    subcategoria_nivel2_name = _find_sheet_name(
+        master,
+        ["Subcategorias Nivel 2", "Subcategorias Nível 2", "Subcategoria Nivel 2", "Subcategoria Nível 2"],
+        required=False,
+    )
 
     df_degelo = _normalize_columns(_safe_df(master.read_values(degelo_name)))
     df_categoria_gpt = _normalize_columns(_safe_df(master.read_values(categoria_gpt_name)))
@@ -1232,6 +1467,9 @@ def run_etl_to_base_products(
     df_fotos = _normalize_columns(_safe_df(master.read_values(fotos_name))) if fotos_name else pd.DataFrame()
     df_familia_visual = (
         _normalize_columns(_safe_df(master.read_values(familia_visual_name))) if familia_visual_name else pd.DataFrame()
+    )
+    df_subcategoria_nivel2 = (
+        _normalize_columns(_safe_df(master.read_values(subcategoria_nivel2_name))) if subcategoria_nivel2_name else pd.DataFrame()
     )
 
     map_degelo = _build_map_from_df(
@@ -1257,6 +1495,8 @@ def run_etl_to_base_products(
         ["caixa_largura_cm", "caixa_altura_cm", "caixa_comprimento_cm", "caixa_volume_cm3"],
     )
     if persist:
+        subcategoria_nivel2_name = _ensure_subcategory_level2_sheet(master, subcategoria_nivel2_name)
+        df_subcategoria_nivel2 = _normalize_columns(_safe_df(master.read_values(subcategoria_nivel2_name)))
         familia_visual_name = _ensure_visual_family_sheet(
             master,
             mix_df,
@@ -1272,6 +1512,7 @@ def run_etl_to_base_products(
     barcode_codes = _extract_barcode_set(df_barcode)
     photo_map = _build_photo_map(df_fotos)
     visual_family_map = _extract_visual_family_map(df_familia_visual)
+    subcategory_level2_map = _extract_subcategory_level2_map(df_subcategoria_nivel2)
     limite_peso_kg = _extract_limite_peso(df_config)
     capacity_map = _extract_capacity_map(df_vol_eq)
     dic_cat_map = _extract_category_group_map(df_dic_cat)
@@ -1297,6 +1538,7 @@ def run_etl_to_base_products(
         categoria_armz = str(gpt_data.get("Categoria_Correta") or "").strip()
         categoria_site = str(site_data.get("categoria") or "").strip()
         subcategoria = str(subcat_data.get("subcategoria") or "").strip()
+        subcategoria_nivel_2 = subcategory_level2_map.get(_norm(subcategoria), "")
         grupo = dic_cat_map.get(_norm(categoria_site), "") or subcategory_group_map.get(_norm(subcategoria), "") or "neutro"
         fabricante = str(degelo_data.get("nm_fabricante") or vol_data.get("nm_fabricante") or "").strip()
 
@@ -1382,6 +1624,7 @@ def run_etl_to_base_products(
             "nm_fabricante": fabricante,
             "categoria_armazenagem": categoria_armz,
             "subcategoria": subcategoria,
+            "subcategoria_nivel_2": subcategoria_nivel_2,
             "categoria_site": categoria_site,
             "grupo": grupo,
             "familia_visual": familia_visual,
@@ -1535,6 +1778,7 @@ def run_etl_to_base_products(
             "base_produtos": target.get_sheet_url(SHEET_BASE_PRODUTOS),
             "master_volumetria": master.get_sheet_url(volumetria_name),
             "master_subcategorias": master.get_sheet_url(subcategorias_name),
+            "master_subcategorias_nivel_2": master.get_sheet_url(subcategoria_nivel2_name) if subcategoria_nivel2_name else "",
             "master_categoria_site": master.get_sheet_url(categoria_site_name),
             "master_degelo": master.get_sheet_url(degelo_name),
             "master_familia_visual": master.get_sheet_url(familia_visual_name) if familia_visual_name else "",

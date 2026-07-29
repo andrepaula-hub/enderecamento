@@ -53,6 +53,7 @@ class Slot:
     occupant_count: int = 0
     occupant_codes: list[str] | None = None
     occupant_subcategories: set[str] | None = None
+    occupant_subcategory_level2: set[str] | None = None
     occupant_families: set[str] | None = None
     occupant_manufacturers: set[str] | None = None
     occupant_volume_l: float = 0.0
@@ -270,6 +271,14 @@ def _actionable_subcategory(row: dict[str, Any]) -> str:
     return "" if subcat in _GENERIC_SUBCATEGORIES else subcat
 
 
+def _actionable_subcategory_level2(row: dict[str, Any]) -> str:
+    level2 = str(
+        row.get("_subcategoria_nivel_2_norm")
+        or _normalize_text(row.get("subcategoria_nivel_2") or row.get("subcategoria_nivel2"))
+    )
+    return "" if level2 in _GENERIC_SUBCATEGORIES else level2
+
+
 def _degelo_class(row: dict[str, Any]) -> str:
     value = _normalize_text(row.get("degelo"))
     if value.startswith("nao"):
@@ -313,6 +322,7 @@ def _slot_from_row(
             level = _parse_int(match.group(1))
     occupied_codes: list[str] = []
     occupied_subcats: set[str] = set()
+    occupied_subcat_level2: set[str] = set()
     occupied_families: set[str] = set()
     occupied_manufacturers: set[str] = set()
     occupied_volume = 0.0
@@ -325,6 +335,9 @@ def _slot_from_row(
         subcat = _normalize_text(product.get("subcategoria") or occupied.get("subcategoria"))
         if subcat:
             occupied_subcats.add(subcat)
+        subcat_level2 = _actionable_subcategory_level2(product)
+        if subcat_level2:
+            occupied_subcat_level2.add(subcat_level2)
         family = _visual_family(product)
         if family:
             occupied_families.add(family)
@@ -347,6 +360,7 @@ def _slot_from_row(
         occupant_count=occupant_count,
         occupant_codes=occupied_codes,
         occupant_subcategories=occupied_subcats,
+        occupant_subcategory_level2=occupied_subcat_level2,
         occupant_families=occupied_families,
         occupant_manufacturers=occupied_manufacturers,
         occupant_volume_l=occupied_volume,
@@ -420,6 +434,9 @@ def _hard_rule_violations(
         subcat = _actionable_subcategory(product)
         if subcat and subcat in (slot.occupant_subcategories or set()):
             reasons.append("Subcategoria repetida no mesmo endereco.")
+        subcat_level2 = _actionable_subcategory_level2(product)
+        if subcat_level2 and subcat_level2 in (slot.occupant_subcategory_level2 or set()):
+            reasons.append("Subcategoria nivel 2 repetida no mesmo endereco.")
         if slot.capacity_l and slot.capacity_l > 0:
             projected = slot.occupant_volume_l + _required_volume_l(product)
             if projected / slot.capacity_l > rules.second_slot_max_used_capacity_ratio:
@@ -652,6 +669,9 @@ def _has_same_level_attribute_conflict(
     subcat = _actionable_subcategory(product)
     if subcat:
         checks.append((subcat, slot.equip_id))
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if subcat_level2:
+        checks.append(("__subcat_level2__", subcat_level2, slot.equip_id))
     family = _visual_family(product)
     if family:
         checks.append(("__family__", family, slot.equip_id))
@@ -679,16 +699,21 @@ def _has_same_level_subcategory_conflict(
     if slot.level is None:
         return False
     subcat = _actionable_subcategory(product)
-    if not subcat:
-        return False
-    for placement in placement_index.get((subcat, slot.equip_id), []):
-        if _same_product(product, placement):
-            continue
-        try:
-            if int(placement.get("level")) == int(slot.level):
-                return True
-        except (TypeError, ValueError):
-            continue
+    checks: list[tuple[Any, ...]] = []
+    if subcat:
+        checks.append((subcat, slot.equip_id))
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if subcat_level2:
+        checks.append(("__subcat_level2__", subcat_level2, slot.equip_id))
+    for key in checks:
+        for placement in placement_index.get(key, []):
+            if _same_product(product, placement):
+                continue
+            try:
+                if int(placement.get("level")) == int(slot.level):
+                    return True
+            except (TypeError, ValueError):
+                continue
     return False
 
 
@@ -723,6 +748,9 @@ def _has_direct_attribute_adjacency(
     subcat = _actionable_subcategory(product)
     if subcat:
         checks.append((subcat, slot.equip_id))
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if subcat_level2:
+        checks.append(("__subcat_level2__", subcat_level2, slot.equip_id))
     family = _visual_family(product)
     if family:
         checks.append(("__family__", family, slot.equip_id))
@@ -1149,6 +1177,9 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
         return
     if subcat:
         index.setdefault((subcat, equip_id), []).append(placement)
+    subcat_level2 = _actionable_subcategory_level2(placement)
+    if subcat_level2:
+        index.setdefault(("__subcat_level2__", subcat_level2, equip_id), []).append(placement)
     family = _visual_family(placement)
     if family:
         index.setdefault(("__family__", family, equip_id), []).append(placement)
@@ -1170,6 +1201,7 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
         "product_code": _product_code(product),
         "product_name": normalize_string(product.get("product_name") or product.get("nome")),
         "subcategoria": _normalize_text(product.get("subcategoria")),
+        "subcategoria_nivel_2": _actionable_subcategory_level2(product),
         "familia_visual": _visual_family(product),
         "nm_fabricante": _manufacturer(product),
         "curva": _curve_value(product),
@@ -1191,6 +1223,10 @@ def _commit_product_to_slot(slot: Slot, product: dict[str, Any]) -> None:
     if subcat:
         slot.occupant_subcategories = set(slot.occupant_subcategories or set())
         slot.occupant_subcategories.add(subcat)
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if subcat_level2:
+        slot.occupant_subcategory_level2 = set(slot.occupant_subcategory_level2 or set())
+        slot.occupant_subcategory_level2.add(subcat_level2)
     family = _visual_family(product)
     if family:
         slot.occupant_families = set(slot.occupant_families or set())
