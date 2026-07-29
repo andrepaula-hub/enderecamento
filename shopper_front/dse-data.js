@@ -138,6 +138,7 @@
     if (text.indexOf('geladeira') >= 0) return 'geladeira';
     if (text.indexOf('freezer') >= 0) return 'freezer';
     if (text.indexOf('quim') >= 0) return 'quimico';
+    if (text.indexOf('prateleira') >= 0) return text;
     return 'prateleira';
   }
 
@@ -400,7 +401,7 @@
     sendEtlWarningGroupAsync: function (warningType) { return postApiAsync('sendEtlWarningGroupJob', [warningType]); },
     sendMissingVolumetriaDefaultAsync: function (defaultVolumeCm3) { return postApiAsync('sendMissingVolumetriaDefault', [defaultVolumeCm3]); },
     refreshEtlWarningAsync: function (warningType) { return postApiAsync('refreshEtlWarning', [warningType]); },
-    generateSlots: function () { return postApi('generateSlotsFromCadastro', [false]); },
+    generateSlots: function () { return postApi('generateSlotsFromCadastro', [true]); },
     buildSalesTarget: function (payload) { return postApi('buildMetabaseSalesTarget', [payload]); },
     buildSalesTargetAsync: function (payload) { return postApiAsync('buildMetabaseSalesTargetJob', [payload]); },
     exportSalesXlsx: function (payload) { return postApi('exportMetabaseSalesXlsx', [payload]); },

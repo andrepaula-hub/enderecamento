@@ -55,6 +55,21 @@ const EQUIP_CFG = {
 
 const ALL_TYPES = Object.entries(EQUIP_CFG).map(([id,cfg])=>({id,...cfg}));
 
+function formatEquipTypeLabel(type) {
+  const text = String(type || '').replace(/[_-]+/g, ' ').trim();
+  if (!text) return 'Prateleira';
+  return text.replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function getEquipCfg(type) {
+  if (EQUIP_CFG[type]) return EQUIP_CFG[type];
+  const normalized = String(type || '').toLowerCase();
+  const base = normalized.includes('geladeira')
+    ? EQUIP_CFG.geladeira
+    : (normalized.includes('freezer') ? EQUIP_CFG.freezer : EQUIP_CFG.prateleira);
+  return { ...base, label: formatEquipTypeLabel(type) };
+}
+
 function normalizeEquipmentFilterList(filter) {
   if (Array.isArray(filter)) return [...new Set(filter.filter((item)=>item && item !== 'all'))];
   if (!filter || filter === 'all') return [];
@@ -327,7 +342,7 @@ function EquipMenu({ eq, streetId, dispatch, onClose, onStartSwap, position }) {
     return ()=>document.removeEventListener('mousedown',h);
   }, []);
 
-  const cfg = EQUIP_CFG[eq.tipo]||EQUIP_CFG.prateleira;
+  const cfg = getEquipCfg(eq.tipo);
 
   const item = (label,onClick,opts={})=>(
     <button onClick={onClick} style={{ display:'flex', alignItems:'center', gap:7, width:'100%', padding:'6px 10px', borderRadius:4, border:'none', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', background:'transparent', color:opts.danger?'#9E1028':'var(--dropdown-text)', fontSize:11, fontWeight:500 }}
@@ -408,7 +423,7 @@ const EquipmentCard = memo(function EquipmentCard({ eq, streetId, allocations, h
   const menuBtnRef = useRef(null);
   const [hovHeader, setHovHeader] = useState(false);
   const [hovEquipment, setHovEquipment] = useState(false);
-  const cfg = EQUIP_CFG[eq.tipo]||EQUIP_CFG.prateleira;
+  const cfg = getEquipCfg(eq.tipo);
   const isTypePending = !!pendingEquipmentTypeChanges[eq.id];
   const isCard175 = !!eq.card175Only;
   const isDark = document.documentElement.getAttribute('data-dse-theme')==='dark';
@@ -997,7 +1012,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
                       Todos
                     </button>
                     {equipTypes.map(t=>{
-                      const cfg=EQUIP_CFG[t]||EQUIP_CFG.prateleira;
+                      const cfg=getEquipCfg(t);
                       const selected = typeFilters.includes(t);
                       return (
                         <button key={t} onClick={()=>setTypeFilters((current)=>current.includes(t) ? current.filter((item)=>item!==t) : [...current,t])}
@@ -1043,7 +1058,7 @@ const StreetColumn = memo(function StreetColumn({ street, allocations, hasAlloca
                     ['freezer','Freezer'],
                     ['quimico','Químico'],
                   ].map(([t,label])=>{
-                    const cfg=EQUIP_CFG[t]||EQUIP_CFG.prateleira;
+                    const cfg=getEquipCfg(t);
                     return (
                       <button key={t} onClick={()=>setNewEquipTipo(t)}
                         style={{ padding:'5px 8px', fontSize:10, fontWeight:700, borderRadius:4, cursor:'pointer', textAlign:'left',

@@ -17,9 +17,9 @@ from .utils import normalize_string, parse_bool_flag, parse_number
 
 
 COMPATIBILITY = {
-    "seco": {"prateleira", "prateleira_lateral", "prateleira_alta"},
-    "refrigerado": {"geladeira", "geladeira_alta", "geladeira_americana", "geladeira_gerador", "geladeira_degelo"},
-    "congelado": {"freezer"},
+    "seco": ("prateleira",),
+    "refrigerado": ("geladeira",),
+    "congelado": ("freezer",),
 }
 
 
@@ -69,6 +69,14 @@ def _normalize_text(value: Any) -> str:
 
 def _normalize_equip_type(value: Any) -> str:
     return _normalize_text(value).replace(" ", "_")
+
+
+def _is_compatible_equipment_type(category: str, equip_type: str) -> bool:
+    prefixes = COMPATIBILITY.get(category, ())
+    if not prefixes:
+        return True
+    normalized = _normalize_equip_type(equip_type)
+    return any(normalized == prefix or normalized.startswith(f"{prefix}_") for prefix in prefixes)
 
 
 def _normalize_equip_id(value: Any) -> str:
@@ -401,8 +409,7 @@ def _hard_rule_violations(
 ) -> list[str]:
     reasons: list[str] = []
     category = _category_group(product)
-    compatible = COMPATIBILITY.get(category, set())
-    if compatible and slot.equip_type not in compatible:
+    if not _is_compatible_equipment_type(category, slot.equip_type):
         reasons.append(f"Categoria {category} incompativel com equipamento {slot.equip_type}.")
     if _is_cold_high_product(product) and _normalize_equip_type(slot.equip_type) != "geladeira_alta":
         reasons.append("Produto refrigerado alto exige geladeira alta.")
@@ -491,9 +498,8 @@ def _pick_slots_for_product(
 ) -> list[Slot]:
     required = max(1, int(required or 1))
     candidates: list[Slot] = []
-    compatible_equips = COMPATIBILITY.get(_category_group(product), set())
     for slot in slots:
-        if compatible_equips and slot.equip_type not in compatible_equips:
+        if not _is_compatible_equipment_type(_category_group(product), slot.equip_type):
             continue
         if slot.location_id in reserved_locations and slot.occupant_count == 0:
             continue

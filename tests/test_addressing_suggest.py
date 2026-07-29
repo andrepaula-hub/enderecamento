@@ -88,6 +88,32 @@ def test_suggest_allocations_blocks_same_subcategory_when_only_same_level_exists
     assert result["unallocated"] == ["NEW"]
 
 
+def test_suggest_allocations_accepts_dynamic_prateleira_variant_for_dry_products():
+    result = suggest_allocations(
+        unallocated_codes=["SECO"],
+        products_data=[
+            _product("SECO", nome="Produto seco", arm="seco"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira_stress", "niveis": 5, "escsPerNivel": 4, "cap": 100},
+                ],
+            },
+        ],
+        allocations={
+            f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+            for level in range(1, 6)
+            for pos in range(1, 5)
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"].startswith("R1-E1-")
+
+
 def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level_block():
     result = suggest_allocations(
         unallocated_codes=["LEVE", "PESADO"],
