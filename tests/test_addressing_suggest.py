@@ -948,6 +948,49 @@ def test_suggest_allocations_blocks_same_family_side_by_side():
     assert result["moves"][0]["escaninhoId"] not in {"R1-E1-3-1", "R1-E1-3-3"}
 
 
+def test_suggest_allocations_blocks_same_family_side_by_side_with_different_prefixes():
+    result = suggest_allocations(
+        unallocated_codes=["BANANA_ORG"],
+        products_data=[
+            _product(
+                "BANANA_NANICA",
+                nome="Banana nanica madura 1kg",
+                grupo="FLV",
+                sub="Frutas, Legumes e Verduras",
+                familia_visual="frutas, legumes e verduras|banana",
+            ),
+            _product(
+                "BANANA_ORG",
+                nome="Banana prata madura organica 500g",
+                grupo="FLV",
+                sub="Organicos",
+                familia_visual="organicos|banana",
+            ),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 4, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 5)
+            },
+            "R1-E1-3-2": {"p1": "BANANA_NANICA", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["escaninhoId"] not in {"R1-E1-3-1", "R1-E1-3-3"}
+
+
 def test_suggest_allocations_blocks_same_family_same_position_adjacent_level():
     result = suggest_allocations(
         unallocated_codes=["CAFE2"],
@@ -977,6 +1020,60 @@ def test_suggest_allocations_blocks_same_family_same_position_adjacent_level():
     assert result["success"] is True
     assert result["moves"]
     assert result["moves"][0]["escaninhoId"] not in {"R1-E1-2-2", "R1-E1-4-2"}
+
+
+def test_suggest_allocations_spreads_same_family_across_equipment_when_pool_is_large():
+    filler_codes = [f"FILLER{i}" for i in range(45)]
+    result = suggest_allocations(
+        unallocated_codes=["CAFE2", *filler_codes],
+        products_data=[
+            _product(
+                "CAFE1",
+                nome="Cafe torrado e moido 3 coracoes tradicional 500g",
+                sub="Suprimentos",
+                fabricante="3 CORAÇÕES",
+                familia_visual="suprimentos|3_coracoes",
+            ),
+            _product(
+                "CAFE2",
+                nome="Cafe soluvel 3 coracoes tradicional refil 40g",
+                sub="Cafes",
+                fabricante="3 CORAÇÕES",
+                familia_visual="cafes|3_coracoes",
+            ),
+            *[
+                _product(code, nome=f"Produto {index}", sub=f"Sub {index}", fabricante=f"Fabricante {index}")
+                for index, code in enumerate(filler_codes)
+            ],
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 10, "cap": 100},
+                    {"id": "R1-E2", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 10, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 11)
+            },
+            **{
+                f"R1-E2-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 11)
+            },
+            "R1-E1-3-2": {"p1": "CAFE1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    cafe_move = next(move for move in result["moves"] if move["productCode"] == "CAFE2")
+    assert cafe_move["escaninhoId"].startswith("R1-E2-")
 
 
 def test_suggest_allocations_avoids_level2_vertical_adjacency_when_filtered_pool_is_large():

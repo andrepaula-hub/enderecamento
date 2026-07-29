@@ -254,6 +254,14 @@ def _visual_family(row: dict[str, Any]) -> str:
     return f"{category}|{group}|{name_family}"
 
 
+def _visual_family_match_key(row: dict[str, Any]) -> str:
+    family = _visual_family(row)
+    if not family:
+        return ""
+    tail = family.split("|")[-1].strip()
+    return tail or family
+
+
 _GENERIC_SUBCATEGORIES = {
     "",
     "sem subcategoria",
@@ -338,7 +346,7 @@ def _slot_from_row(
         subcat_level2 = _actionable_subcategory_level2(product)
         if subcat_level2:
             occupied_subcat_level2.add(subcat_level2)
-        family = _visual_family(product)
+        family = _visual_family_match_key(product)
         if family:
             occupied_families.add(family)
         manufacturer = _manufacturer(product)
@@ -511,6 +519,18 @@ def _pick_slots_for_product(
             if not _has_hard_visual_adjacency(product, slot, placement_index)
         ]
         if _has_large_filtered_pool(product):
+            family_equipment_clean = [
+                slot for slot in candidate_tier
+                if not _has_equipment_family_conflict(product, slot, placement_index)
+            ]
+            if family_equipment_clean:
+                candidate_tier = family_equipment_clean
+            manufacturer_equipment_clean = [
+                slot for slot in candidate_tier
+                if not _has_equipment_manufacturer_saturation(product, slot, placement_index)
+            ]
+            if manufacturer_equipment_clean:
+                candidate_tier = manufacturer_equipment_clean
             subcat_level2_clean = [
                 slot for slot in candidate_tier
                 if not _has_vertical_subcategory_level2_adjacency(product, slot, placement_index)
@@ -685,7 +705,7 @@ def _has_same_level_attribute_conflict(
     subcat_level2 = _actionable_subcategory_level2(product)
     if subcat_level2:
         checks.append(("__subcat_level2__", subcat_level2, slot.equip_id))
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if family:
         checks.append(("__family__", family, slot.equip_id))
     manufacturer = _manufacturer(product)
@@ -764,7 +784,7 @@ def _has_direct_attribute_adjacency(
     subcat_level2 = _actionable_subcategory_level2(product)
     if subcat_level2:
         checks.append(("__subcat_level2__", subcat_level2, slot.equip_id))
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if family:
         checks.append(("__family__", family, slot.equip_id))
     manufacturer = _manufacturer(product)
@@ -788,7 +808,7 @@ def _has_hard_visual_adjacency(
 ) -> bool:
     if slot.level is None or slot.position is None:
         return False
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if not family:
         return False
     for placement in placement_index.get(("__family__", family, slot.equip_id), []):
@@ -817,6 +837,36 @@ def _has_vertical_subcategory_level2_adjacency(
         if level_distance == 1 and pos_distance == 0:
             return True
     return False
+
+
+def _has_equipment_family_conflict(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    family = _visual_family_match_key(product)
+    if not family:
+        return False
+    return any(
+        not _same_product(product, placement)
+        for placement in placement_index.get(("__family__", family, slot.equip_id), [])
+    )
+
+
+def _has_equipment_manufacturer_saturation(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    manufacturer = _manufacturer(product)
+    if not manufacturer:
+        return False
+    count = sum(
+        1
+        for placement in placement_index.get(("__manufacturer__", manufacturer, slot.equip_id), [])
+        if not _same_product(product, placement)
+    )
+    return count >= 2
 
 
 def _has_large_filtered_pool(product: dict[str, Any]) -> bool:
@@ -1074,7 +1124,7 @@ def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dic
             elif level_distance == 1:
                 penalty += 25
 
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if family:
         for placement in placement_index.get(("__family__", family, slot.equip_id), []):
             if _same_product(product, placement):
@@ -1125,7 +1175,7 @@ def _equipment_concentration_penalty(
         count = count_other((subcat, slot.equip_id))
         penalty += multiplier * 170.0 * (count ** 1.35)
 
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if family:
         count = count_other(("__family__", family, slot.equip_id))
         penalty += multiplier * 150.0 * (count ** 1.35)
@@ -1286,7 +1336,7 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
     subcat_level2 = _actionable_subcategory_level2(placement)
     if subcat_level2:
         index.setdefault(("__subcat_level2__", subcat_level2, equip_id), []).append(placement)
-    family = _visual_family(placement)
+    family = _visual_family_match_key(placement)
     if family:
         index.setdefault(("__family__", family, equip_id), []).append(placement)
     manufacturer = _manufacturer(placement)
@@ -1333,7 +1383,7 @@ def _commit_product_to_slot(slot: Slot, product: dict[str, Any]) -> None:
     if subcat_level2:
         slot.occupant_subcategory_level2 = set(slot.occupant_subcategory_level2 or set())
         slot.occupant_subcategory_level2.add(subcat_level2)
-    family = _visual_family(product)
+    family = _visual_family_match_key(product)
     if family:
         slot.occupant_families = set(slot.occupant_families or set())
         slot.occupant_families.add(family)
