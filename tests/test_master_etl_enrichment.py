@@ -33,6 +33,13 @@ class _FakeClient:
     def append_rows(self, sheet_name: str, rows: list[list[Any]]) -> None:
         self._values_by_sheet[sheet_name] = rows
 
+    def update_rows(self, sheet_name: str, row_updates: dict[int, list[Any]], header_len: int) -> None:
+        rows = self._values_by_sheet.setdefault(sheet_name, [])
+        for row_num, values in row_updates.items():
+            while len(rows) < row_num:
+                rows.append([])
+            rows[row_num - 1] = values[:header_len] + [""] * max(0, header_len - len(values))
+
     def get_title(self) -> str:
         return "Fake Sheet"
 
@@ -218,6 +225,9 @@ def test_run_etl_replaces_invalid_measure_visual_family_from_master_sheet():
     output = clients["target"].read_values("Base_Produtos")
     headers = output[0]
     assert output[1][headers.index("familia_visual")] == "frutas, legumes e verduras|banana"
+    family_sheet = clients["master"].read_values("Familia Visual")
+    family_headers = family_sheet[0]
+    assert family_sheet[1][family_headers.index("familia_visual")] == "frutas, legumes e verduras|banana"
 
 
 def test_run_etl_creates_and_populates_familia_visual_sheet_when_missing():
@@ -326,6 +336,30 @@ def test_suggest_visual_family_never_uses_measure_as_family_token():
             "3 CORAÇÕES",
         )
         == "cafes|3_coracoes"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "SORVETE BACIO DI LATTE PISTACCHIO 490ML",
+            "Sorvetes e Sobremesas",
+            "Bacio di Latte",
+        )
+        == "sorvetes e sobremesas|bacio_di_latte"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "SORVETE HAAGEN DAZS BAUNILHA 473ML",
+            "Sorvetes e Sobremesas",
+            "General Mills",
+        )
+        == "sorvetes e sobremesas|haagen_dazs"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "NUGGETS DE FRANGO TRADICIONAL SADIA 300G",
+            "Frangos",
+            "Sadia",
+        )
+        == "frangos|nuggets"
     )
 
 

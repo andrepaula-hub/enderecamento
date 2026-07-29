@@ -1126,7 +1126,9 @@ def _curve_equipment_priority_score(
 
     placements = placement_index.get(("__curve__", slot.equip_id), [])
     if placements:
+        same_curve = sum(1 for placement in placements if placement.get("curva") == curve)
         other_curve = sum(1 for placement in placements if placement.get("curva") and placement.get("curva") != curve)
+        score += same_curve * 180.0
         score -= other_curve * 90.0
     return score
 

@@ -14,6 +14,7 @@ from core.agent_scoring import (
     _commit_product_to_slot,
     _group,
     _degelo_class,
+    _equipment_concentration_penalty,
     _hard_rule_violations,
     _is_cold_high_product,
     _normalize_curve_zones,
@@ -159,13 +160,16 @@ def suggest_allocations(
     candidate_window = _allocation_candidate_window(options)
     remaining_products = list(sorted_products)
     product_order = {id(product): index for index, product in enumerate(remaining_products)}
+    deferral_counts: dict[int, int] = {}
     while remaining_products and len(proposed) < max_proposals:
         best_option: tuple[float, int, dict[str, Any], list[Slot], str, int, bool, str] | None = None
+        evaluated_products: list[dict[str, Any]] = []
         candidate_products = _allocation_candidate_products(remaining_products, candidate_window)
         for pool_index, product_pool in enumerate((candidate_products, remaining_products)):
             if pool_index == 1 and len(candidate_products) == len(remaining_products):
                 break
             for product in product_pool:
+                evaluated_products.append(product)
                 code = str(product.get("product_code") or "")
                 required = max(1, int(product.get("escaninhos_necessarios") or 1))
                 product_is_cold_high = _is_cold_high_product(product)
@@ -204,6 +208,8 @@ def suggest_allocations(
                     degelo_preferred_equips,
                     curve_priority_enabled,
                 )
+                if _equipment_concentration_penalty(product, candidates[0], placement_index) > 0:
+                    candidate_score += min(900.0, float(deferral_counts.get(id(product), 0)) * 180.0)
                 option = (
                     candidate_score,
                     -product_order.get(id(product), 0),
@@ -226,6 +232,12 @@ def suggest_allocations(
 
         _, _, product, candidates, code, required, product_is_cold_high, degelo_class = best_option
         remaining_products.remove(product)
+        chosen_id = id(product)
+        deferral_counts.pop(chosen_id, None)
+        for evaluated_product in evaluated_products:
+            evaluated_id = id(evaluated_product)
+            if evaluated_id != chosen_id and evaluated_product in remaining_products:
+                deferral_counts[evaluated_id] = deferral_counts.get(evaluated_id, 0) + 1
 
         if product_is_cold_high:
             pending_cold_high_units = max(0, pending_cold_high_units - required)

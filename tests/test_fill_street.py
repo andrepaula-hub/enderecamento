@@ -395,7 +395,7 @@ def test_fill_street_curve_priority_prefers_earlier_equipment():
     ]
 
 
-def test_fill_street_curve_priority_does_not_group_same_curve_in_same_equipment():
+def test_fill_street_curve_priority_keeps_same_curve_in_same_equipment():
     map_structure = [
         {
             "id": "R1",
@@ -429,11 +429,11 @@ def test_fill_street_curve_priority_does_not_group_same_curve_in_same_equipment(
 
     assert result["success"] is True
     assert result["moves"] == [
-        {"escaninhoId": "R1-E1-2-1", "productCode": "NEXT_A", "slot": 1, "equipmentId": "R1-E1"},
+        {"escaninhoId": "R1-E2-2-1", "productCode": "NEXT_A", "slot": 1, "equipmentId": "R1-E2"},
     ]
 
 
-def test_fill_street_keeps_cold_high_products_in_high_equipment_without_forcing_concentration():
+def test_fill_street_keeps_cold_high_products_in_same_high_equipment():
     map_structure = [
         {
             "id": "R1",
@@ -467,7 +467,7 @@ def test_fill_street_keeps_cold_high_products_in_high_equipment_without_forcing_
 
     assert result["success"] is True
     assert result["moves"] == [
-        {"escaninhoId": "R1-E1-2-1", "productCode": "HIGH2", "slot": 1, "equipmentId": "R1-E1"},
+        {"escaninhoId": "R1-E2-2-1", "productCode": "HIGH2", "slot": 1, "equipmentId": "R1-E2"},
     ]
 
 

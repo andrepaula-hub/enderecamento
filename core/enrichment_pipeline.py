@@ -35,6 +35,7 @@ FAMILIA_VISUAL_HEADERS = [
 FAMILIA_VISUAL_STOPWORDS = {
     "agua",
     "alcool",
+    "ao",
     "arroz",
     "barra",
     "biscoito",
@@ -42,20 +43,36 @@ FAMILIA_VISUAL_STOPWORDS = {
     "cafe",
     "caixa",
     "chocolate",
+    "com",
+    "congelado",
+    "congelada",
+    "cremoso",
+    "cremosa",
+    "de",
     "detergente",
+    "extra",
+    "forte",
+    "gourmet",
     "hidratante",
     "integral",
     "leite",
     "limpador",
     "liquido",
+    "madura",
+    "maduro",
     "macarrao",
     "molho",
+    "moido",
     "original",
     "papel",
+    "pote",
     "produto",
+    "refil",
     "sabonete",
+    "sabor",
     "sem",
     "soluvel",
+    "sorvete",
     "suco",
     "torrado",
     "tradicional",
@@ -974,6 +991,10 @@ def _phrase_token_family(name: str) -> str:
         return "3_coracoes"
     if re.search(r"\b3\s*cora[cç][oõ]es\b", name):
         return "3_coracoes"
+    if re.search(r"\bh[aä]agen\b", name) and re.search(r"\bdazs\b", name):
+        return "haagen_dazs"
+    if re.search(r"\bbacio\b", name) and re.search(r"\blatte\b", name):
+        return "bacio_di_latte"
     return ""
 
 
@@ -981,6 +1002,8 @@ def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante
     name = _norm(product_name)
     subcat = _norm(subcategoria)
     maker = _norm(fabricante)
+    name = re.sub(r"\[(?:nao|não)\s+vendido\]", " ", name)
+    name = re.sub(r"\[brinde\]", " ", name)
     phrase_family = _phrase_token_family(name)
     if phrase_family:
         prefix = subcat or maker
@@ -1075,6 +1098,7 @@ def _ensure_visual_family_sheet(
     else:
         headers = [str(header or "").strip() for header in values[0]]
         code_col = _find_header_index(headers, ["cod_produto", "product_code", "codigo_produto", "codigo", "sku"])
+        family_col = _find_header_index(headers, ["familia_visual", "família_visual", "familia", "família", "familia visual"])
         existing_codes = {
             _norm_code(row[code_col] if code_col < len(row) else "")
             for row in values[1:]
@@ -1084,6 +1108,28 @@ def _ensure_visual_family_sheet(
 
     headers = FAMILIA_VISUAL_HEADERS if rows else [str(header or "").strip() for header in values[0]]
     missing_rows: list[list[Any]] = []
+    row_updates: dict[int, list[Any]] = {}
+    products_by_code = {
+        _norm_code(product.get("product_code")): product
+        for _, product in mix_df.iterrows()
+        if _norm_code(product.get("product_code"))
+    }
+    if not rows and code_col != -1 and family_col != -1:
+        for row_index, row in enumerate(values[1:], start=2):
+            code = _norm_code(row[code_col] if code_col < len(row) else "")
+            if not code or code not in products_by_code:
+                continue
+            current_family = row[family_col] if family_col < len(row) else ""
+            if not _is_invalid_visual_family(current_family):
+                continue
+            product = products_by_code[code]
+            row_updates[row_index] = _visual_family_template_row(
+                code,
+                product.get("product_name"),
+                map_subcat.get(code, {}).get("subcategoria"),
+                map_vol.get(code, {}).get("nm_fabricante"),
+                headers,
+            )
     for _, product in mix_df.iterrows():
         code = _norm_code(product.get("product_code"))
         if not code or code in existing_codes:
@@ -1100,7 +1146,11 @@ def _ensure_visual_family_sheet(
     if rows:
         master.clear_sheet(sheet_name)
         master.append_rows(sheet_name, rows + missing_rows)
+    elif row_updates and hasattr(master, "update_rows"):
+        master.update_rows(sheet_name, row_updates, len(headers))
     elif missing_rows:
+        master.append_rows(sheet_name, missing_rows)
+    if row_updates and missing_rows:
         master.append_rows(sheet_name, missing_rows)
     return sheet_name
 

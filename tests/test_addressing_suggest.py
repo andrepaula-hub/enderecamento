@@ -773,6 +773,64 @@ def test_suggest_allocations_can_skip_concentrated_manufacturer_for_better_queue
     assert result["moves"][0]["productCode"] == "OTHER"
 
 
+def test_suggest_allocations_does_not_starve_concentrated_manufacturer_until_queue_end():
+    other_codes = [f"OTHER{i}" for i in range(1, 7)]
+    result = suggest_allocations(
+        unallocated_codes=["SADIA2", *other_codes],
+        products_data=[
+            _product(
+                "SADIA1",
+                nome="Nuggets Sadia",
+                sub="Frangos",
+                fabricante="Sadia",
+                familia_visual="frangos|nuggets",
+                arm="Freezer",
+            ),
+            _product(
+                "SADIA2",
+                nome="File de frango Sadia",
+                sub="Cortes congelados",
+                fabricante="Sadia",
+                familia_visual="frangos|file_frango",
+                arm="Freezer",
+            ),
+            *[
+                _product(
+                    code,
+                    nome=f"Produto congelado {index}",
+                    sub=f"Subcategoria {index}",
+                    fabricante=f"Fabricante {index}",
+                    familia_visual=f"familia|{index}",
+                    arm="Freezer",
+                )
+                for index, code in enumerate(other_codes, start=1)
+            ],
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "freezer", "niveis": 2, "escsPerNivel": 5, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 3)
+                for pos in range(1, 6)
+            },
+            "R1-E1-1-1": {"p1": "SADIA1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    product_order = [move["productCode"] for move in result["moves"]]
+    assert "SADIA2" in product_order
+    assert product_order.index("SADIA2") < len(product_order) - 1
+
+
 def test_suggest_allocations_does_not_group_same_curve_over_family_concentration():
     result = suggest_allocations(
         unallocated_codes=["CAFE2"],
