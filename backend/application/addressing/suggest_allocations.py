@@ -141,6 +141,7 @@ def suggest_allocations(
 
     proposed: list[dict[str, Any]] = []
     unallocated_out: list[str] = []
+    max_proposals = _available_slot_units(slots, allow_second_slot)
 
     sorted_products = _sort_products_for_allocation(products_to_allocate, curve_priority_enabled=curve_priority_enabled)
     pending_cold_high_units = sum(
@@ -155,64 +156,72 @@ def suggest_allocations(
         if _degelo_class(product) in {"nao", "pode"}
     )
 
+    candidate_window = _allocation_candidate_window(options)
     remaining_products = list(sorted_products)
     product_order = {id(product): index for index, product in enumerate(remaining_products)}
-    while remaining_products:
+    while remaining_products and len(proposed) < max_proposals:
         best_option: tuple[float, int, dict[str, Any], list[Slot], str, int, bool, str] | None = None
-        for product in remaining_products:
-            code = str(product.get("product_code") or "")
-            required = max(1, int(product.get("escaninhos_necessarios") or 1))
-            product_is_cold_high = _is_cold_high_product(product)
-            high_units_remaining_after_current = pending_cold_high_units
-            if product_is_cold_high:
-                high_units_remaining_after_current = max(0, pending_cold_high_units - required)
-            degelo_class = _degelo_class(product)
-            opposite_degelo_units_remaining = 0
-            if degelo_class == "nao":
-                opposite_degelo_units_remaining = pending_degelo_units.get("pode", 0)
-            elif degelo_class == "pode":
-                opposite_degelo_units_remaining = pending_degelo_units.get("nao", 0)
+        candidate_products = _allocation_candidate_products(remaining_products, candidate_window)
+        for pool_index, product_pool in enumerate((candidate_products, remaining_products)):
+            if pool_index == 1 and len(candidate_products) == len(remaining_products):
+                break
+            for product in product_pool:
+                code = str(product.get("product_code") or "")
+                required = max(1, int(product.get("escaninhos_necessarios") or 1))
+                product_is_cold_high = _is_cold_high_product(product)
+                high_units_remaining_after_current = pending_cold_high_units
+                if product_is_cold_high:
+                    high_units_remaining_after_current = max(0, pending_cold_high_units - required)
+                degelo_class = _degelo_class(product)
+                opposite_degelo_units_remaining = 0
+                if degelo_class == "nao":
+                    opposite_degelo_units_remaining = pending_degelo_units.get("pode", 0)
+                elif degelo_class == "pode":
+                    opposite_degelo_units_remaining = pending_degelo_units.get("nao", 0)
 
-            candidates = _pick_slots_for_product(
-                product, required, slots, rules, chemical_equips,
-                reserved_locations, placement_index, product_placement_index, curve_zones,
-                degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
-                opposite_degelo_units_remaining,
-            )
-            if len(candidates) != required:
-                continue
-
-            blocked = []
-            for candidate in candidates:
-                blocked.extend(
-                    _hard_rule_violations(product, candidate, rules, chemical_equips, validate_chemical_zone=bool(chemical_equips))
+                candidates = _pick_slots_for_product(
+                    product, required, slots, rules, chemical_equips,
+                    reserved_locations, placement_index, product_placement_index, curve_zones,
+                    degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
+                    opposite_degelo_units_remaining,
                 )
-            if blocked:
-                continue
+                if len(candidates) != required:
+                    continue
 
-            candidate_score = _score_run(
-                product,
-                candidates,
-                placement_index,
-                curve_zones,
-                degelo_preferred_equips,
-                curve_priority_enabled,
-            )
-            option = (
-                candidate_score,
-                -product_order.get(id(product), 0),
-                product,
-                candidates,
-                code,
-                required,
-                product_is_cold_high,
-                degelo_class,
-            )
-            if best_option is None or option[:2] > best_option[:2]:
-                best_option = option
+                blocked = []
+                for candidate in candidates:
+                    blocked.extend(
+                        _hard_rule_violations(product, candidate, rules, chemical_equips, validate_chemical_zone=bool(chemical_equips))
+                    )
+                if blocked:
+                    continue
+
+                candidate_score = _score_run(
+                    product,
+                    candidates,
+                    placement_index,
+                    curve_zones,
+                    degelo_preferred_equips,
+                    curve_priority_enabled,
+                )
+                option = (
+                    candidate_score,
+                    -product_order.get(id(product), 0),
+                    product,
+                    candidates,
+                    code,
+                    required,
+                    product_is_cold_high,
+                    degelo_class,
+                )
+                if best_option is None or option[:2] > best_option[:2]:
+                    best_option = option
+            if best_option is not None:
+                break
 
         if best_option is None:
             unallocated_out.extend(str(product.get("product_code") or "") for product in remaining_products)
+            remaining_products = []
             break
 
         _, _, product, candidates, code, required, product_is_cold_high, degelo_class = best_option
@@ -233,6 +242,9 @@ def suggest_allocations(
                 placement = _placement_for_slot(product, slot_ref)
                 _add_placement_to_index(placement_index, placement)
                 product_placement_index.setdefault(code, []).append(placement)
+
+    if remaining_products:
+        unallocated_out.extend(str(product.get("product_code") or "") for product in remaining_products)
 
     proposed, validation_unallocated = _drop_invalid_plan_moves(
         proposed=proposed,
@@ -256,6 +268,53 @@ def suggest_allocations(
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
+def _allocation_candidate_window(options: dict[str, Any]) -> int:
+    raw_value = options.get("candidate_window")
+    if raw_value in (None, ""):
+        return 6
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return 6
+
+
+def _allocation_candidate_products(products: list[dict[str, Any]], candidate_window: int) -> list[dict[str, Any]]:
+    if len(products) <= candidate_window:
+        return products
+
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    def add(product: dict[str, Any]) -> None:
+        marker = id(product)
+        if marker in seen:
+            return
+        seen.add(marker)
+        selected.append(product)
+
+    for product in products[:candidate_window]:
+        add(product)
+
+    sample_count = min(2, max(0, len(products) - candidate_window))
+    if sample_count:
+        tail_count = len(products) - candidate_window
+        for index in range(sample_count):
+            offset = candidate_window + (index * tail_count // sample_count)
+            add(products[offset])
+
+    return selected
+
+
+def _available_slot_units(slots: list[Slot], allow_second_slot: bool) -> int:
+    total = 0
+    for slot in slots:
+        if slot.occupant_count <= 0:
+            total += 1
+        elif allow_second_slot and slot.occupant_count == 1:
+            total += 1
+    return total
+
 
 def _drop_invalid_plan_moves(
     *,
