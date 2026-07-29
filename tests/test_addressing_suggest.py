@@ -1112,6 +1112,56 @@ def test_suggest_allocations_avoids_level2_vertical_adjacency_when_filtered_pool
     assert ovo_move["escaninhoId"] not in {"R1-E1-2-1", "R1-E1-4-1"}
 
 
+def test_suggest_allocations_avoids_flv_vertical_adjacency_when_filtered_pool_is_large():
+    filler_codes = [f"FILLER{i}" for i in range(40)]
+    result = suggest_allocations(
+        unallocated_codes=["BANANA2", *filler_codes],
+        products_data=[
+            _product(
+                "BANANA1",
+                nome="Banana nanica madura 1kg",
+                grupo="FLV",
+                sub="Frutas",
+                subNivel2="banana",
+                familia_visual="flv|banana",
+            ),
+            _product(
+                "BANANA2",
+                nome="Cenoura organica 500g",
+                grupo="FLV",
+                sub="Legumes",
+                subNivel2="cenoura",
+                familia_visual="flv|cenoura",
+            ),
+            *[
+                _product(code, nome=f"Produto {index}", sub=f"Sub {index}", subNivel2=f"grupo_{index}")
+                for index, code in enumerate(filler_codes)
+            ],
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 7, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 8)
+            },
+            "R1-E1-3-2": {"p1": "BANANA1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    banana_move = next(move for move in result["moves"] if move["productCode"] == "BANANA2")
+    assert banana_move["escaninhoId"] not in {"R1-E1-2-2", "R1-E1-4-2"}
+
+
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():
     result = suggest_allocations(
         unallocated_codes=["SNICKERS2"],

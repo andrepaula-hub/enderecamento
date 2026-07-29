@@ -537,6 +537,12 @@ def _pick_slots_for_product(
             ]
             if subcat_level2_clean:
                 candidate_tier = subcat_level2_clean
+            flv_vertical_clean = [
+                slot for slot in candidate_tier
+                if not _has_vertical_flv_adjacency(product, slot, placement_index)
+            ]
+            if flv_vertical_clean:
+                candidate_tier = flv_vertical_clean
         if not candidate_tier:
             continue
         for conflict_tier in _conflict_avoidance_tiers(product, candidate_tier, placement_index):
@@ -831,6 +837,22 @@ def _has_vertical_subcategory_level2_adjacency(
     if not subcat_level2:
         return False
     for placement in placement_index.get(("__subcat_level2__", subcat_level2, slot.equip_id), []):
+        if _same_product(product, placement):
+            continue
+        level_distance, pos_distance = _placement_distance(slot, placement)
+        if level_distance == 1 and pos_distance == 0:
+            return True
+    return False
+
+
+def _has_vertical_flv_adjacency(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if _group(product) != "flv" or slot.level is None or slot.position is None:
+        return False
+    for placement in placement_index.get(("__group__", "flv", slot.equip_id), []):
         if _same_product(product, placement):
             continue
         level_distance, pos_distance = _placement_distance(slot, placement)
@@ -1342,6 +1364,9 @@ def _add_placement_to_index(index: dict[tuple[str, str], list[dict[str, Any]]], 
     manufacturer = _manufacturer(placement)
     if manufacturer:
         index.setdefault(("__manufacturer__", manufacturer, equip_id), []).append(placement)
+    group = _group(placement)
+    if group:
+        index.setdefault(("__group__", group, equip_id), []).append(placement)
     degelo_class = _degelo_class(placement)
     if degelo_class:
         index.setdefault(("__degelo__", equip_id), []).append(placement)
@@ -1360,6 +1385,7 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
         "subcategoria_nivel_2": _actionable_subcategory_level2(product),
         "familia_visual": _visual_family(product),
         "nm_fabricante": _manufacturer(product),
+        "grupo": _group(product),
         "curva": _curve_value(product),
         "is_alto": parse_bool_flag(product.get("is_alto")),
         "degelo": normalize_string(product.get("degelo")),
