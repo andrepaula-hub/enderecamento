@@ -957,6 +957,10 @@ def _score_slot(
     if _is_prateleira(slot):
         if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
             score += 30
+        peso = parse_number(product.get("peso_kg_unitario")) or 0
+        is_heavy = peso > 2 or parse_bool_flag(product.get("is_pesado"))
+        if parse_bool_flag(product.get("is_alto")) and not is_heavy and slot.is_top_level:
+            score += 90
     if _is_geladeira(slot) and group == "flv" and slot.position is not None:
         wall_positions = {1}
         if slot.max_position and slot.max_position > 1:

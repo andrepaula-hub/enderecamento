@@ -106,6 +106,41 @@ def test_suggest_allocations_does_not_prioritize_heavy_products_beyond_top_level
     assert moves_by_product["PESADO"]["escaninhoId"] == "R1-E1-2-1"
 
 
+def test_suggest_allocations_prefers_top_level_for_tall_non_heavy_shelf_products():
+    result = suggest_allocations(
+        unallocated_codes=["ALTO"],
+        products_data=[
+            _product("BASE", nome="Produto base", sub="Base"),
+            _product("ALTO", nome="Produto alto leve", alto=True, peso=0.5, sub="Outra"),
+        ],
+        map_structure=_map_structure(levels=4),
+        allocations={
+            **_empty_allocations(levels=4),
+            "R1-E1-1-1": {"p1": None, "p2": None},
+            "R1-E1-2-1": {"p1": "BASE", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] == "R1-E1-1-1"
+
+
+def test_suggest_allocations_keeps_tall_heavy_shelf_products_blocked_on_top():
+    result = suggest_allocations(
+        unallocated_codes=["ALTO_PESADO"],
+        products_data=[
+            _product("ALTO_PESADO", nome="Produto alto pesado", alto=True, pesado=True, peso=3.0, sub="Outra"),
+        ],
+        map_structure=_map_structure(levels=4),
+        allocations=_empty_allocations(levels=4),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] != "R1-E1-1-1"
+
+
 def test_suggest_allocations_requires_geladeira_alta_for_tall_refrigerated_products():
     product = _product("ALTO", nome="Bebida refrigerada alta", arm="Geladeira", alto=True)
     regular_only = [
