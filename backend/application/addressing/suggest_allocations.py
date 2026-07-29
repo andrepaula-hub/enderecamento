@@ -23,6 +23,7 @@ from core.agent_scoring import (
     _pick_slots_for_product,
     _placement_for_slot,
     _required_volume_l,
+    _score_run,
     _sort_products_for_allocation,
     _visual_family,
 )
@@ -154,37 +155,68 @@ def suggest_allocations(
         if _degelo_class(product) in {"nao", "pode"}
     )
 
-    for product in sorted_products:
-        code = str(product.get("product_code") or "")
-        required = max(1, int(product.get("escaninhos_necessarios") or 1))
-        product_is_cold_high = _is_cold_high_product(product)
-        high_units_remaining_after_current = pending_cold_high_units
-        if product_is_cold_high:
-            high_units_remaining_after_current = max(0, pending_cold_high_units - required)
-        degelo_class = _degelo_class(product)
-        opposite_degelo_units_remaining = 0
-        if degelo_class == "nao":
-            opposite_degelo_units_remaining = pending_degelo_units.get("pode", 0)
-        elif degelo_class == "pode":
-            opposite_degelo_units_remaining = pending_degelo_units.get("nao", 0)
-        candidates = _pick_slots_for_product(
-            product, required, slots, rules, chemical_equips,
-            reserved_locations, placement_index, product_placement_index, curve_zones,
-            degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
-            opposite_degelo_units_remaining,
-        )
-        if len(candidates) != required:
-            unallocated_out.append(code)
-            continue
+    remaining_products = list(sorted_products)
+    product_order = {id(product): index for index, product in enumerate(remaining_products)}
+    while remaining_products:
+        best_option: tuple[float, int, dict[str, Any], list[Slot], str, int, bool, str] | None = None
+        for product in remaining_products:
+            code = str(product.get("product_code") or "")
+            required = max(1, int(product.get("escaninhos_necessarios") or 1))
+            product_is_cold_high = _is_cold_high_product(product)
+            high_units_remaining_after_current = pending_cold_high_units
+            if product_is_cold_high:
+                high_units_remaining_after_current = max(0, pending_cold_high_units - required)
+            degelo_class = _degelo_class(product)
+            opposite_degelo_units_remaining = 0
+            if degelo_class == "nao":
+                opposite_degelo_units_remaining = pending_degelo_units.get("pode", 0)
+            elif degelo_class == "pode":
+                opposite_degelo_units_remaining = pending_degelo_units.get("nao", 0)
 
-        blocked = []
-        for candidate in candidates:
-            blocked.extend(
-                _hard_rule_violations(product, candidate, rules, chemical_equips, validate_chemical_zone=bool(chemical_equips))
+            candidates = _pick_slots_for_product(
+                product, required, slots, rules, chemical_equips,
+                reserved_locations, placement_index, product_placement_index, curve_zones,
+                degelo_preferred_equips, curve_priority_enabled, high_units_remaining_after_current,
+                opposite_degelo_units_remaining,
             )
-        if blocked:
-            unallocated_out.append(code)
-            continue
+            if len(candidates) != required:
+                continue
+
+            blocked = []
+            for candidate in candidates:
+                blocked.extend(
+                    _hard_rule_violations(product, candidate, rules, chemical_equips, validate_chemical_zone=bool(chemical_equips))
+                )
+            if blocked:
+                continue
+
+            candidate_score = _score_run(
+                product,
+                candidates,
+                placement_index,
+                curve_zones,
+                degelo_preferred_equips,
+                curve_priority_enabled,
+            )
+            option = (
+                candidate_score,
+                -product_order.get(id(product), 0),
+                product,
+                candidates,
+                code,
+                required,
+                product_is_cold_high,
+                degelo_class,
+            )
+            if best_option is None or option[:2] > best_option[:2]:
+                best_option = option
+
+        if best_option is None:
+            unallocated_out.extend(str(product.get("product_code") or "") for product in remaining_products)
+            break
+
+        _, _, product, candidates, code, required, product_is_cold_high, degelo_class = best_option
+        remaining_products.remove(product)
 
         if product_is_cold_high:
             pending_cold_high_units = max(0, pending_cold_high_units - required)

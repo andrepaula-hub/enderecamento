@@ -743,6 +743,36 @@ def test_suggest_allocations_still_uses_only_freezer_when_concentration_is_unavo
     assert result["moves"][0]["escaninhoId"].startswith("R1-E1-")
 
 
+def test_suggest_allocations_can_skip_concentrated_manufacturer_for_better_queue_candidate():
+    result = suggest_allocations(
+        unallocated_codes=["SADIA2", "OTHER"],
+        products_data=[
+            _product("SADIA1", nome="Nuggets Sadia", sub="Frangos", fabricante="Sadia", arm="Freezer"),
+            _product("SADIA2", nome="File de frango Sadia", sub="Frangos", fabricante="Sadia", arm="Freezer"),
+            _product("OTHER", nome="Batata congelada", sub="Salgados e Lanches", fabricante="McCain", arm="Freezer"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "freezer", "niveis": 2, "escsPerNivel": 2, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            "R1-E1-1-1": {"p1": "SADIA1", "p2": None},
+            "R1-E1-1-2": {"p1": None, "p2": None},
+            "R1-E1-2-1": {"p1": None, "p2": None},
+            "R1-E1-2-2": {"p1": None, "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["productCode"] == "OTHER"
+
+
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():
     result = suggest_allocations(
         unallocated_codes=["SNICKERS2"],
