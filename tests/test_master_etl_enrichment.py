@@ -185,6 +185,43 @@ def test_run_etl_writes_familia_visual_from_master_sheet():
     assert result["links"]["master_familia_visual"] == "https://fake/Familia Visual"
 
 
+def test_run_etl_creates_and_populates_familia_visual_sheet_when_missing():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo"], ["CT189445", ""]],
+        "Categoria ChatGPT": [["cod_produto", "Categoria_Correta"], ["CT189445", "Itens de prateleira"]],
+        "Categoria Site": [["cod_produto", "categoria"], ["CT189445", "Mercearia"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["CT189445", "Wraps e Tortillas"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["CT189445", 1000, 10, "Bimbo"],
+        ],
+        "Vendas Alvo": [["cod_produto", "desc_produto", "qtd_total"], ["CT189445", "RAP10 ORIGINAL 297G", 10]],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["Mercearia", "alimento"]],
+    }
+    mix_values = {"MIX": [["product_code", "product_name", "quantidade"], ["CT189445", "RAP10 ORIGINAL 297G", 3]]}
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    family_sheet = clients["master"].read_values("Familia Visual")
+    assert family_sheet[0] == enrichment_pipeline.FAMILIA_VISUAL_HEADERS
+    assert family_sheet[1][0] == "CT189445"
+    assert family_sheet[1][4] == "wraps e tortillas|rap10"
+
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    assert output[1][headers.index("familia_visual")] == "wraps e tortillas|rap10"
+
+
 def test_card175_marks_product_when_missing_bins():
     base_map = {
         "SKU1": {

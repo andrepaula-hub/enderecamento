@@ -19,6 +19,44 @@ SHEET_VOLUMETRIA_TARGET = "Volumetria_Equipamentos"
 SHEET_BARCODE_TARGET = "Código de barras produtos"
 SHEET_EDICOES_MANUAIS = "Edicoes_Manuais"
 SHEET_MIX_INPUT = "MIX"
+SHEET_FAMILIA_VISUAL = "Familia Visual"
+MIX_QTY_COLUMN_CANDIDATES = ["Quantidade", "quantidade", "qtd", "qtd_total", "par_level"]
+MIX_REQUIRED_COLUMNS_ERROR = "Não encontrei a aba MIX com colunas product_code, product_name e quantidade/par_level."
+FAMILIA_VISUAL_HEADERS = [
+    "cod_produto",
+    "product_name",
+    "subcategoria",
+    "nm_fabricante",
+    "familia_visual",
+    "familia_visual_sugerida",
+    "observacao",
+]
+FAMILIA_VISUAL_STOPWORDS = {
+    "agua",
+    "alcool",
+    "arroz",
+    "barra",
+    "biscoito",
+    "bolacha",
+    "cafe",
+    "caixa",
+    "chocolate",
+    "detergente",
+    "hidratante",
+    "integral",
+    "leite",
+    "limpador",
+    "liquido",
+    "macarrao",
+    "molho",
+    "original",
+    "papel",
+    "produto",
+    "sabonete",
+    "sem",
+    "suco",
+    "tradicional",
+}
 
 BASE_OUTPUT_HEADERS = [
     "product_code",
@@ -677,6 +715,125 @@ def _extract_visual_family_map(df_family: pd.DataFrame) -> dict[str, str]:
     return output
 
 
+def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante: Any = "") -> str:
+    name = _norm(product_name)
+    subcat = _norm(subcategoria)
+    maker = _norm(fabricante)
+    raw_tokens = [token for token in re.split(r"[^a-z0-9]+", name) if token]
+    token = ""
+    for candidate in raw_tokens:
+        if len(candidate) >= 4 and re.search(r"[a-z]", candidate) and re.search(r"\d", candidate):
+            token = candidate
+            break
+    if not token:
+        for candidate in raw_tokens:
+            if (
+                len(candidate) >= 4
+                and candidate not in FAMILIA_VISUAL_STOPWORDS
+                and not candidate.isdigit()
+                and not re.fullmatch(r"\d+(ml|l|g|kg|cm|un)?", candidate)
+            ):
+                token = candidate
+                break
+    if not token and maker:
+        token = maker
+    if not token:
+        return ""
+    prefix = subcat or maker
+    return f"{prefix}|{token}" if prefix else token
+
+
+def _visual_family_template_row(
+    code: str,
+    product_name: Any,
+    subcategoria: Any,
+    fabricante: Any,
+    headers: list[str],
+) -> list[Any]:
+    suggestion = _suggest_visual_family(product_name, subcategoria, fabricante)
+    values = {
+        "cod_produto": code,
+        "product_code": code,
+        "product_name": product_name,
+        "subcategoria": subcategoria,
+        "nm_fabricante": fabricante,
+        "fabricante": fabricante,
+        "familia_visual": suggestion,
+        "familia": suggestion,
+        "familia_visual_sugerida": suggestion,
+        "observacao": "",
+    }
+    return [values.get(header, "") for header in headers]
+
+
+def _ensure_visual_family_sheet(
+    master: GSheetsClient,
+    mix_df: pd.DataFrame,
+    map_subcat: dict[str, dict[str, Any]],
+    map_vol: dict[str, dict[str, Any]],
+    existing_name: str | None,
+) -> str:
+    sheet_name = existing_name or SHEET_FAMILIA_VISUAL
+    sheet_names = master.list_sheet_names()
+    if sheet_name not in sheet_names:
+        rows = [FAMILIA_VISUAL_HEADERS]
+        for _, product in mix_df.iterrows():
+            code = _norm_code(product.get("product_code"))
+            if not code:
+                continue
+            rows.append(
+                _visual_family_template_row(
+                    code,
+                    product.get("product_name"),
+                    map_subcat.get(code, {}).get("subcategoria"),
+                    map_vol.get(code, {}).get("nm_fabricante"),
+                    FAMILIA_VISUAL_HEADERS,
+                )
+            )
+        try:
+            master.ensure_sheet(sheet_name, row_count=max(1000, len(rows)), column_count=len(FAMILIA_VISUAL_HEADERS))
+        except TypeError:
+            master.ensure_sheet(sheet_name)
+        master.append_rows(sheet_name, rows)
+        return sheet_name
+
+    values = master.read_values(sheet_name)
+    if not values or not any(normalize_string(cell) for cell in values[0]):
+        rows = [FAMILIA_VISUAL_HEADERS]
+        existing_codes: set[str] = set()
+    else:
+        headers = [str(header or "").strip() for header in values[0]]
+        code_col = _find_header_index(headers, ["cod_produto", "product_code", "codigo_produto", "codigo", "sku"])
+        existing_codes = {
+            _norm_code(row[code_col] if code_col < len(row) else "")
+            for row in values[1:]
+            if code_col != -1
+        }
+        rows = []
+
+    headers = FAMILIA_VISUAL_HEADERS if rows else [str(header or "").strip() for header in values[0]]
+    missing_rows: list[list[Any]] = []
+    for _, product in mix_df.iterrows():
+        code = _norm_code(product.get("product_code"))
+        if not code or code in existing_codes:
+            continue
+        missing_rows.append(
+            _visual_family_template_row(
+                code,
+                product.get("product_name"),
+                map_subcat.get(code, {}).get("subcategoria"),
+                map_vol.get(code, {}).get("nm_fabricante"),
+                headers,
+            )
+        )
+    if rows:
+        master.clear_sheet(sheet_name)
+        master.append_rows(sheet_name, rows + missing_rows)
+    elif missing_rows:
+        master.append_rows(sheet_name, missing_rows)
+    return sheet_name
+
+
 def _extract_subcategory_group_map(
     map_subcat: dict[str, dict[str, Any]],
     map_categoria_site: dict[str, dict[str, Any]],
@@ -1006,7 +1163,12 @@ def _apply_escaninhos_cap(rows: list[list[Any]], headers: list[str]) -> None:
                 row[col] = max_val
 
 
-def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_sheet_id: str) -> dict[str, Any]:
+def run_etl_to_base_products(
+    master_sheet_id: str,
+    mix_sheet_id: str,
+    target_sheet_id: str,
+    persist: bool = True,
+) -> dict[str, Any]:
     master = GSheetsClient(master_sheet_id)
     mix = GSheetsClient(mix_sheet_id)
     target = GSheetsClient(target_sheet_id)
@@ -1085,6 +1247,15 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
         ["cod_produto", "product_code"],
         ["caixa_largura_cm", "caixa_altura_cm", "caixa_comprimento_cm", "caixa_volume_cm3"],
     )
+    if persist:
+        familia_visual_name = _ensure_visual_family_sheet(
+            master,
+            mix_df,
+            map_subcat,
+            map_vol,
+            familia_visual_name,
+        )
+        df_familia_visual = _normalize_columns(_safe_df(master.read_values(familia_visual_name)))
 
     vendas_df = df_vendas_alvo if not df_vendas_alvo.empty else df_vendas_pam
     sales_by_code, sales_by_name = _extract_sales_map(vendas_df)
@@ -1330,13 +1501,16 @@ def run_etl_to_base_products(master_sheet_id: str, mix_sheet_id: str, target_she
     df_warnings = _normalize_columns(df_warnings)
     warnings = _build_etl_warnings(df_warnings, duplicated_codes=duplicated_codes, barcode_codes=barcode_codes)
 
-    target.clear_sheet(SHEET_BASE_PRODUTOS)
-    target.append_rows(SHEET_BASE_PRODUTOS, rows)
-    plan_cleanup = _prune_plan_and_versions_to_valid_codes(target, output_codes)
+    plan_cleanup = {"removed_plan_allocations": 0, "cleaned_plan_sheets": []}
+    if persist:
+        target.clear_sheet(SHEET_BASE_PRODUTOS)
+        target.append_rows(SHEET_BASE_PRODUTOS, rows)
+        plan_cleanup = _prune_plan_and_versions_to_valid_codes(target, output_codes)
 
     return {
         "success": True,
         "rows_written": max(0, len(rows) - 1),
+        "preview_only": not persist,
         "rows_frozen_allocated": frozen_rows_count,
         "allocated_codes_total": len(allocated_codes),
         "zero_qty_codes_removed": len(zero_qty_codes),
