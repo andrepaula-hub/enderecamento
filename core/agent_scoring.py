@@ -985,6 +985,7 @@ def _score_slot(
     if slot.level is not None:
         score -= slot.level * 2
     score += _curve_zone_score(curve, slot, curve_zone_map)
+    score -= _equipment_concentration_penalty(product, slot, placement_index)
     score -= _adjacency_penalty(product, slot, placement_index)
     return score
 
@@ -1050,6 +1051,42 @@ def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dic
                 penalty += 160
             elif level_distance == 0 and pos_distance <= 2:
                 penalty += 80 / max(pos_distance, 1)
+    return penalty
+
+
+def _equipment_concentration_penalty(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> float:
+    def count_other(key: tuple[Any, ...]) -> int:
+        return sum(
+            1
+            for placement in placement_index.get(key, [])
+            if not _same_product(product, placement)
+        )
+
+    penalty = 0.0
+    subcat = _actionable_subcategory(product)
+    if subcat:
+        count = count_other((subcat, slot.equip_id))
+        penalty += 170.0 * (count ** 1.35)
+
+    family = _visual_family(product)
+    if family:
+        count = count_other(("__family__", family, slot.equip_id))
+        penalty += 150.0 * (count ** 1.35)
+
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if subcat_level2:
+        count = count_other(("__subcat_level2__", subcat_level2, slot.equip_id))
+        penalty += 110.0 * (count ** 1.3)
+
+    manufacturer = _manufacturer(product)
+    if manufacturer:
+        count = count_other(("__manufacturer__", manufacturer, slot.equip_id))
+        if count:
+            penalty += 45.0 * (count ** 1.45)
     return penalty
 
 
