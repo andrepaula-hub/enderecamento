@@ -1456,6 +1456,14 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       return;
     }
     if (hasAllocationSource) {
+      if (scope === 'single') {
+        const directQueue = selectedProduct ? [selectedProduct] : capQueueByRequiredBins(queueProductIds || []);
+        const directProductId = directQueue[0];
+        if (directProductId) {
+          onAllocate(escsId, directProductId, wantsSecondSlot ? 2 : 1);
+        }
+        return;
+      }
       try {
         const scopeLabel = scope === 'street' ? 'rua' : scope === 'level' ? 'nível' : scope === 'equipment' ? 'equipamento' : 'escaninho';
         const levaLabel = wantsSecondSlot ? '2ª leva da ' : '';
@@ -1481,7 +1489,7 @@ function DSEMapCanvas({ mapStructure, allocations, equipCollapsed, streetCollaps
       window.setTimeout(() => setSmartFillProgress(null), 1800);
       return;
     }
-  },[selectedProduct,mode2aLeva,hasAllocationSource,buildCollectBatch,handleSmartFill,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany]);
+  },[selectedProduct,mode2aLeva,hasAllocationSource,buildCollectBatch,capQueueByRequiredBins,handleSmartFill,onAllocate,onAllocateMany,onAllocateManyProgressive,onCollect,onCollectMany,queueProductIds]);
 
   const handleHover = useCallback((escsId,p1,p2)=>{
     if(closeTimerRef.current) clearTimeout(closeTimerRef.current);

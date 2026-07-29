@@ -18,7 +18,7 @@ from .utils import normalize_string, parse_bool_flag, parse_number
 
 COMPATIBILITY = {
     "seco": {"prateleira", "prateleira_lateral", "prateleira_alta"},
-    "refrigerado": {"geladeira", "geladeira_alta", "geladeira_americana"},
+    "refrigerado": {"geladeira", "geladeira_alta", "geladeira_americana", "geladeira_gerador", "geladeira_degelo"},
     "congelado": {"freezer"},
 }
 

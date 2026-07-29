@@ -161,6 +161,29 @@ def test_suggest_allocations_requires_geladeira_alta_for_tall_refrigerated_produ
     assert placed["moves"][0]["escaninhoId"].startswith("R1-E2-")
 
 
+def test_suggest_allocations_accepts_generator_fridge_for_regular_refrigerated_products():
+    result = suggest_allocations(
+        unallocated_codes=["NAO"],
+        products_data=[
+            _product("NAO", nome="Produto refrigerado nao pode sofrer", arm="Geladeira", degelo="NÃO"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "geladeira_gerador", "niveis": 5, "escsPerNivel": 5, "cap": 100},
+                ],
+            }
+        ],
+        allocations=_empty_allocations_grid(levels=5, escs_per_nivel=5),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["productCode"] == "NAO"
+
+
 def test_suggest_allocations_keeps_heavy_blocked_on_top_even_when_click_started_on_top():
     base_payload = {
         "unallocated_codes": ["PESADO"],
