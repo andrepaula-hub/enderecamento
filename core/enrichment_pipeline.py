@@ -177,6 +177,7 @@ DEFAULT_SUBCATEGORIA_NIVEL_2_ROWS = [
     ("Frios", "queijos_frios_embutidos"),
     ("Embutidos", "queijos_frios_embutidos"),
     ("Queijos, Frios e Embutidos", "queijos_frios_embutidos"),
+    ("Ovos", "ovos"),
     ("Cafés", "cafes_chas_capsulas"),
     ("Chás", "cafes_chas_capsulas"),
     ("Chás e Mates", "cafes_chas_capsulas"),
@@ -987,6 +988,8 @@ def _is_invalid_visual_family(value: Any) -> bool:
 
 
 def _phrase_token_family(name: str) -> str:
+    if _is_egg_product_name(name):
+        return f"ovos|{_egg_visual_token(name)}"
     if re.search(r"\b3\s*coracoes\b", name):
         return "3_coracoes"
     if re.search(r"\b3\s*cora[cç][oõ]es\b", name):
@@ -998,6 +1001,23 @@ def _phrase_token_family(name: str) -> str:
     return ""
 
 
+def _is_egg_product_name(name: Any) -> bool:
+    return bool(re.match(r"^ovos?\b", _norm(name)))
+
+
+def _egg_visual_token(name: Any) -> str:
+    normalized = _norm(name)
+    if re.search(r"\bcodorna\b", normalized):
+        return "codorna"
+    if re.search(r"\bcaipira\b", normalized):
+        return "caipira"
+    if re.search(r"\bbranco\b", normalized):
+        return "branco"
+    if re.search(r"\borganico\b", normalized):
+        return "organico"
+    return "geral"
+
+
 def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante: Any = "") -> str:
     name = _norm(product_name)
     subcat = _norm(subcategoria)
@@ -1006,6 +1026,8 @@ def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante
     name = re.sub(r"\[brinde\]", " ", name)
     phrase_family = _phrase_token_family(name)
     if phrase_family:
+        if phrase_family.startswith("ovos|"):
+            return phrase_family
         prefix = subcat or maker
         return f"{prefix}|{phrase_family}" if prefix else phrase_family
     raw_tokens = [token for token in re.split(r"[^a-z0-9]+", name) if token]
@@ -1620,7 +1642,7 @@ def run_etl_to_base_products(
         categoria_armz = str(gpt_data.get("Categoria_Correta") or "").strip()
         categoria_site = str(site_data.get("categoria") or "").strip()
         subcategoria = str(subcat_data.get("subcategoria") or "").strip()
-        subcategoria_nivel_2 = subcategory_level2_map.get(_norm(subcategoria), "")
+        subcategoria_nivel_2 = "ovos" if _is_egg_product_name(name) else subcategory_level2_map.get(_norm(subcategoria), "")
         grupo = dic_cat_map.get(_norm(categoria_site), "") or subcategory_group_map.get(_norm(subcategoria), "") or "neutro"
         fabricante = str(degelo_data.get("nm_fabricante") or vol_data.get("nm_fabricante") or "").strip()
 

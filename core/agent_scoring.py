@@ -506,6 +506,19 @@ def _pick_slots_for_product(
         cold_high_units_remaining,
         opposite_degelo_units_remaining,
     ):
+        candidate_tier = [
+            slot for slot in candidate_tier
+            if not _has_hard_visual_adjacency(product, slot, placement_index)
+        ]
+        if _has_large_filtered_pool(product):
+            subcat_level2_clean = [
+                slot for slot in candidate_tier
+                if not _has_vertical_subcategory_level2_adjacency(product, slot, placement_index)
+            ]
+            if subcat_level2_clean:
+                candidate_tier = subcat_level2_clean
+        if not candidate_tier:
+            continue
         for conflict_tier in _conflict_avoidance_tiers(product, candidate_tier, placement_index):
             conflict_tier = [
                 slot for slot in conflict_tier
@@ -768,6 +781,51 @@ def _has_direct_attribute_adjacency(
     return False
 
 
+def _has_hard_visual_adjacency(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None or slot.position is None:
+        return False
+    family = _visual_family(product)
+    if not family:
+        return False
+    for placement in placement_index.get(("__family__", family, slot.equip_id), []):
+        if _same_product(product, placement):
+            continue
+        level_distance, pos_distance = _placement_distance(slot, placement)
+        if (level_distance == 0 and pos_distance == 1) or (level_distance == 1 and pos_distance == 0):
+            return True
+    return False
+
+
+def _has_vertical_subcategory_level2_adjacency(
+    product: dict[str, Any],
+    slot: Slot,
+    placement_index: dict[tuple[str, str], list[dict[str, Any]]],
+) -> bool:
+    if slot.level is None or slot.position is None:
+        return False
+    subcat_level2 = _actionable_subcategory_level2(product)
+    if not subcat_level2:
+        return False
+    for placement in placement_index.get(("__subcat_level2__", subcat_level2, slot.equip_id), []):
+        if _same_product(product, placement):
+            continue
+        level_distance, pos_distance = _placement_distance(slot, placement)
+        if level_distance == 1 and pos_distance == 0:
+            return True
+    return False
+
+
+def _has_large_filtered_pool(product: dict[str, Any]) -> bool:
+    try:
+        return int(product.get("_allocation_pool_size") or 0) >= 40
+    except (TypeError, ValueError):
+        return False
+
+
 def _conflict_avoidance_tiers(
     product: dict[str, Any],
     candidates: list[Slot],
@@ -955,20 +1013,10 @@ def _score_slot(
     if group == "quimico":
         score += 500
     if _is_prateleira(slot):
-        if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
-            score += 30
         peso = parse_number(product.get("peso_kg_unitario")) or 0
         is_heavy = peso > 2 or parse_bool_flag(product.get("is_pesado"))
         if parse_bool_flag(product.get("is_alto")) and not is_heavy and slot.is_top_level:
             score += 90
-    if _is_geladeira(slot) and group == "flv" and slot.position is not None:
-        wall_positions = {1}
-        if slot.max_position and slot.max_position > 1:
-            wall_positions.add(slot.max_position)
-        elif slot.position == 5:
-            wall_positions.add(5)
-        if slot.position not in wall_positions:
-            score += 30
     if (
         degelo_preferred_equips
         and _category_group(product) == "refrigerado"
@@ -1070,28 +1118,45 @@ def _equipment_concentration_penalty(
             if not _same_product(product, placement)
         )
 
+    multiplier = _concentration_pool_multiplier(product)
     penalty = 0.0
     subcat = _actionable_subcategory(product)
     if subcat:
         count = count_other((subcat, slot.equip_id))
-        penalty += 170.0 * (count ** 1.35)
+        penalty += multiplier * 170.0 * (count ** 1.35)
 
     family = _visual_family(product)
     if family:
         count = count_other(("__family__", family, slot.equip_id))
-        penalty += 150.0 * (count ** 1.35)
+        penalty += multiplier * 150.0 * (count ** 1.35)
 
     subcat_level2 = _actionable_subcategory_level2(product)
     if subcat_level2:
         count = count_other(("__subcat_level2__", subcat_level2, slot.equip_id))
-        penalty += 110.0 * (count ** 1.3)
+        penalty += multiplier * 110.0 * (count ** 1.3)
 
     manufacturer = _manufacturer(product)
     if manufacturer:
         count = count_other(("__manufacturer__", manufacturer, slot.equip_id))
         if count:
-            penalty += 45.0 * (count ** 1.45)
+            penalty += multiplier * 45.0 * (count ** 1.45)
     return penalty
+
+
+def _concentration_pool_multiplier(product: dict[str, Any]) -> float:
+    try:
+        pool_size = int(product.get("_allocation_pool_size") or 0)
+    except (TypeError, ValueError):
+        pool_size = 0
+    if pool_size >= 160:
+        return 2.6
+    if pool_size >= 100:
+        return 2.2
+    if pool_size >= 60:
+        return 1.7
+    if pool_size >= 40:
+        return 1.35
+    return 1.0
 
 
 def _degelo_equipment_affinity_score(product: dict[str, Any], slot: Slot, placement_index: dict[tuple[str, str], list[dict[str, Any]]]) -> float:

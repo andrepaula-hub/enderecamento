@@ -111,6 +111,9 @@ def suggest_allocations(
         product["escaninhos_necessarios"] = requested
         products_to_allocate.append(product)
         del requested_counts[code]
+    allocation_pool_size = len(products_to_allocate)
+    for product in products_to_allocate:
+        product["_allocation_pool_size"] = allocation_pool_size
 
     # Build slots from map_structure + current allocations
     slots = _slots_from_map(map_structure, allocations, allow_second_slot, products_by_code)

@@ -917,6 +917,104 @@ def test_suggest_allocations_does_not_group_same_curve_over_family_concentration
     assert result["moves"][0]["escaninhoId"].startswith("R1-E2-")
 
 
+def test_suggest_allocations_blocks_same_family_side_by_side():
+    result = suggest_allocations(
+        unallocated_codes=["BANANA2"],
+        products_data=[
+            _product("BANANA1", nome="Banana nanica 1kg", grupo="FLV", sub="Frutas", familia_visual="flv|banana"),
+            _product("BANANA2", nome="Banana prata 1kg", grupo="FLV", sub="Frutas", familia_visual="flv|banana"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 3, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 4)
+            },
+            "R1-E1-3-2": {"p1": "BANANA1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["escaninhoId"] not in {"R1-E1-3-1", "R1-E1-3-3"}
+
+
+def test_suggest_allocations_blocks_same_family_same_position_adjacent_level():
+    result = suggest_allocations(
+        unallocated_codes=["CAFE2"],
+        products_data=[
+            _product("CAFE1", nome="Cafe 3 coracoes 500g", sub="Cafes", familia_visual="cafes|3_coracoes"),
+            _product("CAFE2", nome="Cafe soluvel 3 coracoes 50g", sub="Cafes", familia_visual="cafes|3_coracoes"),
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 3, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 4)
+            },
+            "R1-E1-3-2": {"p1": "CAFE1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"]
+    assert result["moves"][0]["escaninhoId"] not in {"R1-E1-2-2", "R1-E1-4-2"}
+
+
+def test_suggest_allocations_avoids_level2_vertical_adjacency_when_filtered_pool_is_large():
+    filler_codes = [f"FILLER{i}" for i in range(40)]
+    result = suggest_allocations(
+        unallocated_codes=["OVO2", *filler_codes],
+        products_data=[
+            _product("OVO1", nome="Ovo caipira c/10", sub="Ovos", subNivel2="ovos", familia_visual="ovos|caipira"),
+            _product("OVO2", nome="Ovo branco c/12", sub="Ovos", subNivel2="ovos", familia_visual="ovos|branco"),
+            *[
+                _product(code, nome=f"Produto {index}", sub=f"Sub {index}", subNivel2=f"grupo_{index}")
+                for index, code in enumerate(filler_codes)
+            ],
+        ],
+        map_structure=[
+            {
+                "id": "R1",
+                "equipment": [
+                    {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 10, "cap": 100},
+                ],
+            }
+        ],
+        allocations={
+            **{
+                f"R1-E1-{level}-{pos}": {"p1": None, "p2": None}
+                for level in range(1, 6)
+                for pos in range(1, 11)
+            },
+            "R1-E1-3-1": {"p1": "OVO1", "p2": None},
+        },
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    ovo_move = next(move for move in result["moves"] if move["productCode"] == "OVO2")
+    assert ovo_move["escaninhoId"] not in {"R1-E1-2-1", "R1-E1-4-1"}
+
+
 def test_suggest_allocations_avoids_same_family_and_manufacturer_on_same_level_when_clean_level_exists():
     result = suggest_allocations(
         unallocated_codes=["SNICKERS2"],

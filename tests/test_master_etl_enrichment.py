@@ -361,6 +361,62 @@ def test_suggest_visual_family_never_uses_measure_as_family_token():
         )
         == "frangos|nuggets"
     )
+    assert enrichment_pipeline._suggest_visual_family("OVO CAIPIRA ORGÂNICO C/10", "Ovos", "Raiar") == "ovos|caipira"
+    assert enrichment_pipeline._suggest_visual_family("OVO BRANCO MANTIQUEIRA C/12", "Ovos", "Mantiqueira") == "ovos|branco"
+    assert (
+        enrichment_pipeline._suggest_visual_family("KINDER OVO CHOCOLATE 20G", "Chocolates", "Ferrero")
+        != "ovos|geral"
+    )
+
+
+def test_run_etl_sets_egg_level2_only_for_real_egg_names():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo"], ["OVO1", ""], ["KINDER1", ""]],
+        "Categoria ChatGPT": [
+            ["cod_produto", "Categoria_Correta"],
+            ["OVO1", "Itens de prateleira"],
+            ["KINDER1", "Itens de prateleira"],
+        ],
+        "Categoria Site": [["cod_produto", "categoria"], ["OVO1", "Mercearia"], ["KINDER1", "Mercearia"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["OVO1", "Mercearia"], ["KINDER1", "Chocolates e Bombons"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["OVO1", 1000, 10, "Raiar"],
+            ["KINDER1", 1000, 10, "Ferrero"],
+        ],
+        "Vendas Alvo": [
+            ["cod_produto", "desc_produto", "qtd_total"],
+            ["OVO1", "OVO CAIPIRA ORGÂNICO C/10", 10],
+            ["KINDER1", "KINDER OVO CHOCOLATE 20G", 10],
+        ],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["Mercearia", "alimento"]],
+    }
+    mix_values = {
+        "MIX": [
+            ["product_code", "product_name", "quantidade"],
+            ["OVO1", "OVO CAIPIRA ORGÂNICO C/10", 3],
+            ["KINDER1", "KINDER OVO CHOCOLATE 20G", 3],
+        ]
+    }
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    by_code = {row[headers.index("product_code")]: row for row in output[1:]}
+    assert by_code["OVO1"][headers.index("subcategoria_nivel_2")] == "ovos"
+    assert by_code["OVO1"][headers.index("familia_visual")] == "ovos|caipira"
+    assert by_code["KINDER1"][headers.index("subcategoria_nivel_2")] == "chocolates"
 
 
 def test_card175_marks_product_when_missing_bins():
