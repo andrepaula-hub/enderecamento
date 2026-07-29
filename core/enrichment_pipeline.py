@@ -715,6 +715,10 @@ def _extract_visual_family_map(df_family: pd.DataFrame) -> dict[str, str]:
     return output
 
 
+def _is_measure_token(token: str) -> bool:
+    return bool(re.fullmatch(r"\d+(?:[.,]\d+)?(?:ml|l|g|kg|mg|cm|mm|m|un|und|unds|unid|unidade|unidades)", token))
+
+
 def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante: Any = "") -> str:
     name = _norm(product_name)
     subcat = _norm(subcategoria)
@@ -722,7 +726,12 @@ def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante
     raw_tokens = [token for token in re.split(r"[^a-z0-9]+", name) if token]
     token = ""
     for candidate in raw_tokens:
-        if len(candidate) >= 4 and re.search(r"[a-z]", candidate) and re.search(r"\d", candidate):
+        if (
+            len(candidate) >= 4
+            and re.search(r"[a-z]", candidate)
+            and re.search(r"\d", candidate)
+            and not _is_measure_token(candidate)
+        ):
             token = candidate
             break
     if not token:
@@ -731,7 +740,7 @@ def _suggest_visual_family(product_name: Any, subcategoria: Any = "", fabricante
                 len(candidate) >= 4
                 and candidate not in FAMILIA_VISUAL_STOPWORDS
                 and not candidate.isdigit()
-                and not re.fullmatch(r"\d+(ml|l|g|kg|cm|un)?", candidate)
+                and not _is_measure_token(candidate)
             ):
                 token = candidate
                 break

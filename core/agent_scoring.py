@@ -926,10 +926,6 @@ def _score_slot(
     curve = _curve_value(product)
     if group == "quimico":
         score += 500
-    if curve == "A" and not slot.is_top_level:
-        score += 40
-    if curve == "C" and slot.is_top_level:
-        score += 20
     if _is_prateleira(slot):
         if group == "flv" and not slot.is_top_level and not slot.is_bottom_level:
             score += 30
@@ -992,14 +988,7 @@ def _adjacency_penalty(product: dict[str, Any], slot: Slot, placement_index: dic
             level_distance, pos_distance = _placement_distance(slot, placement)
             if level_distance is None or pos_distance is None:
                 continue
-            if level_distance == 0 and pos_distance == 1:
-                penalty += 1200
-            elif level_distance == 0:
-                if pos_distance <= 3:
-                    penalty += 500 / max(pos_distance, 1)
-                else:
-                    penalty += 80
-            elif pos_distance == 0 and level_distance == 1:
+            if pos_distance == 0 and level_distance == 1:
                 penalty += 80
             elif level_distance == 1:
                 penalty += 25

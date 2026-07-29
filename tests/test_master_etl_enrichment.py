@@ -222,6 +222,25 @@ def test_run_etl_creates_and_populates_familia_visual_sheet_when_missing():
     assert output[1][headers.index("familia_visual")] == "wraps e tortillas|rap10"
 
 
+def test_suggest_visual_family_never_uses_measure_as_family_token():
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "DETERGENTE LIQUIDO LIMPOL NEUTRO 500ML",
+            "Detergentes",
+            "Bombril",
+        )
+        == "detergentes|limpol"
+    )
+    assert (
+        enrichment_pipeline._suggest_visual_family(
+            "RAP10 ORIGINAL 297G",
+            "Wraps e Tortillas",
+            "Bimbo",
+        )
+        == "wraps e tortillas|rap10"
+    )
+
+
 def test_card175_marks_product_when_missing_bins():
     base_map = {
         "SKU1": {
