@@ -192,7 +192,7 @@ def _normalize_store_ids(raw_stores: Any, available_stores: list[dict[str, str]]
 def get_metabase_sales_context() -> dict[str, Any]:
     context = _load_context()
     default_initial, default_final = _default_sales_range()
-    available_stores = _fetch_store_options_from_metabase()
+    available_stores = _read_stores_cache(allow_stale=True) or list(STORE_OPTIONS)
     stores = _normalize_store_ids(context.get("stores"), available_stores) or [item["value"] for item in available_stores]
     return {
         "data_inicial": default_initial,
@@ -421,8 +421,20 @@ def _write_stores_cache(stores: list[dict[str, str]]) -> None:
         pass
 
 
-def _fetch_store_options_from_metabase(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> list[dict[str, str]]:
-    """Descobre lojas reais pelo card 823; cache é apenas fallback se a consulta falhar."""
+def _fetch_store_options_from_metabase(
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    force_refresh: bool = False,
+) -> list[dict[str, str]]:
+    """Descobre lojas reais pelo card 823.
+
+    Chamadas de boot da UI devem usar o cache via get_metabase_sales_context(),
+    porque consultar Metabase aqui pode prender o carregamento da tela por minutos.
+    """
+    if not force_refresh:
+        cached = _read_stores_cache()
+        if cached:
+            return cached
     try:
         today = date.today()
         session_id = resolve_metabase_session(timeout_seconds=timeout_seconds)

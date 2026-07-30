@@ -240,6 +240,23 @@ def test_fetch_store_options_discovers_stores_from_card_823(monkeypatch, tmp_pat
     assert cache_path.exists()
 
 
+def test_get_metabase_sales_context_does_not_call_metabase(monkeypatch):
+    def fail_resolve_metabase_session(timeout_seconds):
+        raise AssertionError("boot context must not call Metabase")
+
+    monkeypatch.setattr(metabase_sales, "resolve_metabase_session", fail_resolve_metabase_session)
+    monkeypatch.setattr(metabase_sales, "_read_stores_cache", lambda allow_stale=False: [
+        {"value": "brooklin", "label": "Brooklin", "query_value": "Dark Store Brooklin"}
+    ])
+
+    result = metabase_sales.get_metabase_sales_context()
+
+    assert result["available_stores"] == [
+        {"value": "brooklin", "label": "Brooklin", "query_value": "Dark Store Brooklin"}
+    ]
+    assert result["stores"] == ["brooklin"]
+
+
 def test_normalize_store_ids_accepts_dynamically_discovered_store():
     available = [
         {"value": "pamplona", "label": "Jardins / Pamplona"},
