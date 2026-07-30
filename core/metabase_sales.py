@@ -19,11 +19,10 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 from openpyxl import Workbook
 
-from .apps_script_client import call_apps_script_webapp_action, get_metabase_session_from_script
 from .gsheets_client import CREDENTIALS_DIR, GSheetsClient
 from .utils import normalize_string, parse_number
 
-DEFAULT_METABASE_URL = "https://metabase.kdabra.com.br"
+DEFAULT_METABASE_URL = str(os.getenv("METABASE_URL", "https://metabase.kdabra.com.br")).strip()
 DEFAULT_CARD_ID = 823
 DEFAULT_TIMEOUT_SECONDS = 180
 METABASE_EARLIEST_DATE = "2020-01-01"
@@ -103,6 +102,58 @@ def _norm_text(value: Any) -> str:
     return " ".join(_strip_accents(str(value or "")).strip().lower().split())
 
 
+def _store_value_from_label(label: str) -> str:
+    words = re.findall(r"[a-z0-9]+", _norm_text(label))
+    if not words:
+        return ""
+    return words[0] + "".join(word[:1].upper() + word[1:] for word in words[1:])
+
+
+def _display_store_label(value: Any) -> str:
+    text = normalize_string(value).strip()
+    text = re.sub(r"(?i)^\s*(dark\s*store|loja)\s+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or normalize_string(value).strip()
+
+
+def _store_keywords_for_options(available_stores: list[dict[str, str]] | None = None) -> dict[str, list[str]]:
+    keywords = {store_id: list(values) for store_id, values in STORE_KEYWORDS_BY_ID.items()}
+    for option in available_stores or []:
+        store_id = str(option.get("value") or "").strip()
+        if not store_id:
+            continue
+        values = keywords.setdefault(store_id, [])
+        for key in ("query_value", "label", "value"):
+            normalized = _norm_text(option.get(key))
+            if normalized and normalized not in values:
+                values.append(normalized)
+    return keywords
+
+
+def _store_option_from_dark_store(raw_dark_store: Any) -> dict[str, str] | None:
+    raw = normalize_string(raw_dark_store).strip()
+    normalized = _norm_text(raw)
+    if not normalized:
+        return None
+
+    known_keywords = _store_keywords_for_options(STORE_OPTIONS)
+    for store_id, keywords in known_keywords.items():
+        if any(keyword and keyword in normalized for keyword in keywords):
+            option = {
+                "value": store_id,
+                "label": STORE_LABEL_BY_ID.get(store_id, _display_store_label(raw)),
+            }
+            if raw:
+                option["query_value"] = raw
+            return option
+
+    label = _display_store_label(raw)
+    value = _store_value_from_label(label)
+    if not value:
+        return None
+    return {"value": value, "label": label, "query_value": raw}
+
+
 def _load_context() -> dict[str, Any]:
     if not METABASE_CONTEXT_PATH.exists():
         return {}
@@ -168,8 +219,8 @@ def save_metabase_sales_context(
 
 def _load_metabase_backend_credentials() -> tuple[str, str, str]:
     session_id = str(os.getenv("MB_SESSION_ID", "")).strip()
-    username = str(os.getenv("MB_USER", "")).strip()
-    password = str(os.getenv("MB_PASS", "")).strip()
+    username = str(os.getenv("METABASE_USERNAME") or os.getenv("MB_USER", "")).strip()
+    password = str(os.getenv("METABASE_PASSWORD") or os.getenv("MB_PASS", "")).strip()
     if session_id or (username and password):
         return session_id, username, password
 
@@ -184,9 +235,9 @@ def _load_metabase_backend_credentials() -> tuple[str, str, str]:
                 value = value.strip().strip("'").strip('"')
                 if key == "MB_SESSION_ID" and not session_id:
                     session_id = value
-                elif key == "MB_USER" and not username:
+                elif key in {"METABASE_USERNAME", "MB_USER"} and not username:
                     username = value
-                elif key == "MB_PASS" and not password:
+                elif key in {"METABASE_PASSWORD", "MB_PASS"} and not password:
                     password = value
         except Exception:
             pass
@@ -195,8 +246,12 @@ def _load_metabase_backend_credentials() -> tuple[str, str, str]:
         try:
             payload = json.loads(METABASE_CREDENTIALS_JSON_PATH.read_text(encoding="utf-8"))
             session_id = session_id or str(payload.get("MB_SESSION_ID") or payload.get("session_id") or "").strip()
-            username = username or str(payload.get("MB_USER") or payload.get("username") or "").strip()
-            password = password or str(payload.get("MB_PASS") or payload.get("password") or "").strip()
+            username = username or str(
+                payload.get("METABASE_USERNAME") or payload.get("MB_USER") or payload.get("username") or ""
+            ).strip()
+            password = password or str(
+                payload.get("METABASE_PASSWORD") or payload.get("MB_PASS") or payload.get("password") or ""
+            ).strip()
         except Exception:
             pass
 
@@ -253,16 +308,25 @@ def _min_available_row_date(rows: list[dict[str, Any]]) -> str:
     return min(dates).isoformat()
 
 
-def _assign_store_to_rows(rows: list[dict[str, Any]], stores: list[str]) -> list[dict[str, Any]]:
+def _assign_store_to_rows(
+    rows: list[dict[str, Any]],
+    stores: list[str],
+    available_stores: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Atribui _requested_store a cada row com base nos keywords, do mais específico ao menos."""
-    ordered = sorted(stores, key=lambda s: max((len(kw) for kw in STORE_KEYWORDS_BY_ID.get(s, [s])), default=0), reverse=True)
+    keywords_by_id = _store_keywords_for_options(available_stores)
+    ordered = sorted(
+        stores,
+        key=lambda s: max((len(kw) for kw in keywords_by_id.get(s, [s])), default=0),
+        reverse=True,
+    )
     result = []
     for row in rows:
         dark = _norm_text(row.get("dark_store") or "")
         if not dark:
             continue
         for store_id in ordered:
-            keywords = STORE_KEYWORDS_BY_ID.get(store_id, [store_id.lower()])
+            keywords = keywords_by_id.get(store_id, [_norm_text(store_id)])
             if any(kw in dark for kw in keywords):
                 row["_requested_store"] = store_id
                 result.append(row)
@@ -275,9 +339,12 @@ def _fetch_rows_directly(
     data_inicial: str,
     data_final: str,
     stores: list[str],
+    available_stores: list[dict[str, str]] | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Busca dados do card 823 direto do Metabase sem filtro de Loja, filtra em Python."""
+    if available_stores is None:
+        available_stores = _read_stores_cache(allow_stale=True)
     session_id = resolve_metabase_session(timeout_seconds=timeout_seconds)
     params = [
         {"type": "date/single", "value": data_inicial, "target": ["variable", ["template-tag", "data_inicial"]]},
@@ -290,7 +357,7 @@ def _fetch_rows_directly(
         parameters=params,
         timeout_seconds=timeout_seconds,
     )
-    filtered = _assign_store_to_rows(all_rows, stores)
+    filtered = _assign_store_to_rows(all_rows, stores, available_stores)
     return {
         "rows": filtered,
         "data_inicial_effective": data_inicial,
@@ -307,49 +374,13 @@ def _fetch_rows_via_apps_script(
     stores: list[str],
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Busca o card 823 pelo Apps Script, que encapsula MetabaseAPI/autenticação."""
-    available_stores = _fetch_store_options_from_metabase(timeout_seconds=timeout_seconds)
-    option_by_id = {str(item.get("value") or ""): item for item in available_stores}
-    query_store_by_id = {
-        store_id: str(option_by_id.get(store_id, {}).get("query_value") or store_id).strip()
-        for store_id in stores
-    }
-    id_by_query_store = {query_value: store_id for store_id, query_value in query_store_by_id.items()}
-    result = call_apps_script_webapp_action(
-        "fetchVendasPorDiaRows",
-        {
-            "data_inicial": data_inicial,
-            "data_final": data_final,
-            "stores": list(query_store_by_id.values()),
-        },
+    """Compatibilidade: o fluxo de Vendas Alvo não usa mais Apps Script."""
+    return _fetch_rows_directly(
+        data_inicial=data_inicial,
+        data_final=data_final,
+        stores=stores,
         timeout_seconds=timeout_seconds,
     )
-    rows = list(result.get("rows") or [])
-    normalized_rows: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        item = dict(row)
-        requested_store = str(item.get("_requested_store") or item.get("store_code") or "").strip()
-        if requested_store:
-            item["_requested_store"] = id_by_query_store.get(requested_store, requested_store)
-        normalized_rows.append(item)
-
-    errors = [str(error) for error in (result.get("errors") or []) if str(error).strip()]
-    if errors and not normalized_rows:
-        raise RuntimeError("Apps Script/MetabaseAPI não retornou vendas: " + " | ".join(errors[:5]))
-
-    return {
-        "rows": normalized_rows,
-        "data_inicial_effective": str(result.get("data_inicial") or data_inicial),
-        "data_final_effective": str(result.get("data_final") or data_final),
-        "fallback_applied": False,
-        "fallback_reason": " | ".join(errors[:5]),
-        "source": "apps_script_metabase_api",
-        "stores_processed": [
-            id_by_query_store.get(str(store), str(store)) for store in (result.get("stores_processed") or [])
-        ],
-    }
 
 
 def _read_stores_cache(*, allow_stale: bool = False) -> list[dict[str, str]] | None:
@@ -391,41 +422,42 @@ def _write_stores_cache(stores: list[dict[str, str]]) -> None:
 
 
 def _fetch_store_options_from_metabase(timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> list[dict[str, str]]:
-    """Descobre lojas pelo Apps Script/MetabaseAPI e mantém cache de 12h."""
-    cached = _read_stores_cache()
-    if cached is not None:
-        return cached
-
+    """Descobre lojas reais pelo card 823; cache é apenas fallback se a consulta falhar."""
     try:
         today = date.today()
-        result_payload = call_apps_script_webapp_action(
-            "fetchVendasStoreOptions",
-            {
-                "data_inicial": (today - timedelta(days=30)).isoformat(),
-                "data_final": today.isoformat(),
-            },
+        session_id = resolve_metabase_session(timeout_seconds=timeout_seconds)
+        rows = metabase_query_card_with_auth_retry(
+            base_url=DEFAULT_METABASE_URL,
+            card_id=DEFAULT_CARD_ID,
+            session_id=session_id,
+            parameters=[
+                {
+                    "type": "date/single",
+                    "value": (today - timedelta(days=30)).isoformat(),
+                    "target": ["variable", ["template-tag", "data_inicial"]],
+                },
+                {
+                    "type": "date/single",
+                    "value": today.isoformat(),
+                    "target": ["variable", ["template-tag", "data_final"]],
+                },
+            ],
             timeout_seconds=timeout_seconds,
         )
-        options = []
-        seen_ids: set[str] = set()
-        for raw in result_payload.get("stores") or []:
-            if not isinstance(raw, dict):
+        by_id: dict[str, dict[str, str]] = {}
+        for row in rows:
+            option = _store_option_from_dark_store(row.get("dark_store"))
+            if not option:
                 continue
-            value = str(raw.get("value") or "").strip()
-            label = str(raw.get("label") or value).strip()
-            if not value or not label or value in seen_ids:
+            store_id = str(option.get("value") or "").strip()
+            if not store_id:
                 continue
-            seen_ids.add(value)
-            option = {"value": value, "label": label}
-            query_value = str(raw.get("query_value") or "").strip()
-            if query_value and query_value != value:
-                option["query_value"] = query_value
-            options.append(option)
-        if not options:
-            raise RuntimeError("Card 823 não retornou nenhuma loja nos últimos 30 dias.")
-        result = sorted(options, key=lambda item: _norm_text(item["label"]))
-        _write_stores_cache(result)
-        return result
+            by_id.setdefault(store_id, option)
+        if not by_id:
+            raise RuntimeError("Card 823 não retornou lojas em dark_store nos últimos 30 dias.")
+        stores = sorted(by_id.values(), key=lambda item: _norm_text(item.get("label")))
+        _write_stores_cache(stores)
+        return stores
     except Exception:
         return _read_stores_cache(allow_stale=True) or list(STORE_OPTIONS)
 
@@ -497,17 +529,11 @@ def resolve_metabase_session(session_id: str = "", timeout_seconds: int = DEFAUL
     if env_session:
         return env_session
 
-    # Tenta via Apps Script (usa sessão cacheada, não precisa da senha)
-    try:
-        return get_metabase_session_from_script(timeout_seconds=min(timeout_seconds, 30))
-    except Exception:
-        pass
-
     if username and password:
         return metabase_login(DEFAULT_METABASE_URL, username, password, timeout_seconds)
 
     raise RuntimeError(
-        "Não foi possível autenticar no Metabase. Verifique MB_USER/MB_PASS ou apps_script_oauth.json."
+        "Não foi possível autenticar no Metabase. Verifique METABASE_USERNAME/METABASE_PASSWORD ou MB_USER/MB_PASS."
     )
 
 
@@ -520,18 +546,11 @@ def _resolve_fresh_metabase_session(timeout_seconds: int = DEFAULT_TIMEOUT_SECON
     """Renova sessão ignorando MB_SESSION_ID local, que pode expirar."""
     _, username, password = _load_metabase_backend_credentials()
 
-    try:
-        session = get_metabase_session_from_script(timeout_seconds=min(timeout_seconds, 30))
-        if session:
-            return session
-    except Exception:
-        pass
-
     if username and password:
         return metabase_login(DEFAULT_METABASE_URL, username, password, timeout_seconds)
 
     raise RuntimeError(
-        "Sessão do Metabase expirou e não consegui renovar. Verifique Apps Script ou MB_USER/MB_PASS."
+        "Sessão do Metabase expirou e não consegui renovar. Verifique METABASE_USERNAME/METABASE_PASSWORD ou MB_USER/MB_PASS."
     )
 
 
@@ -843,7 +862,7 @@ def build_vendas_alvo_from_metabase(
 
     save_metabase_sales_context(data_inicial=valid_initial, data_final=valid_final, stores=selected_stores)
 
-    result = _fetch_rows_via_apps_script(
+    result = _fetch_rows_directly(
         data_inicial=valid_initial,
         data_final=valid_final,
         stores=selected_stores,
