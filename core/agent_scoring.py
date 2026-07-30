@@ -393,6 +393,10 @@ def _is_geladeira(slot: Slot) -> bool:
     return "geladeira" in slot.equip_type
 
 
+def _is_tall_for_top_level(product: dict[str, Any]) -> bool:
+    return parse_bool_flag(product.get("is_alto")) or parse_bool_flag(product.get("is_altinho"))
+
+
 def _is_egg(product: dict[str, Any]) -> bool:
     name = _normalize_text(product.get("product_name"))
     first = name.split()[0] if name.split() else ""
@@ -429,6 +433,8 @@ def _hard_rule_violations(
     if _is_prateleira(slot):
         if group == "flv" and (slot.is_top_level or slot.is_bottom_level):
             reasons.append("FLV em nivel proibido de prateleira.")
+        if parse_bool_flag(product.get("is_pequeno")) and slot.is_top_level:
+            reasons.append("Produto baixo/pequeno no nivel de topo de prateleira.")
         peso = parse_number(product.get("peso_kg_unitario")) or 0
         if (peso > 2 or parse_bool_flag(product.get("is_pesado"))) and slot.is_top_level:
             reasons.append("Produto pesado no nivel de topo.")
@@ -820,6 +826,13 @@ def _has_hard_visual_adjacency(
 ) -> bool:
     if slot.level is None or slot.position is None:
         return False
+    if _group(product) == "flv":
+        for placement in placement_index.get(("__group__", "flv", slot.equip_id), []):
+            if _same_product(product, placement):
+                continue
+            level_distance, pos_distance = _placement_distance(slot, placement)
+            if level_distance == 0 and pos_distance == 1:
+                return True
     family = _visual_family_match_key(product)
     if not family:
         return False
@@ -1093,8 +1106,8 @@ def _score_slot(
     if _is_prateleira(slot):
         peso = parse_number(product.get("peso_kg_unitario")) or 0
         is_heavy = peso > 2 or parse_bool_flag(product.get("is_pesado"))
-        if parse_bool_flag(product.get("is_alto")) and not is_heavy and slot.is_top_level:
-            score += 90
+        if _is_tall_for_top_level(product) and not is_heavy:
+            score += 260 if slot.is_top_level else -45
     if (
         degelo_preferred_equips
         and _category_group(product) == "refrigerado"
@@ -1394,6 +1407,8 @@ def _placement_for_slot(product: dict[str, Any], slot: Slot) -> dict[str, Any]:
         "grupo": _group(product),
         "curva": _curve_value(product),
         "is_alto": parse_bool_flag(product.get("is_alto")),
+        "is_altinho": parse_bool_flag(product.get("is_altinho")),
+        "is_pequeno": parse_bool_flag(product.get("is_pequeno")),
         "degelo": normalize_string(product.get("degelo")),
         "degelo_class": _degelo_class(product),
         "equip_id": slot.equip_id,

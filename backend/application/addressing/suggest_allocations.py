@@ -28,7 +28,7 @@ from core.agent_scoring import (
     _sort_products_for_allocation,
     _visual_family,
 )
-from core.utils import normalize_string
+from core.utils import normalize_string, parse_bool_flag
 
 BLOCKED_SLOT_CODE = "__BLOCKED__"
 BOARD_ENTRY_RE = re.compile(r"^(?:unallocated|collected)::(.+?)::\d+$")
@@ -511,9 +511,11 @@ def _react_product_to_scoring(p: dict[str, Any]) -> dict[str, Any]:
         "vol_L_unitario": float(p.get("vol") or p.get("vol_L_unitario") or 0),
         "quantidade": int(p.get("qtd") or p.get("quantidade") or 1),
         "escaninhos_necessarios": int(p.get("escsNec") or p.get("escaninhos_necessarios") or 1),
-        "is_pesado": bool(p.get("pesado") or p.get("is_pesado") or False),
-        "is_alto": bool(p.get("alto") or p.get("is_alto") or False),
-        "is_fragil": bool(p.get("fragil") or p.get("is_fragil") or False),
+        "is_pesado": parse_bool_flag(p.get("pesado") if "pesado" in p else p.get("is_pesado")),
+        "is_alto": parse_bool_flag(p.get("alto") if "alto" in p else p.get("is_alto")),
+        "is_altinho": parse_bool_flag(p.get("altinho") if "altinho" in p else p.get("is_altinho")),
+        "is_pequeno": parse_bool_flag(p.get("pequeno") if "pequeno" in p else p.get("is_pequeno")),
+        "is_fragil": parse_bool_flag(p.get("fragil") if "fragil" in p else p.get("is_fragil")),
         "categoria_armazenagem": str(p.get("arm") or p.get("categoria_armazenagem") or ""),
         "degelo": str(p.get("degelo") or ""),
     }

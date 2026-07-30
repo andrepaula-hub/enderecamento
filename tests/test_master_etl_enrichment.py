@@ -56,6 +56,23 @@ class _FakeSource:
         return self._rows_by_sheet.get(sheet_name, [])
 
 
+def test_build_mix_df_reads_par_level_as_quantidade():
+    client = _FakeClient(
+        {
+            "MIX": [
+                ["product_code", "product_name", "par_level"],
+                ["SKU1", "Produto 1", 7],
+            ]
+        }
+    )
+
+    mix_df = enrichment_pipeline._build_mix_df(client)
+
+    assert mix_df.to_dict("records") == [
+        {"product_code": "SKU1", "product_name": "Produto 1", "quantidade": 7}
+    ]
+
+
 def test_master_etl_enrichment_sets_categoria_vendas_e_curva_d():
     source = _FakeSource(
         rows_by_sheet={
@@ -190,6 +207,54 @@ def test_run_etl_writes_familia_visual_from_master_sheet():
     headers = output[0]
     assert output[1][headers.index("familia_visual")] == "wrap_rap10"
     assert result["links"]["master_familia_visual"] == "https://fake/Familia Visual"
+
+
+def test_run_etl_writes_height_flags_from_operational_config():
+    master_values = {
+        "Degelo": [["cod_produto", "degelo", "peso_kg_unitario"], ["CT197108", "", 1.0]],
+        "Categoria ChatGPT": [["cod_produto", "Categoria_Correta"], ["CT197108", "Itens de prateleira"]],
+        "Categoria Site": [["cod_produto", "categoria"], ["CT197108", "Limpeza"]],
+        "Subcategorias": [["cod_produto", "subcategoria"], ["CT197108", "Detergentes e Lava Louças"]],
+        "volumetria e fabricantes": [
+            ["cod_produto", "volume_cm3", "altura_cm", "fabricante"],
+            ["CT197108", 1000, 22, "YPÊ"],
+        ],
+        "Vendas Alvo": [["cod_produto", "desc_produto", "qtd_total"], ["CT197108", "LAVA LOUÇAS YPE 500ML", 10]],
+        "Volumetria_Equipamentos": [["tipo_equipamento", "capacidade_l"], ["prateleira", 25]],
+        "Configuracoes_Operacionais": [
+            ["parametro", "valor"],
+            ["limite_peso_kg", 0.7],
+            ["limite_altura_cm", 28],
+            ["limite_altinho_cm", 20],
+            ["limite_altura_baixo_cm", 12.5],
+        ],
+        "Dicionario_Categorias": [["categoria_site", "grupo"], ["Limpeza", "quimico"]],
+    }
+    mix_values = {
+        "MIX": [["product_code", "product_name", "quantidade"], ["CT197108", "LAVA LOUÇAS YPE 500ML", 3]],
+    }
+    target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
+    clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
+
+    original_client = enrichment_pipeline.GSheetsClient
+    enrichment_pipeline.GSheetsClient = lambda sheet_id: clients[sheet_id]
+    try:
+        result = enrichment_pipeline.run_etl_to_base_products("master", "mix", "target")
+    finally:
+        enrichment_pipeline.GSheetsClient = original_client
+
+    assert result["success"] is True
+    output = clients["target"].read_values("Base_Produtos")
+    headers = output[0]
+    row = output[1]
+    assert row[headers.index("altura_cm")] == 22
+    assert row[headers.index("peso_kg_unitario")] == 1.0
+    assert row[headers.index("is_pesado")] is True
+    assert row[headers.index("is_alto")] is False
+    assert row[headers.index("is_altinho")] is True
+    assert row[headers.index("is_pequeno")] is False
+    assert result["limite_peso_kg"] == 0.7
+    assert result["limite_altinho_cm"] == 20
 
 
 def test_run_etl_replaces_invalid_measure_visual_family_from_master_sheet():
@@ -479,7 +544,7 @@ def test_run_etl_updates_sales_for_allocated_skus_only():
         "Dicionario_Categorias": [["categoria_site", "grupo"], ["Mercearia", "alimento"]],
     }
     mix_values = {
-        "Sheet1": [["product_code", "product_name", "quantidade"], ["SKU1", "Produto 1", 5], ["SKU2", "Produto 2", 5]],
+        "MIX": [["product_code", "product_name", "quantidade"], ["SKU1", "Produto 1", 5], ["SKU2", "Produto 2", 5]],
     }
     target_values = {
         "Base_Produtos": [
@@ -553,7 +618,7 @@ def test_run_etl_removes_zero_quantity_sku_even_if_allocated():
         "Dicionario_Categorias": [["categoria_site", "grupo"], ["Mercearia", "alimento"]],
     }
     mix_values = {
-        "Sheet1": [["product_code", "product_name", "quantidade"], ["SKU0", "Produto 0", 0], ["SKU1", "Produto 1", 5]],
+        "MIX": [["product_code", "product_name", "quantidade"], ["SKU0", "Produto 0", 0], ["SKU1", "Produto 1", 5]],
     }
     target_values = {
         "Base_Produtos": [
@@ -619,7 +684,7 @@ def test_run_etl_fills_group_from_subcategory_when_categoria_site_is_missing():
         "Dicionario_Categorias": [["categoria_site", "grupo"], ["Bebidas", "bebidas"]],
     }
     mix_values = {
-        "Sheet1": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]],
+        "MIX": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]],
     }
     target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
     clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
@@ -652,7 +717,7 @@ def test_run_etl_does_not_fill_group_from_broad_subcategory():
         "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
         "Dicionario_Categorias": [["categoria_site", "grupo"], ["Limpeza", "quimico"]],
     }
-    mix_values = {"Sheet1": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]]}
+    mix_values = {"MIX": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]]}
     target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
     clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
 
@@ -681,7 +746,7 @@ def test_run_etl_defaults_missing_group_to_neutro():
         "Configuracoes_Operacionais": [["parametro", "valor"], ["limite_peso_kg", 0.7]],
         "Dicionario_Categorias": [["categoria_site", "grupo"], ["Bebidas", "bebidas"]],
     }
-    mix_values = {"Sheet1": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]]}
+    mix_values = {"MIX": [["product_code", "product_name", "quantidade"], ["NEW", "Produto novo", 3]]}
     target_values = {"Base_Produtos": [enrichment_pipeline.BASE_OUTPUT_HEADERS], "Plano_Enderecamento_Final": [["location_id"]]}
     clients = {"master": _FakeClient(master_values), "mix": _FakeClient(mix_values), "target": _FakeClient(target_values)}
 

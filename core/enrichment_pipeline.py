@@ -247,6 +247,9 @@ BASE_OUTPUT_HEADERS = [
     "grupo",
     "familia_visual",
     "altura_cm",
+    "is_alto",
+    "is_altinho",
+    "is_pequeno",
     "vol_L_unitario",
     "quantidade",
     "curva",
@@ -292,6 +295,13 @@ PRESERVED_ALLOCATED_OVERRIDES = {
     "escaninhos_necessarios_prateleira",
     "escaninhos_necessarios_prateleira_lateral",
     "familia_visual",
+    "altura_cm",
+    "peso_kg_unitario",
+    "peso_kg_total",
+    "is_pesado",
+    "is_alto",
+    "is_altinho",
+    "is_pequeno",
     "photo_url",
 }
 
@@ -593,7 +603,7 @@ def _resolve_mix_sheet(mix_client: GSheetsClient) -> dict[str, Any] | None:
         return None
     code_col = _pick_col(df, ["product_code", "cod_produto", "codigo", "sku"])
     name_col = _pick_col(df, ["product_name", "descricao", "desc_produto", "produto"])
-    qty_col = _pick_col(df, ["Quantidade", "quantidade", "qtd", "qtd_total"])
+    qty_col = _pick_col(df, MIX_QTY_COLUMN_CANDIDATES)
     if code_col and name_col and qty_col:
         chosen_df = df[[code_col, name_col, qty_col]].copy()
         chosen_df.columns = ["product_code", "product_name", "quantidade"]
@@ -616,7 +626,7 @@ def _resolve_mix_sheet(mix_client: GSheetsClient) -> dict[str, Any] | None:
 def _build_mix_df(mix_client: GSheetsClient) -> pd.DataFrame:
     resolved = _resolve_mix_sheet(mix_client)
     if not resolved:
-        raise ValueError("Não encontrei a aba MIX com colunas product_code, product_name e quantidade.")
+        raise ValueError(MIX_REQUIRED_COLUMNS_ERROR)
     chosen_df = resolved["mix_df"].copy()
 
     chosen_df["product_code"] = chosen_df["product_code"].apply(_norm_code)
@@ -630,7 +640,7 @@ def sanitize_mix_duplicates(mix_sheet_id: str, target_sheet_id: str | None = Non
     mix = GSheetsClient(mix_sheet_id)
     resolved = _resolve_mix_sheet(mix)
     if not resolved:
-        return {"success": False, "error": "Não encontrei a aba MIX com colunas product_code, product_name e quantidade."}
+        return {"success": False, "error": MIX_REQUIRED_COLUMNS_ERROR}
 
     sheet_name = str(resolved.get("sheet_name") or "")
     headers = list(resolved.get("headers") or [])
@@ -839,6 +849,24 @@ def _extract_limite_peso(df_config: pd.DataFrame) -> float:
             if value > 0:
                 return value
     return 0.7
+
+
+def _extract_config_number(df_config: pd.DataFrame, keys: set[str], default: float) -> float:
+    df = _normalize_columns(df_config)
+    if df.empty:
+        return default
+    key_col = _pick_col(df, ["parametro", "chave", "nome"])
+    val_col = _pick_col(df, ["valor", "value"])
+    if not key_col or not val_col:
+        return default
+    normalized_keys = {_norm(key) for key in keys}
+    for _, row in df.iterrows():
+        key = _norm(_row_value(row, key_col))
+        if key in normalized_keys:
+            value = _to_float(_row_value(row, val_col), default)
+            if value > 0:
+                return value
+    return default
 
 
 def _extract_capacity_map(df_vol_eq: pd.DataFrame) -> dict[str, float]:
@@ -1415,25 +1443,10 @@ def refresh_single_etl_warning(
     if not warning_norm:
         return {"success": False, "error": "Informe o tipo do alerta para refresh."}
 
-    mix = GSheetsClient(mix_sheet_id)
-    target = GSheetsClient(target_sheet_id)
-    master = GSheetsClient(master_sheet_id)
-
-    duplicated_codes: list[str] = []
-    if warning_norm == "duplicados_mix":
-        mix_df = _build_mix_df(mix)
-        duplicated_codes = _extract_duplicated_codes(mix_df)
-
-    barcode_codes: set[str] | None = None
-    if warning_norm == "sem_barcode":
-        barcode_name = _find_sheet_name(master, ["Codigos de barras", "Código de barras produtos"], required=False)
-        df_barcode = _normalize_columns(_safe_df(master.read_values(barcode_name))) if barcode_name else pd.DataFrame()
-        barcode_codes = _extract_barcode_set(df_barcode)
-
-    target.ensure_sheet(SHEET_BASE_PRODUTOS)
-    target_values = target.read_values(SHEET_BASE_PRODUTOS)
-    df_target = _normalize_columns(_safe_df(target_values))
-    warnings = _build_etl_warnings(df_target, duplicated_codes=duplicated_codes, barcode_codes=barcode_codes)
+    preview = run_etl_to_base_products(master_sheet_id, mix_sheet_id, target_sheet_id, persist=False)
+    if not preview.get("success"):
+        return preview
+    warnings = preview.get("warnings") or []
 
     warning = next((item for item in warnings if _norm(item.get("type")) == warning_norm), None)
     if warning:
@@ -1621,6 +1634,21 @@ def run_etl_to_base_products(
     visual_family_map = _extract_visual_family_map(df_familia_visual)
     subcategory_level2_map = _extract_subcategory_level2_map(df_subcategoria_nivel2)
     limite_peso_kg = _extract_limite_peso(df_config)
+    limite_altura_cm = _extract_config_number(
+        df_config,
+        {"limite_altura_cm", "limite_altura", "altura_alto_cm"},
+        28.0,
+    )
+    limite_altinho_cm = _extract_config_number(
+        df_config,
+        {"limite_altinho_cm", "limite_altura_altinho_cm", "altura_altinho_cm", "altinho_cm"},
+        20.0,
+    )
+    limite_altura_baixo_cm = _extract_config_number(
+        df_config,
+        {"limite_altura_baixo_cm", "limite_altura_cm_baixo", "limite_altura_baixo", "altura_baixo_cm"},
+        12.5,
+    )
     capacity_map = _extract_capacity_map(df_vol_eq)
     dic_cat_map = _extract_category_group_map(df_dic_cat)
     subcategory_group_map = _extract_subcategory_group_map(map_subcat, map_categoria_site, dic_cat_map)
@@ -1694,6 +1722,9 @@ def run_etl_to_base_products(
             peso_kg_unit = _extract_weight_from_name(name)
         peso_kg_total = peso_kg_unit * qtd
         is_pesado = peso_kg_unit >= limite_peso_kg
+        is_alto = bool(altura_cm and altura_cm >= limite_altura_cm)
+        is_altinho = bool(altura_cm and altura_cm >= limite_altinho_cm)
+        is_pequeno = bool(altura_cm and altura_cm <= limite_altura_baixo_cm)
 
         vol_l_total_unitario = vol_l_unitario * qtd
         vol_l_total_caixa = (caixa_volume_cm3_final * caixas_necessarias) / 1000.0 if caixa_volume_cm3_final > 0 else 0.0
@@ -1739,6 +1770,9 @@ def run_etl_to_base_products(
             "grupo": grupo,
             "familia_visual": familia_visual,
             "altura_cm": round(altura_cm, 2) if altura_cm else "",
+            "is_alto": bool(is_alto),
+            "is_altinho": bool(is_altinho),
+            "is_pequeno": bool(is_pequeno),
             "vol_L_unitario": round(vol_l_unitario, 4) if vol_l_unitario else "",
             "quantidade": qtd,
             "curva": "",
@@ -1880,6 +1914,9 @@ def run_etl_to_base_products(
         "cleaned_plan_sheets": plan_cleanup["cleaned_plan_sheets"],
         "warnings": warnings,
         "limite_peso_kg": limite_peso_kg,
+        "limite_altura_cm": limite_altura_cm,
+        "limite_altinho_cm": limite_altinho_cm,
+        "limite_altura_baixo_cm": limite_altura_baixo_cm,
         "master_sheet_title": master.get_title(),
         "mix_sheet_title": mix.get_title(),
         "target_sheet_title": target.get_title(),

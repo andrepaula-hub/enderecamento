@@ -49,6 +49,12 @@
       .toLowerCase();
   }
 
+  function isFlagTrue(value) {
+    if (value === true) return true;
+    var text = normalizeText(value).toUpperCase();
+    return text === 'TRUE' || text === 'SIM' || text === 'YES' || text === '1';
+  }
+
   function parseBoardEntryCode(entryId) {
     var raw = normalizeText(entryId);
     if (!raw) return '';
@@ -199,10 +205,11 @@
           metodo: normalizeText(row.metodo || row.metodo_enderecamento || 'N/A'),
           photoUrl: normalizeText(row.photo_url || row.url_foto || row.foto || ''),
           escsNec: requiredBins(row),
-          pequeno: String(row.is_pequeno || '').toUpperCase() === 'SIM' || row.is_pequeno === true,
-          fragil: String(row.is_fragil || '').toUpperCase() === 'SIM',
-          pesado: String(row.is_pesado || '').toUpperCase() === 'SIM' || row.is_pesado === true,
-          alto: String(row.is_alto || '').toUpperCase() === 'SIM' || row.is_alto === true,
+          pequeno: isFlagTrue(row.is_pequeno),
+          fragil: isFlagTrue(row.is_fragil),
+          pesado: isFlagTrue(row.is_pesado),
+          alto: isFlagTrue(row.is_alto),
+          altinho: isFlagTrue(row.is_altinho),
           quimico: normalizeGroup(row.grupo) === 'Químico',
           arm: normalizeText(row.categoria_armazenagem || 'N/A'),
           raw: row,

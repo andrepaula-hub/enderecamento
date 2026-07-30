@@ -152,6 +152,63 @@ def test_suggest_allocations_prefers_top_level_for_tall_non_heavy_shelf_products
     assert result["moves"][0]["escaninhoId"] == "R1-E1-1-1"
 
 
+def test_suggest_allocations_prefers_top_level_for_altinho_non_heavy_shelf_products():
+    result = suggest_allocations(
+        unallocated_codes=["ALTINHO"],
+        products_data=[
+            _product("ALTINHO", nome="Produto altinho leve", altinho=True, peso=0.5, sub="Outra"),
+        ],
+        map_structure=_map_structure(levels=4),
+        allocations=_empty_allocations(levels=4),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] == "R1-E1-1-1"
+
+
+def test_suggest_allocations_blocks_small_shelf_product_on_top_level():
+    result = suggest_allocations(
+        unallocated_codes=["BAIXO"],
+        products_data=[
+            _product("BAIXO", nome="Produto baixo", pequeno=True, peso=0.1, sub="Outra"),
+        ],
+        map_structure=_map_structure(levels=4),
+        allocations=_empty_allocations(levels=4),
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] != "R1-E1-1-1"
+
+
+def test_suggest_allocations_blocks_different_flv_products_side_by_side():
+    map_structure = [
+        {
+            "id": "R1",
+            "equipment": [
+                {"id": "R1-E1", "tipo": "prateleira", "niveis": 5, "escsPerNivel": 3, "cap": 100},
+            ],
+        }
+    ]
+    allocations = _empty_allocations_grid(levels=5, escs_per_nivel=3)
+    allocations["R1-E1-3-2"] = {"p1": "FLV_BASE", "p2": None}
+
+    result = suggest_allocations(
+        unallocated_codes=["FLV_NEW"],
+        products_data=[
+            _product("FLV_BASE", nome="Banana", grupo="FLV", sub="Frutas"),
+            _product("FLV_NEW", nome="Maçã", grupo="FLV", sub="Frutas"),
+        ],
+        map_structure=map_structure,
+        allocations=allocations,
+        options={"allow_top_level": True},
+    )
+
+    assert result["success"] is True
+    assert result["moves"][0]["escaninhoId"] not in {"R1-E1-3-1", "R1-E1-3-3"}
+
+
 def test_suggest_allocations_keeps_tall_heavy_shelf_products_blocked_on_top():
     result = suggest_allocations(
         unallocated_codes=["ALTO_PESADO"],
